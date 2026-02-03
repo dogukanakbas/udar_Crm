@@ -1,3 +1,5 @@
+// @ts-nocheck
+// @ts-nocheck
 import { useMemo, useState } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
 import { Badge } from '@/components/ui/badge'

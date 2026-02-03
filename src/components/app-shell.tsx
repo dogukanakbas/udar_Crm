@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import type { Role } from '@/types'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -350,7 +351,7 @@ function UserMenu() {
             onClick={() => {
               clearTokens()
               resetDemo()
-              setRole('Worker')
+              setRole('Worker' as Role)
               window.location.href = '/login'
             }}
           >

@@ -14,7 +14,7 @@ function App() {
     const tokens = getTokens()
     if (!tokens) return
     hydrate()
-    const stop = startSse()
+    const stop = startSse ? startSse() : undefined
     return () => {
       if (stop) stop()
     }
