@@ -106,6 +106,7 @@ export function AppShell() {
   const [searchOpen, setSearchOpen] = useState(false)
   const routerState = useRouterState()
   const loggedIn = !!getTokens()
+  const isPublic = !loggedIn
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -119,6 +120,16 @@ export function AppShell() {
   }, [])
 
   const activePath = routerState.location.pathname
+
+  if (isPublic) {
+    return (
+      <div className="min-h-screen bg-background">
+        <main className="mx-auto max-w-[520px] p-6">
+          <Outlet />
+        </main>
+      </div>
+    )
+  }
 
   return (
     <div className={cn('min-h-screen bg-gradient-to-b from-background to-muted/30', data.settings.demoWatermark && "relative before:content-['Udar_CRM_Demo'] before:fixed before:right-4 before:bottom-4 before:rotate-[-20deg] before:text-6xl before:font-bold before:text-primary/10 before:pointer-events-none")}>
@@ -186,11 +197,9 @@ export function AppShell() {
 
         <main className="flex-1">
           <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-border/80 bg-background/80 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/70">
-            {loggedIn && (
-              <div className="lg:hidden">
-                <MobileMenu />
-              </div>
-            )}
+            <div className="lg:hidden">
+              <MobileMenu />
+            </div>
             <div className="relative flex-1 max-w-md">
               <Input
                 placeholder="Global arama (⌘/Ctrl + K)"
@@ -275,11 +284,7 @@ function MobileMenu() {
 }
 
 function NotificationMenu() {
-  const items = [
-    { id: 1, title: '3 yeni lead atandı', time: '2dk' },
-    { id: 2, title: 'Stok uyarısı: SKU-1002 düşük', time: '12dk' },
-    { id: 3, title: 'Fatura INV-1321 gecikmiş', time: '1s' },
-  ]
+  const items: { id: number; title: string; time: string }[] = []
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -290,14 +295,18 @@ function NotificationMenu() {
       <DropdownMenuContent align="end" className="w-72">
         <div className="px-3 py-2 text-sm font-semibold">Bildirimler</div>
         <Separator />
-        <div className="divide-y">
-          {items.map((item) => (
-            <div key={item.id} className="px-3 py-2 text-sm">
-              <p className="font-medium">{item.title}</p>
-              <p className="text-xs text-muted-foreground">{item.time} önce</p>
-            </div>
-          ))}
-        </div>
+        {items.length === 0 ? (
+          <div className="px-3 py-4 text-sm text-muted-foreground">Henüz bildirim yok</div>
+        ) : (
+          <div className="divide-y">
+            {items.map((item) => (
+              <div key={item.id} className="px-3 py-2 text-sm">
+                <p className="font-medium">{item.title}</p>
+                <p className="text-xs text-muted-foreground">{item.time} önce</p>
+              </div>
+            ))}
+          </div>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )

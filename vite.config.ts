@@ -5,6 +5,10 @@ import path from 'path'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  server: {
+    host: true,
+    allowedHosts: ['crm.udarsoft.com'],
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
