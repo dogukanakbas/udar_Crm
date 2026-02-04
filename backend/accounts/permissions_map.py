@@ -3,6 +3,7 @@ PERMISSIONS_BY_MODULE = {
     "pricing": ["pricing.manage"],
     "leads": ["leads.view", "leads.edit"],
     "opportunities": ["opportunities.view", "opportunities.edit"],
+    "contacts": ["contacts.view", "contacts.edit"],
     "invoices": ["invoices.view", "invoices.edit", "invoices.pay"],
     "products": ["products.view", "products.edit"],
     "partners": ["partners.view", "partners.edit"],
@@ -13,6 +14,7 @@ PERMISSIONS_BY_MODULE = {
     "logistics": ["logistics.view", "logistics.edit"],
     "teams": ["teams.view", "teams.edit"],
     "tasks": ["tasks.view", "tasks.edit"],
+    "vehicles": ["vehicles.view", "vehicles.edit"],
     "audit": ["audit.view"],
 }
 

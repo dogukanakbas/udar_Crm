@@ -51,9 +51,12 @@ const taskSchema = z
     priority: z.enum(['low', 'medium', 'high']),
     start: z.string(),
     end: z.string(),
-    notes: z.string().optional(),
-    plannedHours: z.string().optional(),
-    plannedCost: z.string().optional(),
+    due: z.string().optional(),
+    notes: z.string().max(2000, 'Not çok uzun').optional(),
+    plannedHours: z
+      .preprocess((v) => (v === '' || v === undefined ? undefined : Number(v)), z.number().min(0, '>=0 olmalı').optional()),
+    plannedCost: z
+      .preprocess((v) => (v === '' || v === undefined ? undefined : Number(v)), z.number().min(0, '>=0 olmalı').optional()),
   })
   .refine((v) => new Date(v.end).getTime() >= new Date(v.start).getTime(), {
     message: 'Bitiş tarihi başlangıçtan önce olamaz',
@@ -782,7 +785,7 @@ export function TaskDetailPage() {
     return sum + Math.max(0, end - start)
   }, 0)
   const totalHours = (totalMs / 1000 / 60 / 60).toFixed(1)
-  const timeline = [
+  const timelineAll = [
     ...(task.comments || []).map((c) => ({
       id: `c-${c.id}`,
       type: c.type || 'comment',
@@ -798,7 +801,6 @@ export function TaskDetailPage() {
       at: a.uploadedAt || '',
       href: a.file,
     })),
-    // backend activity logs already add status/assignee/due/priority changes as comments
     ...(task.history || []).map((h: any, idx: number) => ({
       id: `h-${idx}`,
       type: 'activity' as const,
@@ -806,8 +808,16 @@ export function TaskDetailPage() {
       text: h.text || '',
       at: h.at || '',
     })),
-  ]
-    .filter((i) => i.at)
+  ].filter((i) => i.at)
+
+  const timelineCounts = {
+    all: timelineAll.length,
+    comment: timelineAll.filter((i) => i.type === 'comment').length,
+    activity: timelineAll.filter((i) => i.type === 'activity').length,
+    attachment: timelineAll.filter((i) => i.type === 'attachment').length,
+  }
+
+  const timeline = timelineAll
     .sort((a, b) => (a.at < b.at ? 1 : -1))
     .filter((i) => (timelineFilter === 'all' ? true : i.type === timelineFilter))
   return (
@@ -1079,10 +1089,10 @@ export function TaskDetailPage() {
         <CardContent className="space-y-3">
           <Tabs value={timelineFilter} onValueChange={(v) => setTimelineFilter(v as any)}>
             <TabsList>
-              <TabsTrigger value="all">Hepsi</TabsTrigger>
-              <TabsTrigger value="comment">Yorum</TabsTrigger>
-              <TabsTrigger value="activity">Aktivite</TabsTrigger>
-              <TabsTrigger value="attachment">Ek</TabsTrigger>
+              <TabsTrigger value="all">Hepsi ({timelineCounts.all})</TabsTrigger>
+              <TabsTrigger value="comment">Yorum ({timelineCounts.comment})</TabsTrigger>
+              <TabsTrigger value="activity">Aktivite ({timelineCounts.activity})</TabsTrigger>
+              <TabsTrigger value="attachment">Ek ({timelineCounts.attachment})</TabsTrigger>
             </TabsList>
           </Tabs>
           <div className="space-y-2">
@@ -1169,6 +1179,7 @@ function TaskModal({
       priority: task?.priority ?? 'medium',
       start: task?.start ?? new Date().toISOString(),
       end: task?.end ?? new Date(Date.now() + 86400000).toISOString(),
+      due: (task as any)?.due ?? '',
       notes: '',
       plannedHours: (task as any)?.plannedHours ? String((task as any).plannedHours) : '',
       plannedCost: (task as any)?.plannedCost ? String((task as any).plannedCost) : '',
@@ -1349,7 +1360,7 @@ function TaskModal({
               </Select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <Label>Başlangıç</Label>
               <Input type="datetime-local" {...form.register('start')} className={cn(errors.start && 'border-destructive')} />
@@ -1360,15 +1371,22 @@ function TaskModal({
               <Input type="datetime-local" {...form.register('end')} className={cn(errors.end && 'border-destructive')} />
               <FormError message={errors.end?.message} />
             </div>
+            <div>
+              <Label>Vade (due)</Label>
+              <Input type="datetime-local" {...form.register('due')} className={cn(errors.due && 'border-destructive')} />
+              <FormError message={errors.due?.message} />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Planlanan saat</Label>
-              <Input type="number" step="0.5" {...form.register('plannedHours')} />
+              <Input type="number" step="0.5" {...form.register('plannedHours')} className={cn(errors.plannedHours && 'border-destructive')} />
+              <FormError message={errors.plannedHours?.message} />
             </div>
             <div>
               <Label>Bütçe (para)</Label>
-              <Input type="number" step="1" {...form.register('plannedCost')} />
+              <Input type="number" step="1" {...form.register('plannedCost')} className={cn(errors.plannedCost && 'border-destructive')} />
+              <FormError message={errors.plannedCost?.message} />
             </div>
           </div>
           <div>
@@ -1383,9 +1401,13 @@ function TaskModal({
               onDrop={(e) => {
                 e.preventDefault()
                 const files = Array.from(e.dataTransfer.files || [])
-                const accepted = files.filter((f) => f.size <= MAX_FILE_MB * 1024 * 1024)
+                const accepted = files.filter(
+                  (f) =>
+                    f.size <= MAX_FILE_MB * 1024 * 1024 &&
+                    (f.type.startsWith('image/') || f.type === 'application/pdf' || f.type === '')
+                )
                 if (accepted.length !== files.length) {
-                  toast({ title: 'Bazı dosyalar 10MB üstü veya reddedildi', variant: 'destructive' })
+                  toast({ title: 'Bazı dosyalar tip/limit nedeniyle reddedildi (10MB, image/pdf)', variant: 'destructive' })
                 }
                 setDroppedFiles(accepted)
               }}

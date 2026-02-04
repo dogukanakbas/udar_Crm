@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, Outlet, useRouterState } from '@tanstack/react-router'
 import {
   Activity,
@@ -285,7 +285,25 @@ function MobileMenu() {
 }
 
 function NotificationMenu() {
-  const items: { id: number; title: string; time: string }[] = []
+  const tasks = useAppStore((s) => s.data.tasks)
+  const items = useMemo(() => {
+    const now = Date.now()
+    const soonMs = 24 * 60 * 60 * 1000
+    const list: { id: string; title: string; time: string }[] = []
+    tasks
+      .filter((t) => t.status !== 'done')
+      .forEach((t) => {
+        if (!t.end && !t.due) return
+        const dueDate = new Date(t.due || t.end || '').getTime()
+        if (isNaN(dueDate)) return
+        if (dueDate < now) {
+          list.push({ id: `over-${t.id}`, title: `Geciken: ${t.title}`, time: 'gecikti' })
+        } else if (dueDate - now <= soonMs) {
+          list.push({ id: `soon-${t.id}`, title: `SLA yaklaşıyor: ${t.title}`, time: '24s içinde' })
+        }
+      })
+    return list
+  }, [tasks])
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -303,7 +321,7 @@ function NotificationMenu() {
             {items.map((item) => (
               <div key={item.id} className="px-3 py-2 text-sm">
                 <p className="font-medium">{item.title}</p>
-                <p className="text-xs text-muted-foreground">{item.time} önce</p>
+                <p className="text-xs text-muted-foreground">{item.time}</p>
               </div>
             ))}
           </div>
