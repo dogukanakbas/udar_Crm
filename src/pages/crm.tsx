@@ -454,6 +454,7 @@ function CompanyModal({ children, onSubmit }: { children: React.ReactNode; onSub
     resolver: zodResolver(companySchema) as any,
     defaultValues: { name: '', industry: '', region: '', size: '', owner: '', annualRevenue: 0 },
   })
+  const [submitError, setSubmitError] = useState<string | null>(null)
   return (
     <Dialog>
       <DialogTrigger asChild>{children}</DialogTrigger>
@@ -482,7 +483,25 @@ function CompanyModal({ children, onSubmit }: { children: React.ReactNode; onSub
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={form.handleSubmit(onSubmit)}>Kaydet</Button>
+          {submitError ? <p className="text-xs text-destructive">{submitError}</p> : null}
+          <Button
+            onClick={form.handleSubmit(async (values) => {
+              setSubmitError(null)
+              try {
+                await onSubmit(values)
+              } catch (err: any) {
+                const detail = err?.response?.data
+                if (detail && typeof detail === 'object') {
+                  const msg = detail.email?.[0] || detail.name?.[0] || detail.detail || 'Kaydedilemedi'
+                  setSubmitError(msg)
+                } else {
+                  setSubmitError('Kaydedilemedi')
+                }
+              }
+            })}
+          >
+            Kaydet
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -511,6 +530,7 @@ function ContactModal({
       owner: contact?.owner ?? '',
     },
   })
+  const [submitError, setSubmitError] = useState<string | null>(null)
   return (
     <Dialog>
       <DialogTrigger asChild>{children}</DialogTrigger>
@@ -560,7 +580,25 @@ function ContactModal({
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={form.handleSubmit(onSubmit)}>Kaydet</Button>
+          {submitError ? <p className="text-xs text-destructive">{submitError}</p> : null}
+          <Button
+            onClick={form.handleSubmit(async (values) => {
+              setSubmitError(null)
+              try {
+                await onSubmit(values)
+              } catch (err: any) {
+                const detail = err?.response?.data
+                if (detail && typeof detail === 'object') {
+                  const msg = detail.email?.[0] || detail.name?.[0] || detail.detail || 'Kaydedilemedi'
+                  setSubmitError(msg)
+                } else {
+                  setSubmitError('Kaydedilemedi')
+                }
+              }
+            })}
+          >
+            Kaydet
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

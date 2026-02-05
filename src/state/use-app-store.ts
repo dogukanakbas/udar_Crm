@@ -135,11 +135,22 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   startSse: () => {
     let timer: any
-    const stop = startSseClient(() => {
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(() => {
-        get().hydrateFromApi()
-      }, 500)
+    const stop = startSseClient((ev) => {
+      const t = ev?.type
+      // Mention / SLA / automation olaylarında sadece ilgili listeleri tazele
+      const shouldHydrate =
+        !t ||
+        t.startsWith('task.') ||
+        t.startsWith('notification.') ||
+        t.startsWith('ticket.') ||
+        t.startsWith('quote.') ||
+        t.startsWith('orders.')
+      if (shouldHydrate) {
+        if (timer) clearTimeout(timer)
+        timer = setTimeout(() => {
+          get().hydrateFromApi()
+        }, 500)
+      }
     })
     return stop
   },
@@ -421,24 +432,24 @@ export const useAppStore = create<AppState>((set, get) => ({
         console.error('API createLead failed', err)
       }
     })(),
-  createCompany: (payload) =>
-    (async () => {
-      try {
-        await api.post('/partners/', payload)
-        await get().hydrateFromApi()
-      } catch (err) {
-        console.error('API createCompany failed', err)
-      }
-    })(),
-  createContact: (payload) =>
-    (async () => {
-      try {
-        await api.post('/contacts/', payload)
-        await get().hydrateFromApi()
-      } catch (err) {
-        console.error('API createContact failed', err)
-      }
-    })(),
+  createCompany: async (payload) => {
+    try {
+      await api.post('/partners/', payload)
+      await get().hydrateFromApi()
+    } catch (err) {
+      console.error('API createCompany failed', err)
+      throw err
+    }
+  },
+  createContact: async (payload) => {
+    try {
+      await api.post('/contacts/', payload)
+      await get().hydrateFromApi()
+    } catch (err) {
+      console.error('API createContact failed', err)
+      throw err
+    }
+  },
   createOpportunity: (payload) =>
     (async () => {
       try {
@@ -543,24 +554,24 @@ export const useAppStore = create<AppState>((set, get) => ({
         console.error('API adjustInventory failed', err)
       }
     })(),
-  upsertProduct: (product) =>
-    (async () => {
-      try {
-        const payload: any = { ...product }
-        if (!payload.sku) payload.sku = ''
-        if (!payload.category) {
-          delete payload.category
-        }
-        if ((product as any).id) {
-          await api.patch(`/products/${(product as any).id}/`, payload)
-        } else {
-          await api.post('/products/', payload)
-        }
-        await get().hydrateFromApi()
-      } catch (err) {
-        console.error('API upsertProduct failed', err)
+  upsertProduct: async (product) => {
+    try {
+      const payload: any = { ...product }
+      if (!payload.sku) payload.sku = ''
+      if (!payload.category) {
+        delete payload.category
       }
-    })(),
+      if ((product as any).id) {
+        await api.patch(`/products/${(product as any).id}/`, payload)
+      } else {
+        await api.post('/products/', payload)
+      }
+      await get().hydrateFromApi()
+    } catch (err) {
+      console.error('API upsertProduct failed', err)
+      throw err
+    }
+  },
   createVehicle: (payload) =>
     (async () => {
       try {
@@ -579,24 +590,24 @@ export const useAppStore = create<AppState>((set, get) => ({
         console.error('API createSalesOrder failed', err)
       }
     })(),
-  createTask: (task) =>
-    (async () => {
-      try {
-        const payload = {
-          ...task,
-          owner: task.owner ? Number(task.owner) : null,
-          assignee: task.assignee ? Number(task.assignee) : null,
-          team: task.teamId ? Number(task.teamId) : null,
-          planned_hours: (task as any).plannedHours,
-          planned_cost: (task as any).plannedCost,
-        }
-        delete (payload as any).teamId
-        await api.post('/tasks/', payload)
-        await get().hydrateFromApi()
-      } catch (err) {
-        console.error('API createTask failed', err)
+  createTask: async (task) => {
+    try {
+      const payload = {
+        ...task,
+        owner: task.owner ? Number(task.owner) : null,
+        assignee: task.assignee ? Number(task.assignee) : null,
+        team: task.teamId ? Number(task.teamId) : null,
+        planned_hours: (task as any).plannedHours,
+        planned_cost: (task as any).plannedCost,
       }
-    })(),
+      delete (payload as any).teamId
+      await api.post('/tasks/', payload)
+      await get().hydrateFromApi()
+    } catch (err) {
+      console.error('API createTask failed', err)
+      throw err
+    }
+  },
   updateTask: (id, patch) =>
     (async () => {
       const prev = get().data.tasks

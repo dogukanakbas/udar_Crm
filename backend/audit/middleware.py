@@ -29,3 +29,4 @@ class AccessLogMiddleware(MiddlewareMixin):
             # fail silent
             return
 
+

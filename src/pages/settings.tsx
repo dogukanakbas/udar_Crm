@@ -17,6 +17,7 @@ import api from '@/lib/api'
 import { DataTable } from '@/components/data-table'
 import { type ColumnDef } from '@tanstack/react-table'
 import type { Team, UserLite } from '@/types'
+import { AlertCircle, ShieldCheck } from 'lucide-react'
 
 export function SettingsPage() {
   const { data, resetDemo, setLocale } = useAppStore()
@@ -31,15 +32,24 @@ export function SettingsPage() {
   const [generatedPass, setGeneratedPass] = useState<string | null>(null)
   const [teamName, setTeamName] = useState('')
   const [automationName, setAutomationName] = useState('')
-  const [automationTrigger, setAutomationTrigger] = useState<'task_status_changed' | 'task_due_soon'>('task_status_changed')
-  const [automationAction, setAutomationAction] = useState<'add_comment' | 'set_assignee' | 'notify' | 'add_tag' | 'set_field'>('add_comment')
+  const [automationTrigger, setAutomationTrigger] = useState<'task_status_changed' | 'task_due_soon' | 'task_created'>('task_status_changed')
+  const [automationAction, setAutomationAction] = useState<
+    'add_comment' | 'set_assignee' | 'notify' | 'multi_notify' | 'add_tag' | 'set_field'
+  >('add_comment')
   const [automationCondition, setAutomationCondition] = useState<any>({})
   const [automationPayload, setAutomationPayload] = useState<any>({})
   const [notifyMessage, setNotifyMessage] = useState('')
   const [notifyWebhook, setNotifyWebhook] = useState('')
   const [notifyEmail, setNotifyEmail] = useState('')
+  const [tagValue, setTagValue] = useState('')
+  const [fieldName, setFieldName] = useState<'priority' | 'status' | ''>('')
+  const [fieldValue, setFieldValue] = useState('')
+  const [multiEmails, setMultiEmails] = useState('')
+  const [multiWebhooks, setMultiWebhooks] = useState('')
+  const [viewOnly, setViewOnly] = useState(false)
   const [rules, setRules] = useState<AutomationRule[]>([])
   const icsUrl = `${window.location.origin}/api/calendar/ics/`
+  const [health, setHealth] = useState<{ backend?: string; db?: string; redis?: string }>({})
 
   const userColumns: ColumnDef<UserLite>[] = [
     { accessorKey: 'username', header: 'Kullanıcı' },
@@ -65,6 +75,13 @@ export function SettingsPage() {
   }, [])
 
   useEffect(() => {
+    api
+      .get('/health/')
+      .then((res) => setHealth(res.data || {}))
+      .catch(() => setHealth({ backend: 'fail' }))
+  }, [])
+
+  useEffect(() => {
     const raw = localStorage.getItem('notification-settings')
     if (raw) {
       try {
@@ -72,6 +89,7 @@ export function SettingsPage() {
         setNotifMuted(!!parsed.muted)
         setNotifSlack(parsed.slack || '')
         setNotifEmail(parsed.email || '')
+        setViewOnly(!!parsed.view_only)
       } catch {
         /* ignore */
       }
@@ -84,12 +102,13 @@ export function SettingsPage() {
         setNotifMuted(!!p.muted)
         setNotifSlack(p.slack || '')
         setNotifEmail(p.email || '')
+        setViewOnly(!!p.view_only)
       })
       .catch(() => null)
   }, [])
 
   const saveNotifSettings = () => {
-    const payload = { muted: notifMuted, slack: notifSlack, email: notifEmail }
+    const payload = { muted: notifMuted, slack: notifSlack, email: notifEmail, view_only: viewOnly }
     localStorage.setItem('notification-settings', JSON.stringify(payload))
     api
       .post('/auth/notification-prefs/', payload)
@@ -200,6 +219,10 @@ export function SettingsPage() {
               <span className="text-sm">Sessize al</span>
               <Switch checked={notifMuted} onCheckedChange={setNotifMuted} />
             </div>
+            <div className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2">
+              <span className="text-sm">View-only (salt okuma)</span>
+              <Switch checked={viewOnly} onCheckedChange={setViewOnly} />
+            </div>
             <div className="space-y-2">
               <Label>Slack webhook</Label>
               <Input value={notifSlack} onChange={(e) => setNotifSlack(e.target.value)} placeholder="https://hooks.slack.com/..." />
@@ -228,6 +251,30 @@ export function SettingsPage() {
             </div>
           </CardContent>
         </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Health / Bağımlılıklar</CardTitle>
+            <CardDescription>Backend, DB, Redis durumu</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {['backend', 'db', 'redis'].map((k) => {
+              const val = (health as any)?.[k] || 'unknown'
+              const ok = val === 'ok'
+              return (
+                <div key={k} className="flex items-center justify-between rounded border px-3 py-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    {ok ? <ShieldCheck className="h-4 w-4 text-green-600" /> : <AlertCircle className="h-4 w-4 text-amber-600" />}
+                    <span className="capitalize">{k}</span>
+                  </div>
+                  <Badge variant={ok ? 'secondary' : 'destructive'}>{val}</Badge>
+                </div>
+              )
+            })}
+            <Button variant="outline" size="sm" onClick={() => api.get('/health/').then((res) => setHealth(res.data || {}))}>
+              Yenile
+            </Button>
+          </CardContent>
+        </Card>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
@@ -248,6 +295,7 @@ export function SettingsPage() {
                   <SelectContent>
                     <SelectItem value="task_status_changed">Durum değişti</SelectItem>
                     <SelectItem value="task_due_soon">Vade yaklaşıyor</SelectItem>
+                    <SelectItem value="task_created">Görev oluşturuldu</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -261,8 +309,9 @@ export function SettingsPage() {
                     <SelectItem value="add_comment">Yorum ekle</SelectItem>
                     <SelectItem value="set_assignee">Atayan değiştir</SelectItem>
                     <SelectItem value="notify">Bildirim</SelectItem>
-                  <SelectItem value="add_tag">Etiket ekle</SelectItem>
-                  <SelectItem value="set_field">Alan değiştir</SelectItem>
+                    <SelectItem value="multi_notify">Çoklu bildirim</SelectItem>
+                    <SelectItem value="add_tag">Etiket ekle</SelectItem>
+                    <SelectItem value="set_field">Alan değiştir</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -309,36 +358,150 @@ export function SettingsPage() {
                 </div>
               </div>
             )}
-            <Button
-              onClick={async () => {
-                try {
-                  const payload = {
-                    ...(automationPayload || {}),
-                    ...(automationAction === 'notify'
-                      ? {
-                          message: notifyMessage || undefined,
-                          webhook: notifyWebhook || undefined,
-                          email: notifyEmail || undefined,
-                        }
-                      : {}),
+            {automationAction === 'multi_notify' && (
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <Label>Mesaj</Label>
+                  <Input value={notifyMessage} onChange={(e) => setNotifyMessage(e.target.value)} placeholder="Bildirim mesajı" />
+                </div>
+                <div>
+                  <Label>E-postalar (virgül)</Label>
+                  <Input value={multiEmails} onChange={(e) => setMultiEmails(e.target.value)} placeholder="a@b.com,c@d.com" />
+                </div>
+                <div>
+                  <Label>Webhooklar (virgül)</Label>
+                  <Input value={multiWebhooks} onChange={(e) => setMultiWebhooks(e.target.value)} placeholder="https://hook1,https://hook2" />
+                </div>
+              </div>
+            )}
+            {automationAction === 'add_tag' && (
+              <div>
+                <Label>Etiket</Label>
+                <Input value={tagValue} onChange={(e) => setTagValue(e.target.value)} placeholder="SLA" />
+              </div>
+            )}
+            {automationAction === 'set_field' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Alan</Label>
+                  <Select value={fieldName} onValueChange={(v) => setFieldName(v as any)}>
+                    <SelectTrigger><SelectValue placeholder="priority/status" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="priority">priority</SelectItem>
+                      <SelectItem value="status">status</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Değer</Label>
+                  <Input value={fieldValue} onChange={(e) => setFieldValue(e.target.value)} placeholder="high / done" />
+                </div>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={async () => {
+                  try {
+                    const payload = {
+                      ...(automationPayload || {}),
+                      ...(automationAction === 'notify'
+                        ? {
+                            message: notifyMessage || undefined,
+                            webhook: notifyWebhook || undefined,
+                            email: notifyEmail || undefined,
+                          }
+                        : {}),
+                      ...(automationAction === 'multi_notify'
+                        ? {
+                            message: notifyMessage || undefined,
+                            emails: multiEmails
+                              .split(',')
+                              .map((x) => x.trim())
+                              .filter(Boolean),
+                            webhooks: multiWebhooks
+                              .split(',')
+                              .map((x) => x.trim())
+                              .filter(Boolean),
+                          }
+                        : {}),
+                      ...(automationAction === 'add_tag'
+                        ? {
+                            tag: tagValue || undefined,
+                          }
+                        : {}),
+                      ...(automationAction === 'set_field'
+                        ? {
+                            field: fieldName || undefined,
+                            value: fieldValue || undefined,
+                          }
+                        : {}),
+                    }
+                    await api.post('/automation-rules/', {
+                      name: automationName || 'Yeni kural',
+                      trigger: automationTrigger,
+                      condition: automationCondition,
+                      action: automationAction,
+                      action_payload: payload,
+                    })
+                    await loadRules()
+                    toast({ title: 'Kural eklendi' })
+                    setAutomationName('')
+                  } catch (err: any) {
+                    toast({ title: 'Hata', description: err?.response?.data?.detail || 'Oluşturulamadı', variant: 'destructive' })
                   }
-                  await api.post('/automation-rules/', {
-                    name: automationName || 'Yeni kural',
-                    trigger: automationTrigger,
-                    condition: automationCondition,
-                    action: automationAction,
-                    action_payload: payload,
-                  })
-                  await loadRules()
-                  toast({ title: 'Kural eklendi' })
-                  setAutomationName('')
-                } catch (err: any) {
-                  toast({ title: 'Hata', description: err?.response?.data?.detail || 'Oluşturulamadı', variant: 'destructive' })
-                }
-              }}
-            >
-              Kaydet
-            </Button>
+                }}
+              >
+                Kaydet
+              </Button>
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  try {
+                    const payload = {
+                      ...(automationPayload || {}),
+                      ...(automationAction === 'notify'
+                        ? { message: notifyMessage || undefined, webhook: notifyWebhook || undefined, email: notifyEmail || undefined }
+                        : {}),
+                      ...(automationAction === 'multi_notify'
+                        ? {
+                            message: notifyMessage || undefined,
+                            emails: multiEmails
+                              .split(',')
+                              .map((x) => x.trim())
+                              .filter(Boolean),
+                            webhooks: multiWebhooks
+                              .split(',')
+                              .map((x) => x.trim())
+                              .filter(Boolean),
+                          }
+                        : {}),
+                      ...(automationAction === 'add_tag' ? { tag: tagValue || undefined } : {}),
+                      ...(automationAction === 'set_field' ? { field: fieldName || undefined, value: fieldValue || undefined } : {}),
+                    }
+                    const res = await api.post('/automation-rules/test/', {
+                      trigger: automationTrigger,
+                      condition: automationCondition,
+                      action: automationAction,
+                      action_payload: payload,
+                      sample_task: {},
+                      extra: {},
+                    })
+                    toast({
+                      title: res.data?.would_run ? 'Koşul sağlandı' : 'Koşul sağlanmadı',
+                      description: JSON.stringify(res.data),
+                    })
+                  } catch (err: any) {
+                    toast({
+                      title: 'Test hata',
+                      description: err?.response?.data?.detail || 'Test çalıştırılamadı',
+                      variant: 'destructive',
+                    })
+                  }
+                }}
+              >
+                Test et (dry-run)
+              </Button>
+            </div>
             <div className="space-y-2">
               {rules.length === 0 && <p className="text-sm text-muted-foreground">Kural yok</p>}
               {rules.map((r) => (

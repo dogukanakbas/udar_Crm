@@ -52,3 +52,40 @@ class HasAPIPermission(permissions.BasePermission):
             return True
         return user_has_perm(user, perm)
 
+
+class CommentOnlyRestriction(permissions.BasePermission):
+    """
+    If user's notification_prefs has comment_only=True:
+      - Allow SAFE_METHODS
+      - Allow POST on comment/message viewsets
+      - Block other non-safe methods (create/update/delete on main resources)
+    """
+
+    def has_permission(self, request, view):
+        user = getattr(request, 'user', None)
+        prefs = getattr(user, 'notification_prefs', {}) or {}
+        if not prefs.get('comment_only'):
+            return True
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        # allow posting comments/messages only
+        view_name = view.__class__.__name__.lower()
+        if request.method == 'POST' and any(
+            key in view_name for key in ['commentviewset', 'ticketmessageviewset']
+        ):
+            return True
+        return False
+
+
+class ViewOnlyRestriction(permissions.BasePermission):
+    """
+    If user's notification_prefs has view_only=True: only SAFE_METHODS allowed.
+    """
+
+    def has_permission(self, request, view):
+        user = getattr(request, 'user', None)
+        prefs = getattr(user, 'notification_prefs', {}) or {}
+        if not prefs.get('view_only'):
+            return True
+        return request.method in permissions.SAFE_METHODS
+

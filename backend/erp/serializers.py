@@ -92,6 +92,17 @@ class ProductSerializer(serializers.ModelSerializer):
 
         return super().create(validated_data)
 
+    def validate(self, attrs):
+        org = attrs.get('organization') or _ensure_org(self.context.get('request'))
+        sku = (attrs.get('sku') or '').strip()
+        if sku:
+            qs = Product.objects.filter(organization=org, sku=sku)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({'sku': 'Aynı organizasyonda bu SKU zaten var'})
+        return super().validate(attrs)
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
         if isinstance(instance.organization, Organization):

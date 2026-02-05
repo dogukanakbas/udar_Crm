@@ -6,11 +6,15 @@ class AutomationRule(models.Model):
     TRIGGERS = [
         ('task_status_changed', 'Task status changed'),
         ('task_due_soon', 'Task due soon'),
+        ('task_created', 'Task created'),
     ]
     ACTIONS = [
         ('add_comment', 'Add comment'),
         ('set_assignee', 'Set assignee'),
         ('notify', 'Notify'),
+        ('multi_notify', 'Notify multiple'),
+        ('add_tag', 'Add tag'),
+        ('set_field', 'Set field'),
     ]
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='automation_rules')
     name = models.CharField(max_length=255)
@@ -26,4 +30,5 @@ class AutomationRule(models.Model):
 
     def __str__(self):
         return self.name
+
 

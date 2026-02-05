@@ -233,8 +233,8 @@ export function InventoryPage() {
       <NewProductDialog
         open={openProduct}
         onClose={() => setOpenProduct(false)}
-        onSave={(values) => {
-          upsertProduct(values as any)
+        onSave={async (values) => {
+          await upsertProduct(values as any)
           setOpenProduct(false)
         }}
       />
@@ -275,6 +275,7 @@ function NewProductDialog({
   const form = useForm<{ sku: string; name: string; price: number; stock: number }>({
     defaultValues: { sku: '', name: '', price: 0, stock: 0 },
   })
+  const [submitError, setSubmitError] = useState<string | null>(null)
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent>
@@ -302,7 +303,26 @@ function NewProductDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={form.handleSubmit(onSave)}>Kaydet</Button>
+          {submitError ? <p className="text-xs text-destructive">{submitError}</p> : null}
+          <Button
+            onClick={form.handleSubmit(async (values) => {
+              setSubmitError(null)
+              try {
+                await onSave(values)
+                onClose()
+              } catch (err: any) {
+                const detail = err?.response?.data
+                if (detail && typeof detail === 'object') {
+                  const msg = detail.sku?.[0] || detail.name?.[0] || detail.detail || 'Kaydedilemedi'
+                  setSubmitError(msg)
+                } else {
+                  setSubmitError('Kaydedilemedi')
+                }
+              }
+            })}
+          >
+            Kaydet
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

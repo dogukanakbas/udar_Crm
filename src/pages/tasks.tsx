@@ -34,6 +34,7 @@ import type { TaskTimeEntry } from '@/types'
 
 const MENTION_REGEX = /@([\w.-]+)/g
 const MAX_FILE_MB = 10
+const ALLOWED_FILE_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'application/pdf']
 const TASK_TEMPLATES: { id: string; name: string; checklist: string[] }[] = [
   { id: 'onboarding', name: 'Onboarding', checklist: ['Gereksinim topla', 'Ölçümleri tanımla', 'Kickoff planla'] },
   { id: 'bugfix', name: 'Bug fix', checklist: ['Reprodüksiyon', 'Kök neden analizi', 'Fix PR', 'Test ve onay'] },
@@ -61,6 +62,10 @@ const taskSchema = z
   .refine((v) => new Date(v.end).getTime() >= new Date(v.start).getTime(), {
     message: 'Bitiş tarihi başlangıçtan önce olamaz',
     path: ['end'],
+  })
+  .refine((v) => !v.due || new Date(v.due).getTime() >= new Date(v.start).getTime(), {
+    message: 'Vade tarihi başlangıçtan önce olamaz',
+    path: ['due'],
   })
 
 const slaStatus = (task: Task) => {
@@ -230,6 +235,104 @@ export function TasksPage() {
       { todo: 0, 'in-progress': 0, done: 0 } as Record<Task['status'], number>
     )
   }, [filtered])
+
+  const slaOverdue = useMemo(() => filtered.filter((t) => slaStatus(t) === 'overdue'), [filtered])
+  const slaSoon = useMemo(() => filtered.filter((t) => slaStatus(t) === 'soon'), [filtered])
+
+  const slaTable = useMemo(() => {
+    return filtered
+      .filter((t) => t.due || t.end)
+      .map((t) => ({
+        id: t.id,
+        title: t.title,
+        due: t.due || t.end || '',
+        status: t.status,
+        priority: t.priority,
+        assignee: data.users.find((u) => u.id === t.assignee)?.username || t.assignee || '—',
+        sla: slaStatus(t),
+      }))
+      .sort((a, b) => new Date(a.due).getTime() - new Date(b.due).getTime())
+      .slice(0, 50)
+  }, [filtered, data.users])
+
+  const slaBuckets = useMemo(() => {
+    const buckets = new Array(7).fill(0)
+    let overdue = 0
+    filtered.forEach((t) => {
+      const due = t.due || t.end
+      if (!due) return
+      const diffDays = Math.floor((new Date(due).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+      if (diffDays < 0) overdue += 1
+      else if (diffDays < 7) buckets[diffDays] += 1
+    })
+    const labels = ['Bugün', 'Yarın', '2g', '3g', '4g', '5g', '6g+']
+    const maxCount = Math.max(overdue, ...buckets, 1)
+    return { buckets, labels, overdue, maxCount }
+  }, [filtered])
+
+  const timeReportUsers = useMemo(() => {
+    const map = new Map<
+      string,
+      { name: string; totalHours: number; entries: number }
+    >()
+    filtered.forEach((t) => {
+      (t.time_entries || []).forEach((te: any) => {
+        const start = te.started_at ? new Date(te.started_at).getTime() : 0
+        const end = te.ended_at ? new Date(te.ended_at).getTime() : start
+        const hours = Math.max(0, (end - start) / 1000 / 60 / 60)
+        const key = te.user || te.user_name || 'unknown'
+        const name = te.user_name || te.user || 'Bilinmiyor'
+        const cur = map.get(key) || { name, totalHours: 0, entries: 0 }
+        cur.totalHours += hours
+        cur.entries += 1
+        map.set(key, cur)
+      })
+    })
+    return Array.from(map.values()).sort((a, b) => b.totalHours - a.totalHours)
+  }, [filtered])
+
+  const timeReportTeams = useMemo(() => {
+    const map = new Map<
+      string,
+      { name: string; totalHours: number; entries: number }
+    >()
+    filtered.forEach((t) => {
+      const teamKey = t.teamId || 'noteam'
+      const teamName = t.teamId ? data.teams.find((tm) => tm.id === t.teamId)?.name || 'Ekip' : 'Ekip yok'
+      const hours = (t.time_entries || []).reduce((sum, te: any) => {
+        const start = te.started_at ? new Date(te.started_at).getTime() : 0
+        const end = te.ended_at ? new Date(te.ended_at).getTime() : start
+        return sum + Math.max(0, (end - start) / 1000 / 60 / 60)
+      }, 0)
+      const cur = map.get(teamKey) || { name: teamName, totalHours: 0, entries: 0 }
+      cur.totalHours += hours
+      cur.entries += (t.time_entries || []).length
+      map.set(teamKey, cur)
+    })
+    return Array.from(map.values()).sort((a, b) => b.totalHours - a.totalHours)
+  }, [filtered, data.teams])
+
+  const timeBudgetTable = useMemo(() => {
+    return filtered
+      .map((t) => {
+        const planned = Number((t as any).plannedHours || 0)
+        const actual = (t.time_entries || []).reduce((sum, te: any) => {
+          const start = te.started_at ? new Date(te.started_at).getTime() : 0
+          const end = te.ended_at ? new Date(te.ended_at).getTime() : start
+          return sum + Math.max(0, (end - start) / 1000 / 60 / 60)
+        }, 0)
+        return {
+          id: t.id,
+          title: t.title,
+          planned,
+          actual,
+          delta: actual - planned,
+          assignee: data.users.find((u) => u.id === t.assignee)?.username || t.assignee || '—',
+        }
+      })
+      .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+      .slice(0, 50)
+  }, [filtered, data.users])
 
   const exportCsv = () => {
     const rows = filtered.map((t) => ({
@@ -476,9 +579,149 @@ export function TasksPage() {
             <Calendar className="mr-2 h-4 w-4" />
             ICS dışa aktar
           </Button>
+            <Button
+              size="sm"
+              variant={notifMuted ? 'secondary' : 'outline'}
+              onClick={() => {
+                const next = !notifMuted
+                setNotifMuted(next)
+                localStorage.setItem('notification-settings', JSON.stringify({ muted: next }))
+                toast({ title: next ? 'Bildirimler sessize alındı' : 'Bildirimler açık' })
+              }}
+            >
+              {notifMuted ? 'Sessiz (aç)' : 'Sessize al'}
+            </Button>
           </div>
         }
       />
+      <div className="grid gap-3 md:grid-cols-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">WIP (todo)</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">{statusCounts.todo}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">WIP (in-progress)</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">{statusCounts['in-progress']}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">SLA gecikmiş</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold text-destructive">{slaOverdue.length}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">&lt;24s SLA</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">{slaSoon.length}</CardContent>
+        </Card>
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>SLA listesi</CardTitle>
+          <CardDescription>Geciken ve 24s içinde vadesi gelen görevler</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2">
+          <div>
+            <p className="text-sm font-semibold text-destructive">Geciken</p>
+            {slaOverdue.slice(0, 5).map((t) => (
+              <div key={t.id} className="mt-2 flex items-center justify-between rounded border px-3 py-2 text-sm">
+                <span>{t.title}</span>
+                <Badge variant="destructive">Gecikti</Badge>
+              </div>
+            ))}
+            {slaOverdue.length === 0 && <p className="text-xs text-muted-foreground mt-2">Kayıt yok</p>}
+          </div>
+          <div>
+            <p className="text-sm font-semibold">&lt;24s</p>
+            {slaSoon.slice(0, 5).map((t) => (
+              <div key={t.id} className="mt-2 flex items-center justify-between rounded border px-3 py-2 text-sm">
+                <span>{t.title}</span>
+                <Badge variant="secondary">Yaklaşıyor</Badge>
+              </div>
+            ))}
+            {slaSoon.length === 0 && <p className="text-xs text-muted-foreground mt-2">Kayıt yok</p>}
+          </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>SLA ısı haritası (7 gün)</CardTitle>
+          <CardDescription>Gün bazlı SLA yükü</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-2 md:grid-cols-4">
+          <div className="rounded border p-3">
+            <p className="text-sm font-semibold text-destructive mb-2">Geciken</p>
+            <div className="h-10 w-full rounded bg-destructive/10 flex items-center justify-center font-semibold text-destructive">
+              {slaBuckets.overdue}
+            </div>
+          </div>
+          {slaBuckets.labels.map((label, idx) => {
+            const count = slaBuckets.buckets[idx]
+            const intensity = Math.min(1, count / slaBuckets.maxCount)
+            const bg = `rgba(59,130,246,${0.15 + 0.6 * intensity})`
+            return (
+              <div key={label} className="rounded border p-3">
+                <p className="text-sm font-semibold mb-2">{label}</p>
+                <div className="h-10 w-full rounded flex items-center justify-center font-semibold" style={{ backgroundColor: bg }}>
+                  {count}
+                </div>
+              </div>
+            )
+          })}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>SLA detay tablosu</CardTitle>
+          <CardDescription>En yakın 50 görev (due/end tarihine göre sıralı)</CardDescription>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-xs text-muted-foreground">
+                <th className="py-2 text-left">Görev</th>
+                <th className="py-2 text-left">Due/End</th>
+                <th className="py-2 text-left">SLA</th>
+                <th className="py-2 text-left">Durum</th>
+                <th className="py-2 text-left">Öncelik</th>
+                <th className="py-2 text-left">Atanan</th>
+              </tr>
+            </thead>
+            <tbody>
+              {slaTable.map((row) => (
+                <tr key={row.id} className="border-b last:border-0">
+                  <td className="py-2">{row.title}</td>
+                  <td className="py-2">{formatDate(row.due)}</td>
+                  <td className="py-2">
+                    <Badge variant={row.sla === 'overdue' ? 'destructive' : row.sla === 'soon' ? 'secondary' : 'outline'}>
+                      {row.sla || '—'}
+                    </Badge>
+                  </td>
+                  <td className="py-2">
+                    <Badge variant="outline">{row.status}</Badge>
+                  </td>
+                  <td className="py-2">
+                    <Badge variant="secondary">{row.priority}</Badge>
+                  </td>
+                  <td className="py-2">{row.assignee}</td>
+                </tr>
+              ))}
+              {slaTable.length === 0 && (
+                <tr>
+                  <td className="py-3 text-muted-foreground text-center" colSpan={6}>
+                    Kayıt yok
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
       <div className="flex flex-wrap gap-2">
         <Input
           value={search}
@@ -587,7 +830,9 @@ export function TasksPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <DataTable columns={columns} data={filtered} />
+            <div className="overflow-x-auto">
+              <DataTable columns={columns} data={filtered} />
+            </div>
           </CardContent>
         </Card>
       ) : view === 'board' ? (
@@ -746,6 +991,154 @@ export function TasksPage() {
                   </div>
                 </div>
               ))}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Zaman raporu (kullanıcı)</CardTitle>
+              <CardDescription>Time entry toplam saat</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (timeReportUsers.length === 0) {
+                      toast({ title: 'Kayıt yok' })
+                      return
+                    }
+                    const rows = timeReportUsers.map((r) => ({
+                      Kullanıcı: r.name,
+                      Saat: r.totalHours.toFixed(2),
+                      Giris: r.entries,
+                    }))
+                    downloadCsv('time-users.csv', rows)
+                    toast({ title: 'CSV hazır', description: `${rows.length} satır` })
+                  }}
+                >
+                  CSV
+                </Button>
+              </div>
+              {timeReportUsers.length === 0 && <p className="text-sm text-muted-foreground">Kayıt yok</p>}
+              {timeReportUsers.map((row, idx) => (
+                <div key={`${row.name}-${idx}`} className="flex items-center justify-between rounded border px-3 py-2 text-sm">
+                  <div>
+                    <p className="font-medium">{row.name}</p>
+                    <p className="text-xs text-muted-foreground">Giriş: {row.entries}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-semibold">{row.totalHours.toFixed(1)}s</p>
+                    <p className="text-xs text-muted-foreground">toplam saat</p>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Zaman raporu (ekip)</CardTitle>
+              <CardDescription>Ekip bazlı toplam saat</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (timeReportTeams.length === 0) {
+                      toast({ title: 'Kayıt yok' })
+                      return
+                    }
+                    const rows = timeReportTeams.map((r) => ({
+                      Ekip: r.name,
+                      Saat: r.totalHours.toFixed(2),
+                      Giris: r.entries,
+                    }))
+                    downloadCsv('time-teams.csv', rows)
+                    toast({ title: 'CSV hazır', description: `${rows.length} satır` })
+                  }}
+                >
+                  CSV
+                </Button>
+              </div>
+              {timeReportTeams.length === 0 && <p className="text-sm text-muted-foreground">Kayıt yok</p>}
+              {timeReportTeams.map((row, idx) => (
+                <div key={`${row.name}-${idx}`} className="flex items-center justify-between rounded border px-3 py-2 text-sm">
+                  <div>
+                    <p className="font-medium">{row.name}</p>
+                    <p className="text-xs text-muted-foreground">Giriş: {row.entries}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-semibold">{row.totalHours.toFixed(1)}s</p>
+                    <p className="text-xs text-muted-foreground">toplam saat</p>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+          <Card className="md:col-span-2">
+            <CardHeader>
+              <CardTitle>Bütçe / Planlanan vs Gerçekleşen</CardTitle>
+              <CardDescription>İlk 50 görev, en yüksek sapmaya göre sıralı</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (timeBudgetTable.length === 0) {
+                      toast({ title: 'Kayıt yok' })
+                      return
+                    }
+                    const rows = timeBudgetTable.map((r) => ({
+                      Gorev: r.title,
+                      Planlanan_saat: r.planned,
+                      Gerceklesen_saat: r.actual.toFixed(2),
+                      Delta: r.delta.toFixed(2),
+                      Atanan: r.assignee,
+                    }))
+                    downloadCsv('time-budget.csv', rows)
+                    toast({ title: 'CSV hazır', description: `${rows.length} satır` })
+                  }}
+                >
+                  CSV
+                </Button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-xs text-muted-foreground">
+                      <th className="py-2 text-left">Görev</th>
+                      <th className="py-2 text-left">Planlanan</th>
+                      <th className="py-2 text-left">Gerçekleşen</th>
+                      <th className="py-2 text-left">Delta</th>
+                      <th className="py-2 text-left">Atanan</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {timeBudgetTable.map((row) => (
+                      <tr key={row.id} className="border-b last:border-0">
+                        <td className="py-2">{row.title}</td>
+                        <td className="py-2">{row.planned}</td>
+                        <td className="py-2">{row.actual.toFixed(2)}</td>
+                        <td className={`py-2 ${row.delta > 0 ? 'text-amber-600' : 'text-green-600'}`}>
+                          {row.delta.toFixed(2)}
+                        </td>
+                        <td className="py-2">{row.assignee}</td>
+                      </tr>
+                    ))}
+                    {timeBudgetTable.length === 0 && (
+                      <tr>
+                        <td className="py-3 text-muted-foreground text-center" colSpan={5}>
+                          Kayıt yok
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -1194,6 +1587,15 @@ function TaskModal({
   const uploadAttachments = async (taskId: string, files: File[] | FileList | null) => {
     if (!files || (files as FileList).length === 0) return
     const arr = Array.isArray(files) ? files : Array.from(files)
+    const invalid = arr.find((f) => !ALLOWED_FILE_TYPES.includes(f.type) || f.size > MAX_FILE_MB * 1024 * 1024)
+    if (invalid) {
+      toast({
+        title: 'Dosya reddedildi',
+        description: 'Yalnızca PNG/JPG/WEBP/PDF ve max 10MB kabul edilir',
+        variant: 'destructive',
+      })
+      return
+    }
     setUploading(true)
     try {
       for (const file of arr) {
@@ -1218,11 +1620,15 @@ function TaskModal({
           Object.entries(presign?.fields || {}).forEach(([k, v]) => formData.append(k, String(v)))
           formData.append('task', taskId)
           formData.append('file', blob, `${file.name}.part${idx}`)
-          await api.post(uploadUrl.replace(api.defaults.baseURL || '', ''), formData, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-          })
+          if (uploadUrl.startsWith('http')) {
+            await fetch(uploadUrl, { method: 'POST', body: formData })
+          } else {
+            await api.post(uploadUrl.replace(api.defaults.baseURL || '', ''), formData, {
+              headers: { 'Content-Type': 'multipart/form-data' },
+            })
+          }
         }
-        if (presign?.strategy === 'chunk' && file.size > partSize) {
+        if (presign?.strategy === 'chunk' && file.size > partSize && presign?.strategy !== 's3') {
           let offset = 0
           let chunkIdx = 0
           while (offset < file.size) {

@@ -91,3 +91,4 @@ Aşağıdaki her adım için ayrı görev aç; ilgili ekibe ve operatöre ata; �
 
 Hızlı başlatmak için: önce ekip ve kullanıcıları tanımla, sonra 10 adımlık görevleri açıp atamaları yap, checklist ve SLA’ları gir. Ardından zaman/dosya/yorum akışı ile süreci işlet; en sonda raporları ve export’ları al. 
 
+

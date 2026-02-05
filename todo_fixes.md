@@ -41,3 +41,4 @@
 12) Kanban UX
     - Sürükle-bırak sonrası optimistic update, hata rollback
 
+

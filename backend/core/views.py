@@ -73,26 +73,43 @@ class GlobalSearchView(APIView):
     def get(self, request):
         q = request.query_params.get("q", "")
         tags = [t.strip() for t in request.query_params.get("tags", "").split(",") if t.strip()]
+        types = [t.strip() for t in request.query_params.get("type", "").split(",") if t.strip()]
+        try:
+            limit = min(int(request.query_params.get("limit", 10)), 50)
+        except Exception:
+            limit = 10
         org = request.user.organization
-        partners = BusinessPartner.objects.filter(organization=org, name__icontains=q)[:5]
-        quotes = Quote.objects.filter(organization=org, number__icontains=q)[:5]
-        products = Product.objects.filter(organization=org, name__icontains=q)[:5]
+        type_filter = set(types) if types else None
+
+        partner_qs = BusinessPartner.objects.filter(organization=org, name__icontains=q)
+        quote_qs = Quote.objects.filter(organization=org, number__icontains=q)
+        product_qs = Product.objects.filter(organization=org, name__icontains=q)
+
         task_qs = Task.objects.filter(organization=org)
         if q:
             task_qs = task_qs.filter(title__icontains=q)
         if tags:
             task_qs = task_qs.filter(tags__overlap=tags)
-        tasks = task_qs[:5]
         comment_qs = TaskComment.objects.filter(task__organization=org)
         if q:
             comment_qs = comment_qs.filter(text__icontains=q)
-        comments = comment_qs[:5]
-        teams = Team.objects.filter(organization=org, name__icontains=q)[:5]
+        teams_qs = Team.objects.filter(organization=org, name__icontains=q)
+
+        partners = [] if type_filter and 'partners' not in type_filter else partner_qs[:limit]
+        quotes = [] if type_filter and 'quotes' not in type_filter else quote_qs[:limit]
+        products = [] if type_filter and 'products' not in type_filter else product_qs[:limit]
+        tasks = [] if type_filter and 'tasks' not in type_filter else task_qs[:limit]
+        comments = [] if type_filter and 'comments' not in type_filter else comment_qs[:limit]
+        teams = [] if type_filter and 'teams' not in type_filter else teams_qs[:limit]
+
         return Response(
             {
                 "partners": [{"id": p.id, "name": p.name} for p in partners],
+                "partners_count": partner_qs.count() if (type_filter is None or 'partners' in type_filter) else 0,
                 "quotes": [{"id": qu.id, "number": qu.number, "status": qu.status} for qu in quotes],
+                "quotes_count": quote_qs.count() if (type_filter is None or 'quotes' in type_filter) else 0,
                 "products": [{"id": pr.id, "name": pr.name, "sku": pr.sku} for pr in products],
+                "products_count": product_qs.count() if (type_filter is None or 'products' in type_filter) else 0,
                 "tasks": [
                     {
                         "id": t.id,
@@ -104,6 +121,7 @@ class GlobalSearchView(APIView):
                     }
                     for t in tasks
                 ],
+                "tasks_count": task_qs.count() if (type_filter is None or 'tasks' in type_filter) else 0,
                 "comments": [
                     {
                         "id": c.id,
@@ -114,7 +132,9 @@ class GlobalSearchView(APIView):
                     }
                     for c in comments
                 ],
+                "comments_count": comment_qs.count() if (type_filter is None or 'comments' in type_filter) else 0,
                 "teams": [{"id": tm.id, "name": tm.name} for tm in teams],
+                "teams_count": teams_qs.count() if (type_filter is None or 'teams' in type_filter) else 0,
             }
         )
 

@@ -91,3 +91,4 @@ Bu döküman, mobil uygulamanın hangi ekranında hangi endpoint'in kullanılaca
 - Arama: `GET /api/search/?q=<term>` (varsa global search), yoksa ilgili modülleri filtre parametreleriyle sorgula.
 
 
+

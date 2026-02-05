@@ -38,3 +38,4 @@ export function downloadICS(filename: string, events: ICalEvent[]) {
   document.body.removeChild(link)
 }
 
+

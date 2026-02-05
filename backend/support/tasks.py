@@ -1,6 +1,7 @@
 from celery import shared_task
 from django.utils import timezone
 from datetime import timedelta
+from core.events import push_event
 from .models import Task, TaskComment
 from .models_automation import AutomationRule
 
@@ -14,7 +15,12 @@ def run_due_soon_automations():
     cond = rule.condition or {}
     hours = cond.get('hours', 24)
     window = now + timedelta(hours=hours)
-    tasks = Task.objects.filter(due__lte=window, due__gte=now)
+    tasks = Task.objects.filter(
+      organization=rule.organization,
+      status__in=['todo', 'in-progress'],
+      due__lte=window,
+      due__gte=now,
+    )
     for task in tasks:
       if rule.action == 'add_comment':
         text = rule.action_payload.get('comment') if isinstance(rule.action_payload, dict) else None
@@ -30,6 +36,16 @@ def run_due_soon_automations():
           send_slack_webhook(msg, webhook_url=webhook)
           if email_to:
             send_email(email_to, f"Görev bildirimi: {task.title}", msg)
+          push_event(
+            {
+              "type": "notification.sla_due_soon",
+              "task_id": task.id,
+              "task_title": task.title,
+              "due": task.due.isoformat() if task.due else None,
+              "organization": task.organization_id,
+              "rule_id": rule.id,
+            }
+          )
         except Exception:
           pass
 

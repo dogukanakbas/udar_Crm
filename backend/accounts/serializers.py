@@ -8,3 +8,4 @@ class TeamSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'organization', 'members']
         read_only_fields = ['organization']
 
+

@@ -21,13 +21,21 @@ class TicketSerializer(serializers.ModelSerializer):
 class TaskAttachmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = TaskAttachment
-        fields = ['id', 'task', 'file', 'uploaded_by', 'uploaded_at', 'description', 'original_name', 'content_type', 'size', 'version', 'parent', 'tags']
+        fields = ['id', 'task', 'file', 'file_name', 'uploaded_by', 'uploaded_at', 'description', 'original_name', 'content_type', 'size', 'version', 'parent', 'tags']
         read_only_fields = ['uploaded_by', 'uploaded_at', 'original_name', 'content_type', 'size', 'version', 'parent']
+
+    file_name = serializers.SerializerMethodField()
+
+    def get_file_name(self, obj):
+        return obj.original_name or (obj.file.name.split('/')[-1] if obj.file else '')
 
     def validate_file(self, value):
         max_size = 10 * 1024 * 1024
         if value.size > max_size:
             raise serializers.ValidationError('Dosya 10MB üstü olamaz')
+        allowed = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'application/pdf']
+        if value.content_type not in allowed:
+            raise serializers.ValidationError('Yalnızca PNG/JPG/WEBP/PDF kabul edilir')
         return value
 
 
@@ -75,6 +83,14 @@ class TaskSerializer(serializers.ModelSerializer):
             val = attrs.get(field)
             if val in (None, '', 'null'):
                 attrs[field] = 0
+        # Tarih aralığı doğrulaması
+        start = attrs.get('start')
+        end = attrs.get('end')
+        due = attrs.get('due')
+        if start and end and end < start:
+            raise serializers.ValidationError({'end': 'Bitiş tarihi başlangıçtan önce olamaz'})
+        if start and due and due < start:
+            raise serializers.ValidationError({'due': 'Vade tarihi başlangıçtan önce olamaz'})
         return super().validate(attrs)
 
 
@@ -107,4 +123,28 @@ class AutomationRuleSerializer(serializers.ModelSerializer):
         model = AutomationRule
         fields = '__all__'
         read_only_fields = ['organization', 'created_at']
+
+    def validate(self, attrs):
+        action = attrs.get('action')
+        payload = attrs.get('action_payload') or {}
+        if action == 'notify':
+            if not (payload.get('message') or payload.get('email') or payload.get('webhook')):
+                raise serializers.ValidationError("Notify aksiyonu için en az mesaj veya email/webhook gerekli")
+        if action == 'multi_notify':
+            emails = payload.get('emails') or []
+            hooks = payload.get('webhooks') or []
+            message = payload.get('message')
+            if not message or (not emails and not hooks):
+                raise serializers.ValidationError("multi_notify için message ve en az bir email/webhook gerekli")
+        if action == 'set_field':
+            field = payload.get('field')
+            if field not in ['priority', 'status']:
+                raise serializers.ValidationError("set_field yalnızca priority/status için kullanılabilir")
+        if action == 'add_tag':
+            if not payload.get('tag'):
+                raise serializers.ValidationError("add_tag için tag zorunlu")
+        if action == 'set_assignee':
+            if not payload.get('assignee'):
+                raise serializers.ValidationError("set_assignee için assignee zorunlu")
+        return super().validate(attrs)
 

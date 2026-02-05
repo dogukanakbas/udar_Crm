@@ -13,6 +13,8 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const setRole = useAppStore((s) => s.setRole)
+  const hydrate = useAppStore((s) => s.hydrateFromApi)
+  const startSse = useAppStore((s) => s.startSse)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -27,6 +29,11 @@ export function LoginPage() {
         }
       } catch {
         /* ignore */
+      }
+      // Yeni oturum için store'u tazele ve SSE başlat
+      await hydrate()
+      if (startSse) {
+        startSse()
       }
       navigate({ to: '/' })
     } catch (err: any) {

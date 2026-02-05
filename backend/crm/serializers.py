@@ -15,6 +15,17 @@ class BusinessPartnerSerializer(serializers.ModelSerializer):
             'address': {'required': False, 'allow_blank': True},
         }
 
+    def validate(self, attrs):
+        org = attrs.get('organization') or (self.context.get('request').user.organization if self.context.get('request') else None)
+        email = (attrs.get('email') or '').strip().lower()
+        if email and org:
+            qs = BusinessPartner.objects.filter(organization=org, email__iexact=email)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({'email': 'Bu e-posta ile başka bir firma zaten kayıtlı'})
+        return super().validate(attrs)
+
 
 class ContactSerializer(serializers.ModelSerializer):
     class Meta:
@@ -41,6 +52,17 @@ class ContactSerializer(serializers.ModelSerializer):
         if org:
             validated_data['organization'] = org
         return super().create(validated_data)
+
+    def validate(self, attrs):
+        org = attrs.get('organization') or (self.context.get('request').user.organization if self.context.get('request') else None)
+        email = (attrs.get('email') or '').strip().lower()
+        if email and org:
+            qs = Contact.objects.filter(organization=org, email__iexact=email)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({'email': 'Bu e-posta ile başka bir kişi zaten kayıtlı'})
+        return super().validate(attrs)
 
 
 class LeadSerializer(serializers.ModelSerializer):

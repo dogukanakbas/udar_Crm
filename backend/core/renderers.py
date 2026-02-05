@@ -10,3 +10,4 @@ class EventStreamRenderer(BaseRenderer):
         # Streaming responses bypass this; keep for negotiation compatibility
         return data
 
+

@@ -38,3 +38,4 @@
 ## Operasyonel
 - Sağlık/bağımlılık durumu kartı; docker-compose prod örnek env; CI lint/test pipeline örneği.
 
+

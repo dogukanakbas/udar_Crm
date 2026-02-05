@@ -196,7 +196,7 @@ export function AppShell() {
           </aside>
         )}
 
-        <main className="flex-1">
+        <main className="flex-1 min-w-0 px-3 md:px-6 overflow-x-hidden">
           <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-border/80 bg-background/80 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/70">
             <div className="lg:hidden">
               <MobileMenu />
@@ -251,7 +251,7 @@ function MobileMenu() {
           <Menu className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-64">
+      <DropdownMenuContent align="start" className="w-64 bg-card shadow-xl border border-border/70">
         {filtered.map((item) =>
           item.children ? (
             <div key={item.label} className="space-y-1">
@@ -311,7 +311,7 @@ function NotificationMenu() {
           <Bell className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-72">
+      <DropdownMenuContent align="end" className="w-72 bg-card shadow-xl border border-border/70">
         <div className="px-3 py-2 text-sm font-semibold">Bildirimler</div>
         <Separator />
         {items.length === 0 ? (
@@ -342,7 +342,7 @@ function UserMenu() {
           <Shield className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64 space-y-2">
+      <DropdownMenuContent align="end" className="w-64 space-y-2 bg-card shadow-xl border border-border/70">
         <div className="px-3 pt-2 space-y-1">
           <p className="text-sm font-semibold">Oturum</p>
           <p className="text-xs text-muted-foreground">Rol: {data.settings.role}</p>
