@@ -78,8 +78,26 @@ class GlobalSearchView(APIView):
             limit = min(int(request.query_params.get("limit", 10)), 50)
         except Exception:
             limit = 10
+        try:
+            page = max(int(request.query_params.get("page", 1)), 1)
+        except Exception:
+            page = 1
+        offset = (page - 1) * limit
         org = request.user.organization
         type_filter = set(types) if types else None
+
+        # Cache key
+        cache_key = None
+        cache_client = None
+        if getattr(settings, "GLOBAL_SEARCH_CACHE_TTL", 0):
+            try:
+                cache_client = redis.from_url(getattr(settings, 'CELERY_BROKER_URL', 'redis://redis:6379/0'))
+                cache_key = f"gs:{org.id}:{q}:{','.join(tags)}:{','.join(types)}:{limit}:{page}"
+                cached = cache_client.get(cache_key)
+                if cached:
+                    return Response(json.loads(cached))
+            except Exception:
+                cache_client = None
 
         partner_qs = BusinessPartner.objects.filter(organization=org, name__icontains=q)
         quote_qs = Quote.objects.filter(organization=org, number__icontains=q)
@@ -95,48 +113,57 @@ class GlobalSearchView(APIView):
             comment_qs = comment_qs.filter(text__icontains=q)
         teams_qs = Team.objects.filter(organization=org, name__icontains=q)
 
-        partners = [] if type_filter and 'partners' not in type_filter else partner_qs[:limit]
-        quotes = [] if type_filter and 'quotes' not in type_filter else quote_qs[:limit]
-        products = [] if type_filter and 'products' not in type_filter else product_qs[:limit]
-        tasks = [] if type_filter and 'tasks' not in type_filter else task_qs[:limit]
-        comments = [] if type_filter and 'comments' not in type_filter else comment_qs[:limit]
-        teams = [] if type_filter and 'teams' not in type_filter else teams_qs[:limit]
+        partners = [] if type_filter and 'partners' not in type_filter else partner_qs[offset:offset+limit]
+        quotes = [] if type_filter and 'quotes' not in type_filter else quote_qs[offset:offset+limit]
+        products = [] if type_filter and 'products' not in type_filter else product_qs[offset:offset+limit]
+        tasks = [] if type_filter and 'tasks' not in type_filter else task_qs[offset:offset+limit]
+        comments = [] if type_filter and 'comments' not in type_filter else comment_qs[offset:offset+limit]
+        teams = [] if type_filter and 'teams' not in type_filter else teams_qs[offset:offset+limit]
 
-        return Response(
-            {
-                "partners": [{"id": p.id, "name": p.name} for p in partners],
-                "partners_count": partner_qs.count() if (type_filter is None or 'partners' in type_filter) else 0,
-                "quotes": [{"id": qu.id, "number": qu.number, "status": qu.status} for qu in quotes],
-                "quotes_count": quote_qs.count() if (type_filter is None or 'quotes' in type_filter) else 0,
-                "products": [{"id": pr.id, "name": pr.name, "sku": pr.sku} for pr in products],
-                "products_count": product_qs.count() if (type_filter is None or 'products' in type_filter) else 0,
-                "tasks": [
-                    {
-                        "id": t.id,
-                        "title": t.title,
-                        "status": t.status,
-                        "assignee": t.assignee.username if t.assignee else None,
-                        "team": t.team.name if t.team else None,
-                        "tags": t.tags,
-                    }
-                    for t in tasks
-                ],
-                "tasks_count": task_qs.count() if (type_filter is None or 'tasks' in type_filter) else 0,
-                "comments": [
-                    {
-                        "id": c.id,
-                        "task_id": c.task.id,
-                        "task_title": c.task.title,
-                        "author": c.author.username if c.author else None,
-                        "text": c.text[:120],
-                    }
-                    for c in comments
-                ],
-                "comments_count": comment_qs.count() if (type_filter is None or 'comments' in type_filter) else 0,
-                "teams": [{"id": tm.id, "name": tm.name} for tm in teams],
-                "teams_count": teams_qs.count() if (type_filter is None or 'teams' in type_filter) else 0,
-            }
-        )
+        data = {
+            "page": page,
+            "limit": limit,
+            "partners": [{"id": p.id, "name": p.name} for p in partners],
+            "partners_count": partner_qs.count() if (type_filter is None or 'partners' in type_filter) else 0,
+            "quotes": [{"id": qu.id, "number": qu.number, "status": qu.status} for qu in quotes],
+            "quotes_count": quote_qs.count() if (type_filter is None or 'quotes' in type_filter) else 0,
+            "products": [{"id": pr.id, "name": pr.name, "sku": pr.sku} for pr in products],
+            "products_count": product_qs.count() if (type_filter is None or 'products' in type_filter) else 0,
+            "tasks": [
+                {
+                    "id": t.id,
+                    "title": t.title,
+                    "status": t.status,
+                    "assignee": t.assignee.username if t.assignee else None,
+                    "team": t.team.name if t.team else None,
+                    "tags": t.tags,
+                }
+                for t in tasks
+            ],
+            "tasks_count": task_qs.count() if (type_filter is None or 'tasks' in type_filter) else 0,
+            "comments": [
+                {
+                    "id": c.id,
+                    "task_id": c.task.id,
+                    "task_title": c.task.title,
+                    "author": c.author.username if c.author else None,
+                    "text": c.text[:120],
+                }
+                for c in comments
+            ],
+            "comments_count": comment_qs.count() if (type_filter is None or 'comments' in type_filter) else 0,
+            "teams": [{"id": tm.id, "name": tm.name} for tm in teams],
+            "teams_count": teams_qs.count() if (type_filter is None or 'teams' in type_filter) else 0,
+        }
+
+        # Store in cache
+        if cache_client and cache_key:
+            try:
+                cache_client.setex(cache_key, getattr(settings, "GLOBAL_SEARCH_CACHE_TTL", 30), json.dumps(data))
+            except Exception:
+                pass
+
+        return Response(data)
 
 
 def health(request):

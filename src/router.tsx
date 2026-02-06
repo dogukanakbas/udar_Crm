@@ -12,13 +12,14 @@ import { TasksPage, TaskDetailPage } from '@/pages/tasks'
 import { QuotesPage, QuoteDetailPage } from '@/pages/quotes'
 import { CalendarPage } from '@/pages/calendar'
 import { LoginPage } from '@/pages/login'
+import { ActivatePage } from '@/pages/activate'
 import AccessLogsPage from '@/pages/access-logs'
 import { getTokens } from '@/lib/auth'
 
 const rootRoute = new RootRoute({
   component: AppShell,
   beforeLoad: ({ location }) => {
-    if (location.pathname === '/login') return
+    if (location.pathname === '/login' || location.pathname === '/activate') return
     const tokens = getTokens()
     if (!tokens) {
       throw redirect({ to: '/login' })
@@ -146,6 +147,12 @@ const loginRoute = new Route({
   component: LoginPage,
 })
 
+const activateRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/activate',
+  component: ActivatePage,
+})
+
 const reportsRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/reports',
@@ -167,6 +174,7 @@ const accessLogsRoute = new Route({
 const routeTree = rootRoute.addChildren([
   dashboardRoute,
   loginRoute,
+  activateRoute,
   leadsRoute,
   leadDetailRoute,
   opportunitiesRoute,

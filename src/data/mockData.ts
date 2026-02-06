@@ -399,6 +399,9 @@ export const buildSeed = (): MockDbSnapshot => {
     quoteHistory,
     vehicles,
     tasks,
+    teams: [],
+    users: [],
+    rolePermissions: [],
     today,
     savedViews: {
       leads: [

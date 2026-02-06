@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { create } from 'zustand'
 
 import api from '@/lib/api'
@@ -17,7 +16,6 @@ import type {
   Role,
   Ticket,
   Task,
-  TaskTimeEntry,
   Quote,
   PricingRule,
   SalesOrder,
@@ -48,14 +46,16 @@ type AppState = {
   adjustInventory: (sku: string, delta: number) => void
   upsertProduct: (product: Partial<Product> & { sku: string }) => void
   createVehicle: (payload: Omit<Vehicle, 'id' | 'last_update'>) => void
+  createSalesOrder: (payload: Partial<SalesOrder>) => void
   createTask: (task: Omit<Task, 'id'>) => void
   updateTask: (id: string, patch: Partial<Task>) => void
+  moveTask: (id: string, patch: Partial<Task>) => void
   deleteTask: (id: string) => void
   addTaskComment: (payload: { task: string; text: string; type?: 'comment' | 'activity' }) => void
   addChecklistItem: (payload: { task: string; title: string }) => void
   toggleChecklistItem: (id: string, done: boolean) => void
   deleteAttachment: (id: string) => void
-  updateAttachment: (id: string, patch: { description?: string }) => void
+  updateAttachment: (id: string, patch: { description?: string; tags?: string[] }) => void
   addTimeEntry: (payload: { task: string; started_at: string; ended_at?: string; note?: string }) => void
   createQuote: (payload: Omit<Quote, 'id' | 'number' | 'createdAt' | 'updatedAt'>) => void
   updateQuote: (id: string, patch: Partial<Quote>) => void
@@ -83,6 +83,7 @@ const emptySnapshot: MockDbSnapshot = {
   tasks: [],
   teams: [],
   users: [],
+  rolePermissions: [],
   today: { tasks: [], meetings: [], overdueInvoices: [], lowStockSkus: [] },
   savedViews: {},
   settings: {
@@ -166,7 +167,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Role bazlı istek listesi; worker için sadece görev/ekip/kullanıcı
       // Worker için sadece gerekli endpointler (403 almamak için daraltılmış)
       const requests =
-        userRole === 'Worker'
+        (userRole || 'Worker') === 'Worker'
           ? {
               productsRes: Promise.resolve({ data: [] }),
               quotesRes: Promise.resolve({ data: [] }),

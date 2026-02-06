@@ -183,7 +183,7 @@ export function ReportsPage() {
               {overdue.slice(0, 5).map((t) => (
                 <div key={t.id} className="flex items-center justify-between">
                   <span className="truncate">{t.title}</span>
-                  <span>{formatDate(t.due)}</span>
+                  <span>{formatDate(t.due || '')}</span>
                 </div>
               ))}
               {overdue.length === 0 && <p>Geciken görev yok</p>}

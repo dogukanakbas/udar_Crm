@@ -1,5 +1,5 @@
-// @ts-nocheck
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
+import type { JSX } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
@@ -16,16 +16,15 @@ import { Textarea } from '@/components/ui/textarea'
 import { PageHeader } from '@/components/app-shell'
 import { useToast } from '@/components/ui/use-toast'
 import { useAppStore } from '@/state/use-app-store'
+import api from '@/lib/api'
 import { formatDate } from '@/lib/utils'
 import type { Task } from '@/types'
 import { Calendar, Plus, Paperclip, Download } from 'lucide-react'
 import { RbacGuard } from '@/components/rbac'
-import { useRef, useState as useReactState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { useRouterState, useParams } from '@tanstack/react-router'
+import { useParams } from '@tanstack/react-router'
 import { CardDescription } from '@/components/ui/card'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { FormEvent, useState as useStateReact } from 'react'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Checkbox } from '@/components/ui/checkbox'
 import { downloadCsv } from '@/utils/download-csv'
 import { downloadICS } from '@/utils/ics'
@@ -54,10 +53,14 @@ const taskSchema = z
     end: z.string(),
     due: z.string().optional(),
     notes: z.string().max(2000, 'Not çok uzun').optional(),
-    plannedHours: z
-      .preprocess((v) => (v === '' || v === undefined ? undefined : Number(v)), z.number().min(0, '>=0 olmalı').optional()),
-    plannedCost: z
-      .preprocess((v) => (v === '' || v === undefined ? undefined : Number(v)), z.number().min(0, '>=0 olmalı').optional()),
+    plannedHours: z.preprocess(
+      (v) => (v === '' || v === undefined ? 0 : Number(v)),
+      z.number().min(0, '>=0 olmalı')
+    ),
+    plannedCost: z.preprocess(
+      (v) => (v === '' || v === undefined ? 0 : Number(v)),
+      z.number().min(0, '>=0 olmalı')
+    ),
   })
   .refine((v) => new Date(v.end).getTime() >= new Date(v.start).getTime(), {
     message: 'Bitiş tarihi başlangıçtan önce olamaz',
@@ -102,7 +105,7 @@ function FormError({ message }: { message?: string }) {
 }
 
 export function TasksPage() {
-  const { data, createTask, updateTask, deleteTask, updateAttachment, deleteAttachment } = useAppStore()
+  const { data, createTask, updateTask, deleteTask } = useAppStore()
   const logAccess = useAppStore((s: any) => s.logAccess)
   const tasks = data.tasks ?? []
   const { toast } = useToast()
@@ -111,7 +114,7 @@ export function TasksPage() {
   const [assignee, setAssignee] = useState('all')
   const [teamFilter, setTeamFilter] = useState('all')
   const [search, setSearch] = useState('')
-  const [uploading, setUploading] = useReactState(false)
+  const [uploading, setUploading] = useState(false)
   const [view, setView] = useState<'table' | 'board' | 'workload'>('table')
   const [wipLimits, setWipLimits] = useState<Record<Task['status'], number>>(WIP_DEFAULTS)
   const [savedFilters, setSavedFilters] = useState<{ name: string; status: string; assignee: string; team: string }[]>([])
@@ -208,7 +211,6 @@ export function TasksPage() {
     toast({
       title: 'SLA uyarısı',
       description: `${soonTasks.length} görev 24 saat içinde vade: ${titles}${soonTasks.length > 3 ? '...' : ''}`,
-      variant: 'warning',
     })
   }, [tasks, notifMuted, toast])
 
@@ -448,7 +450,7 @@ export function TasksPage() {
       cell: ({ row }) => (
         <div className="flex gap-2">
           <Link
-            to={`/tasks/${row.original.id}`}
+            to={`/tasks/${row.original.id}` as any}
             className="text-xs text-blue-600 underline underline-offset-4"
           >
             Detay
@@ -910,10 +912,14 @@ export function TasksPage() {
                       </Select>
                     </div>
                     <div className="mt-2 flex items-center gap-2">
-                      <Button size="xs" variant="outline" onClick={handleDrop(st === 'todo' ? 'in-progress' : 'done', t.id)}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => updateTask(t.id, { status: st === 'todo' ? 'in-progress' : 'done' })}
+                      >
                         {st === 'todo' ? 'Başlat' : 'Tamamla'}
                       </Button>
-                      <Link to={`/tasks/${t.id}`} className="text-xs text-blue-600 underline underline-offset-4">
+                      <Link to={`/tasks/${t.id}` as any} className="text-xs text-blue-600 underline underline-offset-4">
                         Detay
                       </Link>
                       <div className="flex flex-wrap items-center gap-1 text-[11px]">
@@ -1149,14 +1155,14 @@ export function TasksPage() {
 
 export function TaskDetailPage() {
   const { taskId } = useParams({ from: '/tasks/$taskId' })
-  const { data, updateTask, addTaskComment, addChecklistItem, toggleChecklistItem, deleteAttachment, addTimeEntry } = useAppStore()
+  const { data, updateTask, addTaskComment, addChecklistItem, toggleChecklistItem, deleteAttachment, addTimeEntry, updateAttachment } =
+    useAppStore()
   const task = data.tasks.find((t) => t.id === taskId)
   const { toast } = useToast()
-  const [comment, setComment] = useStateReact('')
-  const [timelineFilter, setTimelineFilter] = useStateReact<'all' | 'comment' | 'activity' | 'attachment'>('all')
-  const [checkTitle, setCheckTitle] = useStateReact('')
-  const [selectedTemplate, setSelectedTemplate] = useStateReact<string>('onboarding')
-  const [timerState, setTimerState] = useStateReact<{ running: boolean; start?: string }>({ running: false })
+  const [comment, setComment] = useState('')
+  const [timelineFilter, setTimelineFilter] = useState<'all' | 'comment' | 'activity' | 'attachment'>('all')
+  const [checkTitle, setCheckTitle] = useState('')
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('onboarding')
   if (!task) {
     return (
       <div className="space-y-2">
@@ -1170,7 +1176,7 @@ export function TaskDetailPage() {
   const checklist = task.checklist || []
   const doneCount = checklist.filter((c) => c.done).length
   const completionPct = checklist.length > 0 ? Math.round((doneCount / checklist.length) * 100) : 0
-  const timeEntries: TaskTimeEntry[] = (task as any).time_entries || []
+  const timeEntries: TaskTimeEntry[] = task.time_entries || []
   const openEntry = timeEntries.find((te) => !te.ended_at)
   const totalMs = timeEntries.reduce((sum, te) => {
     const end = te.ended_at ? new Date(te.ended_at).getTime() : Date.now()
@@ -1370,7 +1376,7 @@ export function TaskDetailPage() {
                               >
                                 Yeniden adlandır
                               </Button>
-                              <RbacGuard perm="tasks.edit">
+                              <RbacGuard perm="tasks.edit" fallback={null}>
                                 <Button variant="ghost" size="sm" onClick={() => deleteAttachment(a.id)}>
                                   Sil
                                 </Button>
@@ -1427,12 +1433,10 @@ export function TaskDetailPage() {
                           started_at: openEntry.started_at,
                           ended_at: new Date().toISOString(),
                         })
-                        setTimerState({ running: false, start: undefined })
                         toast({ title: 'Zaman kaydı kapandı' })
                       } else {
                         const start = new Date().toISOString()
                         await addTimeEntry({ task: task.id, started_at: start, note: 'Timer' })
-                        setTimerState({ running: true, start })
                         toast({ title: 'Zaman kaydı başladı' })
                       }
                     }}
@@ -1562,7 +1566,7 @@ function TaskModal({
   setUploading: (v: boolean) => void
 }) {
   const form = useForm<z.infer<typeof taskSchema>>({
-    resolver: zodResolver(taskSchema),
+    resolver: zodResolver(taskSchema) as any,
     defaultValues: {
       title: task?.title ?? '',
       owner: task?.owner ?? users[0]?.id ?? '',
@@ -1574,13 +1578,13 @@ function TaskModal({
       end: task?.end ?? new Date(Date.now() + 86400000).toISOString(),
       due: (task as any)?.due ?? '',
       notes: '',
-      plannedHours: (task as any)?.plannedHours ? String((task as any).plannedHours) : '',
-      plannedCost: (task as any)?.plannedCost ? String((task as any).plannedCost) : '',
+      plannedHours: task?.plannedHours ?? 0,
+      plannedCost: task?.plannedCost ?? 0,
     },
   })
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [droppedFiles, setDroppedFiles] = useStateReact<File[]>([])
+  const [droppedFiles, setDroppedFiles] = useState<File[]>([])
   const errors = form.formState.errors
   const { toast } = useToast()
 
@@ -1600,14 +1604,13 @@ function TaskModal({
     try {
       for (const file of arr) {
         // presign step
-        const presign = await api
-          .post('/uploads/presign/', {
-            filename: file.name,
-            content_type: file.type || 'application/octet-stream',
-            size: file.size,
-            strategy: file.size > 10 * 1024 * 1024 ? 'chunk' : 'direct',
-          })
-          .then((res) => res.data)
+        const presignRes = await api.post('/uploads/presign/', {
+          filename: file.name,
+          content_type: file.type || 'application/octet-stream',
+          size: file.size,
+          strategy: file.size > 10 * 1024 * 1024 ? 'chunk' : 'direct',
+        })
+        const presign = presignRes.data
         const uploadUrl = presign?.upload_url || '/api/task-attachments/'
         const maxSize = presign?.max_size_mb ? Number(presign.max_size_mb) * 1024 * 1024 : MAX_FILE_MB * 1024 * 1024
         if (file.size > maxSize) {

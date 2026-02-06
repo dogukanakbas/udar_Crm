@@ -36,6 +36,8 @@ class User(AbstractUser):
     branch = models.ForeignKey(Branch, on_delete=models.SET_NULL, null=True, blank=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='Sales')
     notification_prefs = models.JSONField(default=dict, blank=True)
+    otp_enabled = models.BooleanField(default=False)
+    otp_secret = models.CharField(max_length=64, blank=True, default='')
 
     def __str__(self):
         return f"{self.username} ({self.role})"

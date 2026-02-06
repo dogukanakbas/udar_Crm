@@ -1,4 +1,4 @@
-export type Role = 'Admin' | 'Manager' | 'Sales' | 'Finance' | 'Support' | 'Warehouse'
+export type Role = 'Admin' | 'Manager' | 'Sales' | 'Finance' | 'Support' | 'Warehouse' | 'Worker'
 
 export type LeadStatus = 'New' | 'Qualified' | 'Contacted' | 'Nurturing' | 'Proposal' | 'Closed Won' | 'Closed Lost'
 
@@ -147,7 +147,7 @@ export interface Ticket {
 export interface Task {
   id: string
   title: string
-  due: string
+  due?: string
   owner: string
   status: 'todo' | 'in-progress' | 'done'
   assignee?: string
@@ -161,6 +161,9 @@ export interface Task {
   attachments?: Attachment[]
   comments?: TaskComment[]
   checklist?: TaskChecklistItem[]
+  time_entries?: TaskTimeEntry[]
+  history?: TaskHistoryItem[]
+  notes?: string
 }
 
 export interface Team {
@@ -198,6 +201,13 @@ export interface TaskComment {
   author?: string
   authorName?: string
   task?: string
+}
+
+export interface TaskHistoryItem {
+  id: string
+  text: string
+  actor?: string
+  at?: string
 }
 
 export interface TaskChecklistItem {
@@ -330,6 +340,9 @@ export interface MockDbSnapshot {
   quoteHistory: QuoteHistoryItem[]
   vehicles: Vehicle[]
   tasks: Task[]
+  teams: Team[]
+  users: UserLite[]
+  rolePermissions?: string[]
   today: TodayPanel
   savedViews: Record<string, { name: string; filters: Record<string, string> }[]>
   settings: {

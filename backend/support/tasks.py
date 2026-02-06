@@ -22,16 +22,16 @@ def run_due_soon_automations():
       due__gte=now,
     )
     for task in tasks:
-      if rule.action == 'add_comment':
-        text = rule.action_payload.get('comment') if isinstance(rule.action_payload, dict) else None
-        TaskComment.objects.create(task=task, author=None, type='activity', text=text or 'Otomasyon: due yaklaşıyor')
-      elif rule.action == 'notify':
-        payload = rule.action_payload if isinstance(rule.action_payload, dict) else {}
-        msg = payload.get('message') or f"Task {task.title}: vade yaklaşıyor"
-        webhook = payload.get('webhook')
-        email_to = payload.get('email') or (task.assignee.email if task.assignee else None)
-        TaskComment.objects.create(task=task, author=None, type='activity', text='(Notify) Due yaklaşıyor')
-        try:
+      try:
+        if rule.action == 'add_comment':
+          text = rule.action_payload.get('comment') if isinstance(rule.action_payload, dict) else None
+          TaskComment.objects.create(task=task, author=None, type='activity', text=text or 'Otomasyon: due yaklaşıyor')
+        elif rule.action == 'notify':
+          payload = rule.action_payload if isinstance(rule.action_payload, dict) else {}
+          msg = payload.get('message') or f"Task {task.title}: vade yaklaşıyor"
+          webhook = payload.get('webhook')
+          email_to = payload.get('email') or (task.assignee.email if task.assignee else None)
+          TaskComment.objects.create(task=task, author=None, type='activity', text='(Notify) Due yaklaşıyor')
           from .utils import send_slack_webhook, send_email
           send_slack_webhook(msg, webhook_url=webhook)
           if email_to:
@@ -46,6 +46,6 @@ def run_due_soon_automations():
               "rule_id": rule.id,
             }
           )
-        except Exception:
-          pass
+      except Exception as e:
+        TaskComment.objects.create(task=task, author=None, type='activity', text=f"Otomasyon hata: {e}")
 

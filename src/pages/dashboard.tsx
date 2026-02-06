@@ -232,7 +232,7 @@ export function DashboardPage() {
                     <span>{task.title}</span>
                     <Badge variant="outline">{task.owner}</Badge>
                   </div>
-                  <p className="text-xs text-muted-foreground">Tarih {formatDate(task.due)}</p>
+                  <p className="text-xs text-muted-foreground">Tarih {formatDate(task.due || task.end || '')}</p>
                 </div>
               ))}
             </div>

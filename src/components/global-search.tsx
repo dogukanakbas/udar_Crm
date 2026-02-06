@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useEffect, useState } from 'react'
 import { useRouter } from '@tanstack/react-router'
 import { FileText, PlusCircle, Search } from 'lucide-react'
@@ -13,24 +12,50 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 
 type Props = { open: boolean; onOpenChange: (open: boolean) => void }
 
+type QuickAction = { label: string; to: string; action: () => void }
+
+type SearchResult = {
+  partners: { id: number; name: string }[]
+  quotes: { id: number; number: string; status: string }[]
+  products: { id: number; name: string; sku: string }[]
+  tasks: { id: number; title: string; status: string; assignee?: string | null; team?: string | null; tags?: string[] }[]
+  comments: { id: number; task_id: number; task_title: string; author?: string | null; text: string }[]
+  teams: { id: number; name: string }[]
+  partners_count?: number
+  quotes_count?: number
+  products_count?: number
+  tasks_count?: number
+  comments_count?: number
+  teams_count?: number
+  page?: number
+  limit?: number
+}
+
 export function GlobalSearch({ open, onOpenChange }: Props) {
   const router = useRouter()
   const { toast } = useToast()
   const [query, setQuery] = useState('')
   const [tags, setTags] = useState('')
   const [types, setTypes] = useState<string[]>([])
-  const [limit, setLimit] = useState(10)
+const [limit, setLimit] = useState(10)
+  const [page, setPage] = useState(1)
   const [saved, setSaved] = useState<{ name: string; query: string; tags: string; types: string }[]>([])
   const [savedPick, setSavedPick] = useState('none')
   const [loading, setLoading] = useState(false)
-  const [results, setResults] = useState<{
-    partners: any[]
-    quotes: any[]
-    products: any[]
-    tasks: any[]
-    comments: any[]
-    teams: any[]
-  }>({ partners: [], quotes: [], products: [], tasks: [], comments: [], teams: [] })
+  const [results, setResults] = useState<SearchResult>({
+    partners: [],
+    quotes: [],
+    products: [],
+    tasks: [],
+    comments: [],
+    teams: [],
+    partners_count: 0,
+    quotes_count: 0,
+    products_count: 0,
+    tasks_count: 0,
+    comments_count: 0,
+    teams_count: 0,
+  })
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -66,17 +91,18 @@ export function GlobalSearch({ open, onOpenChange }: Props) {
   useEffect(() => {
     if (!open) return
     if (query.trim().length < 2 && tags.trim().length === 0) {
-      setResults({ partners: [], quotes: [], products: [], tasks: [], comments: [], teams: [] })
+      setResults({ partners: [], quotes: [], products: [], tasks: [], comments: [], teams: [], partners_count: 0, quotes_count: 0, products_count: 0, tasks_count: 0, comments_count: 0, teams_count: 0 })
+      setPage(1)
       return
     }
     setLoading(true)
     api
-      .get('/search/', { params: { q: query, tags, type: types.join(','), limit } })
+      .get('/search/', { params: { q: query, tags, type: types.join(','), limit, page } })
       .then((res) => setResults(res.data || {}))
       .finally(() => setLoading(false))
-  }, [query, tags, types, limit, open])
+  }, [query, tags, types, limit, page, open])
 
-  const quickActions = [
+  const quickActions: QuickAction[] = [
     { label: 'Lead oluştur', to: '/crm/leads', action: () => toast({ title: 'Lead formu hazır' }) },
     { label: 'Yeni fatura', to: '/erp/invoicing', action: () => toast({ title: 'Fatura modalı hazır' }) },
     { label: 'Destek kaydı aç', to: '/support/tickets', action: () => toast({ title: 'Ticket bilgisi girin' }) },
@@ -103,6 +129,14 @@ export function GlobalSearch({ open, onOpenChange }: Props) {
                 onChange={(e) => setLimit(Math.min(50, Math.max(1, Number(e.target.value) || 10)))}
                 className="h-9 w-20"
                 placeholder="Limit"
+              />
+              <Input
+                type="number"
+                min={1}
+                value={page}
+                onChange={(e) => setPage(Math.max(1, Number(e.target.value) || 1))}
+                className="h-9 w-16"
+                placeholder="Sayfa"
               />
               <Select
                 value={types.join(',') || 'all'}
@@ -131,6 +165,7 @@ export function GlobalSearch({ open, onOpenChange }: Props) {
                     const next = [...saved.filter((s) => s.name !== val), { name: val, query, tags, types: types.join(',') }]
                     setSaved(next)
                     setSavedPick(val)
+                    setPage(1)
                     ;(e.target as HTMLInputElement).value = ''
                     toast({ title: 'Kayıt edildi', description: val })
                   }
@@ -149,6 +184,25 @@ export function GlobalSearch({ open, onOpenChange }: Props) {
           </div>
           <CommandList>
             <CommandEmpty>{loading ? 'Aranıyor...' : 'Sonuç yok.'}</CommandEmpty>
+            <div className="flex items-center justify-between px-3 py-2 text-sm text-muted-foreground">
+              <span>Sayfa {page} / Limit {limit}</span>
+              <div className="space-x-2">
+                <button
+                  className="px-2 py-1 border rounded disabled:opacity-50"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                >
+                  Önceki
+                </button>
+                <button
+                  className="px-2 py-1 border rounded disabled:opacity-50"
+                  onClick={() => setPage((p) => p + 1)}
+                  disabled={!hasNext(results, limit, page)}
+                >
+                  Sonraki
+                </button>
+              </div>
+            </div>
             <CommandGroup heading="Hızlı aksiyonlar">
               {quickActions.map((action) => (
                 <CommandItem
@@ -255,5 +309,17 @@ function SelectSaved({
       </SelectContent>
     </Select>
   )
+}
+
+function hasNext(results: any, limit: number, page: number) {
+  const maxCount = Math.max(
+    results.partners_count ?? 0,
+    results.quotes_count ?? 0,
+    results.products_count ?? 0,
+    results.tasks_count ?? 0,
+    results.comments_count ?? 0,
+    results.teams_count ?? 0
+  )
+  return maxCount > page * limit
 }
 

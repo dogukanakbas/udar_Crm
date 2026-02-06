@@ -11,7 +11,8 @@ from audit.utils import log_entity_action
 from .models import Ticket, TicketMessage, Task, TaskAttachment, TaskComment, TaskChecklist, TaskTimeEntry
 from accounts.models import User
 from .models_automation import AutomationRule
-from .utils import send_slack_webhook, send_email
+from .utils import send_slack_webhook, send_email, generate_presigned_post, scan_file_with_clamav
+from rest_framework import status
 from .serializers import (
     TicketSerializer,
     TicketMessageSerializer,
@@ -233,72 +234,75 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 if cond.get('to') and extra and extra.get('to') != cond.get('to'):
                     continue
             if trigger == 'task_due_soon':
-                # handled via scheduled view (not here)
                 continue
-            if rule.action == 'add_comment':
-                text = rule.action_payload.get('comment') if isinstance(rule.action_payload, dict) else None
-                TaskComment.objects.create(task=task, author=None, type='activity', text=text or 'Otomasyon')
-            elif rule.action == 'set_assignee':
-                assignee_id = rule.action_payload.get('assignee') if isinstance(rule.action_payload, dict) else None
-                if assignee_id:
-                    task.assignee_id = assignee_id
-                    task.save(update_fields=['assignee'])
-            elif rule.action == 'add_tag':
-                payload = rule.action_payload if isinstance(rule.action_payload, dict) else {}
-                tag = payload.get('tag')
-                if tag:
-                    current = task.tags or []
-                    if tag not in current:
-                        task.tags = current + [tag]
-                        task.save(update_fields=['tags'])
-                        TaskComment.objects.create(task=task, author=None, type='activity', text=f"Etiket eklendi: {tag}")
-            elif rule.action == 'set_field':
-                payload = rule.action_payload if isinstance(rule.action_payload, dict) else {}
-                field = payload.get('field')
-                value = payload.get('value')
-                allowed = ['priority', 'status']
-                if field in allowed and value:
-                    setattr(task, field, value)
-                    task.save(update_fields=[field])
-                    TaskComment.objects.create(task=task, author=None, type='activity', text=f"{field} -> {value}")
-            elif rule.action == 'notify':
-                payload = rule.action_payload if isinstance(rule.action_payload, dict) else {}
-                msg = payload.get('message') or f"Task {task.title}: durum {extra.get('from')} -> {extra.get('to')}"
-                webhook = payload.get('webhook')
-                email_to = payload.get('email') or (task.assignee.email if task.assignee else None)
-                TaskComment.objects.create(task=task, author=None, type='activity', text='(Notify) Otomasyon tetiklendi')
-                send_slack_webhook(msg, webhook_url=webhook)
-                if email_to:
-                    send_email(email_to, f"Görev bildirimi: {task.title}", msg)
-                push_event(
-                    {
-                        "type": "notification.automation",
-                        "task_id": task.id,
-                        "task_title": task.title,
-                        "message": msg,
-                        "organization": task.organization_id,
-                        "rule_id": rule.id,
-                    }
-                )
-            elif rule.action == 'notify':
-                payload = rule.action_payload if isinstance(rule.action_payload, dict) else {}
-                msg = payload.get('message') or f"Task {task.title}: durum {extra.get('from')} -> {extra.get('to')}"
-                webhook = payload.get('webhook')
-                email_to = payload.get('email') or (task.assignee.email if task.assignee else None)
-                TaskComment.objects.create(task=task, author=None, type='activity', text='(Notify) Otomasyon tetiklendi')
-                send_slack_webhook(msg, webhook_url=webhook)
-                if email_to:
-                    send_email(email_to, f"Görev bildirimi: {task.title}", msg)
-                push_event(
-                    {
-                        "type": "notification.automation",
-                        "task_id": task.id,
-                        "task_title": task.title,
-                        "message": msg,
-                        "organization": task.organization_id,
-                        "rule_id": rule.id,
-                    }
-                )
+            try:
+                if rule.action == 'add_comment':
+                    text = rule.action_payload.get('comment') if isinstance(rule.action_payload, dict) else None
+                    TaskComment.objects.create(task=task, author=None, type='activity', text=text or 'Otomasyon')
+                elif rule.action == 'set_assignee':
+                    assignee_id = rule.action_payload.get('assignee') if isinstance(rule.action_payload, dict) else None
+                    if assignee_id:
+                        task.assignee_id = assignee_id
+                        task.save(update_fields=['assignee'])
+                elif rule.action == 'add_tag':
+                    payload = rule.action_payload if isinstance(rule.action_payload, dict) else {}
+                    tag = payload.get('tag')
+                    if tag:
+                        current = task.tags or []
+                        if tag not in current:
+                            task.tags = current + [tag]
+                            task.save(update_fields=['tags'])
+                            TaskComment.objects.create(task=task, author=None, type='activity', text=f"Etiket eklendi: {tag}")
+                elif rule.action == 'set_field':
+                    payload = rule.action_payload if isinstance(rule.action_payload, dict) else {}
+                    field = payload.get('field')
+                    value = payload.get('value')
+                    allowed = ['priority', 'status']
+                    if field in allowed and value:
+                        setattr(task, field, value)
+                        task.save(update_fields=[field])
+                        TaskComment.objects.create(task=task, author=None, type='activity', text=f"{field} -> {value}")
+                elif rule.action == 'notify':
+                    payload = rule.action_payload if isinstance(rule.action_payload, dict) else {}
+                    msg = payload.get('message') or f"Task {task.title}: durum {extra.get('from')} -> {extra.get('to')}"
+                    webhook = payload.get('webhook')
+                    email_to = payload.get('email') or (task.assignee.email if task.assignee else None)
+                    TaskComment.objects.create(task=task, author=None, type='activity', text='(Notify) Otomasyon tetiklendi')
+                    send_slack_webhook(msg, webhook_url=webhook)
+                    if email_to:
+                        send_email(email_to, f"Görev bildirimi: {task.title}", msg)
+                    push_event(
+                        {
+                            "type": "notification.automation",
+                            "task_id": task.id,
+                            "task_title": task.title,
+                            "message": msg,
+                            "organization": task.organization_id,
+                            "rule_id": rule.id,
+                        }
+                    )
+                elif rule.action == 'multi_notify':
+                    payload = rule.action_payload if isinstance(rule.action_payload, dict) else {}
+                    msg = payload.get('message') or f"Task {task.title}: durum {extra.get('from')} -> {extra.get('to')}"
+                    emails = payload.get('emails') or []
+                    hooks = payload.get('webhooks') or []
+                    TaskComment.objects.create(task=task, author=None, type='activity', text='(Multi notify) Otomasyon tetiklendi')
+                    for h in hooks:
+                        send_slack_webhook(msg, webhook_url=h)
+                    for em in emails:
+                        send_email(em, f"Görev bildirimi: {task.title}", msg)
+                    push_event(
+                        {
+                            "type": "notification.automation",
+                            "task_id": task.id,
+                            "task_title": task.title,
+                            "message": msg,
+                            "organization": task.organization_id,
+                            "rule_id": rule.id,
+                        }
+                    )
+            except Exception as e:
+                TaskComment.objects.create(task=task, author=None, type='activity', text=f"Otomasyon hata: {e}")
 
 
 class TaskAttachmentViewSet(OrgScopedMixin, viewsets.ModelViewSet):
@@ -553,65 +557,65 @@ class UploadPresignView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsOrgMember]
 
     def post(self, request, *args, **kwargs):
-        filename = request.data.get('filename', 'upload.bin')
+        file_name = request.data.get('file_name') or request.data.get('filename') or 'upload.bin'
         content_type = request.data.get('content_type', 'application/octet-stream')
         size = int(request.data.get('size') or 0)
         strategy = request.data.get('strategy', 'direct')
+
         allowed = {'image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'application/pdf'}
-        max_size_mb = 50 if strategy == 'chunk' else 10
+        max_size_mb = int(os.getenv('PRESIGN_MAX_SIZE_MB', 50 if strategy == 'chunk' else 10))
+
         if content_type not in allowed:
-            return Response({"detail": "Yalnızca PNG/JPG/WEBP/PDF kabul edilir"}, status=400)
+            return Response({"detail": "Yalnızca PNG/JPG/WEBP/PDF kabul edilir"}, status=status.HTTP_400_BAD_REQUEST)
         if size and size > max_size_mb * 1024 * 1024:
-            return Response({"detail": f"Dosya {max_size_mb}MB üstü olamaz"}, status=400)
-        provider = os.getenv('PRESIGN_PROVIDER', 'direct')
+            return Response({"detail": f"Dosya {max_size_mb}MB üstü olamaz"}, status=status.HTTP_400_BAD_REQUEST)
+
+        provider = os.getenv('PRESIGN_PROVIDER', 'direct').lower()
         bucket = os.getenv('PRESIGN_BUCKET') or os.getenv('AWS_STORAGE_BUCKET_NAME')
         endpoint = os.getenv('PRESIGN_ENDPOINT') or os.getenv('MINIO_ENDPOINT')
         access_key = os.getenv('PRESIGN_ACCESS_KEY') or os.getenv('MINIO_ACCESS_KEY') or os.getenv('AWS_ACCESS_KEY_ID')
         secret_key = os.getenv('PRESIGN_SECRET_KEY') or os.getenv('MINIO_SECRET_KEY') or os.getenv('AWS_SECRET_ACCESS_KEY')
-        region = os.getenv('PRESIGN_REGION') or os.getenv('AWS_REGION') or None
-        prefix = os.getenv('PRESIGN_PREFIX', 'uploads')
+        region = os.getenv('PRESIGN_REGION') or os.getenv('AWS_REGION') or 'us-east-1'
+        prefix = os.getenv('PRESIGN_PREFIX', 'uploads').strip('/')
 
         if provider in ['s3', 'minio'] and bucket and access_key and secret_key and endpoint:
+            key = f"{prefix}/tasks/{uuid.uuid4().hex}/{file_name}" if prefix else f"tasks/{uuid.uuid4().hex}/{file_name}"
             try:
-                import boto3
-
-                key = f"{prefix}/tasks/{uuid.uuid4().hex}/{filename}"
-                client = boto3.client(
-                    's3',
-                    endpoint_url=endpoint,
-                    aws_access_key_id=access_key,
-                    aws_secret_access_key=secret_key,
-                    region_name=region,
-                )
-                conditions = [["content-length-range", 0, max_size_mb * 1024 * 1024]]
-                fields = {"Content-Type": content_type}
-                presigned = client.generate_presigned_post(
-                    Bucket=bucket, Key=key, Fields=fields, Conditions=conditions, ExpiresIn=3600
+                presigned = generate_presigned_post(
+                    endpoint=endpoint.replace('https://', '').replace('http://', ''),
+                    bucket=bucket,
+                    key=key,
+                    access_key=access_key,
+                    secret_key=secret_key,
+                    secure=endpoint.startswith('https://'),
+                    region=region,
+                    content_type=content_type,
+                    max_size=max_size_mb * 1024 * 1024,
                 )
                 resp = {
                     "upload_url": presigned['url'],
                     "fields": presigned['fields'],
                     "max_size_mb": max_size_mb,
                     "content_type": content_type,
-                    "filename": filename,
-                    "strategy": "s3",
+                    "filename": file_name,
+                    "strategy": provider,
                     "part_size": max_size_mb * 1024 * 1024,
                     "key": key,
                 }
                 return Response(resp)
-            except Exception:
-                # fallback direct
-                pass
+            except Exception as e:
+                return Response({"detail": f"Presign başarısız: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # Fallback: backend'e direkt yükleme
+        # Fallback: backend'e direkt yükleme (isteğe bağlı ClamAV taraması için flag)
         resp = {
             'upload_url': request.build_absolute_uri('/api/task-attachments/'),
             'fields': {},
             'max_size_mb': max_size_mb,
             'content_type': content_type,
-            'filename': filename,
+            'filename': file_name,
             'strategy': 'direct',
             'part_size': 5 * 1024 * 1024,  # 5MB öneri
+            'clamav': os.getenv('CLAMAV_ENABLED', 'false').lower() == 'true',
         }
         return Response(resp)
 

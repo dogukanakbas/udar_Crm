@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { PageHeader } from '@/components/app-shell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -10,7 +9,6 @@ import { Switch } from '@/components/ui/switch'
 import { useToast } from '@/components/ui/use-toast'
 import { useAppStore } from '@/state/use-app-store'
 import { useTheme } from '@/components/theme-provider'
-// @ts-nocheck
 import { useEffect, useState } from 'react'
 import type { AutomationRule } from '@/types'
 import api from '@/lib/api'
@@ -49,6 +47,9 @@ export function SettingsPage() {
   const [viewOnly, setViewOnly] = useState(false)
   const [rules, setRules] = useState<AutomationRule[]>([])
   const icsUrl = `${window.location.origin}/api/calendar/ics/`
+  const [oldPassword, setOldPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [newPassword2, setNewPassword2] = useState('')
   const [health, setHealth] = useState<{ backend?: string; db?: string; redis?: string }>({})
 
   const userColumns: ColumnDef<UserLite>[] = [
@@ -232,6 +233,53 @@ export function SettingsPage() {
               <Input value={notifEmail} onChange={(e) => setNotifEmail(e.target.value)} placeholder="ops@firma.com" />
             </div>
             <Button onClick={saveNotifSettings}>Kaydet</Button>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Şifre değiştir</CardTitle>
+            <CardDescription>Eski şifreyi doğrulayarak yeni şifre belirle</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-2">
+              <Label>Eski şifre</Label>
+              <Input type="password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Yeni şifre</Label>
+              <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Yeni şifre (tekrar)</Label>
+              <Input type="password" value={newPassword2} onChange={(e) => setNewPassword2(e.target.value)} />
+            </div>
+            <Button
+              onClick={async () => {
+                if (!oldPassword || !newPassword || !newPassword2) {
+                  toast({ title: 'Hata', description: 'Tüm alanlar gerekli', variant: 'destructive' })
+                  return
+                }
+                if (newPassword !== newPassword2) {
+                  toast({ title: 'Hata', description: 'Yeni şifreler eşleşmiyor', variant: 'destructive' })
+                  return
+                }
+                try {
+                  await api.post('/auth/change-password/', { old_password: oldPassword, new_password: newPassword })
+                  toast({ title: 'Şifre güncellendi' })
+                  setOldPassword('')
+                  setNewPassword('')
+                  setNewPassword2('')
+                } catch (err: any) {
+                  toast({
+                    title: 'Hata',
+                    description: err?.response?.data?.detail || 'Güncellenemedi',
+                    variant: 'destructive',
+                  })
+                }
+              }}
+            >
+              Şifreyi güncelle
+            </Button>
           </CardContent>
         </Card>
         <Card>
@@ -589,15 +637,6 @@ export function SettingsPage() {
           </CardContent>
         </Card>
       </div>
-    </div>
-  )
-}
-
-function ToggleRow({ label, defaultChecked }: { label: string; defaultChecked?: boolean }) {
-  return (
-    <div className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2">
-      <span className="text-sm">{label}</span>
-      <Switch defaultChecked={defaultChecked} />
     </div>
   )
 }
