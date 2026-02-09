@@ -219,8 +219,8 @@ export function TasksPage() {
       tasks.filter(
         (t) =>
           (status === 'all' || t.status === status) &&
-          (assignee === 'all' || t.assignee === assignee) &&
-          (teamFilter === 'all' || t.teamId === teamFilter) &&
+          (assignee === 'all' || String(t.assignee) === String(assignee)) &&
+          (teamFilter === 'all' || String(t.teamId) === String(teamFilter)) &&
           (search.trim().length === 0 ||
             t.title.toLowerCase().includes(search.trim().toLowerCase()) ||
             (t.notes || '').toLowerCase().includes(search.trim().toLowerCase()))
@@ -749,7 +749,7 @@ export function TasksPage() {
           <SelectContent>
             <SelectItem value="all">Herkes</SelectItem>
             {data.users.map((u) => (
-              <SelectItem key={u.id} value={u.id}>
+              <SelectItem key={u.id} value={String(u.id)}>
                 {u.username}
               </SelectItem>
             ))}
@@ -762,7 +762,7 @@ export function TasksPage() {
           <SelectContent>
             <SelectItem value="all">Tüm ekipler</SelectItem>
             {data.teams.map((t) => (
-              <SelectItem key={t.id} value={t.id}>
+              <SelectItem key={t.id} value={String(t.id)}>
                 {t.name}
               </SelectItem>
             ))}
