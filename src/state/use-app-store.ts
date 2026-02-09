@@ -169,6 +169,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const requests =
         (userRole || 'Worker') === 'Worker'
           ? {
+              salesOrdersRes: Promise.resolve({ data: [] }),
               productsRes: Promise.resolve({ data: [] }),
               quotesRes: Promise.resolve({ data: [] }),
               partnersRes: Promise.resolve({ data: [] }),
