@@ -880,6 +880,9 @@ export const useAppStore = create<AppState>()(
           ...state.data,
           // today verilerini persist etme (her seferinde API'den gelsin)
           today: { tasks: [], meetings: [], overdueInvoices: [], lowStockSkus: [] },
+          // users ve teams'i persist etme (her zaman fresh data)
+          users: [],
+          teams: [],
         },
       }),
     }

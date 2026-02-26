@@ -78,7 +78,7 @@ export function CalendarPage() {
               <SelectTrigger className="w-48">
                 <SelectValue placeholder="Atanan" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="max-h-[300px] overflow-y-auto">
                 <SelectItem value="all">Herkes</SelectItem>
                 {data.users.map((u) => (
                   <SelectItem key={u.id} value={u.id}>

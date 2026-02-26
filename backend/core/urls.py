@@ -77,5 +77,5 @@ urlpatterns = [
     path('api/uploads/presign/', UploadPresignView.as_view(), name='upload-presign'),
     path('api/calendar/ics/', CalendarICSView.as_view(), name='calendar-ics'),
     path('api/stream/', SSEView.as_view(), name='sse-stream'),
-    path('health/', health),
+    path('api/health/', health, name='health'),
 ]

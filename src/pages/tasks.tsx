@@ -870,7 +870,7 @@ export function TasksPage() {
           <SelectTrigger className="w-40">
             <SelectValue placeholder="Atanan" />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="max-h-[300px] overflow-y-auto">
             <SelectItem value="all">Herkes</SelectItem>
             {data.users.map((u) => (
               <SelectItem key={u.id} value={String(u.id)}>
@@ -1441,7 +1441,7 @@ export function TaskDetailPage() {
                   <SelectTrigger>
                     <SelectValue placeholder="Kişi seç" />
                   </SelectTrigger>
-                  <SelectContent className="max-h-56 overflow-y-auto">
+                  <SelectContent className="max-h-[300px] overflow-y-auto">
                     <SelectItem value="none">—</SelectItem>
                     {data.users.map((u) => (
                       <SelectItem key={u.id} value={String(u.id)}>
@@ -2133,7 +2133,7 @@ function TaskModal({
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-[300px] overflow-y-auto">
                   {users.map((u) => (
                     <SelectItem key={u.id} value={u.id}>
                       {u.username}
@@ -2149,7 +2149,7 @@ function TaskModal({
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-[300px] overflow-y-auto">
                   {users.map((u) => (
                     <SelectItem key={u.id} value={u.id}>
                       {u.username}
@@ -2168,7 +2168,7 @@ function TaskModal({
               <SelectTrigger>
                 <SelectValue placeholder="Ekip seç" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="max-h-[300px] overflow-y-auto">
                 <SelectItem value="none">—</SelectItem>
                 {teams.map((t) => (
                   <SelectItem key={t.id} value={t.id}>
