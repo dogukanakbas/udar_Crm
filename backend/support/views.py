@@ -9,7 +9,7 @@ import uuid
 from permissions import IsOrgMember, HasAPIPermission, CommentOnlyRestriction, ViewOnlyRestriction
 from audit.utils import log_entity_action
 from .models import Ticket, TicketMessage, Task, TaskAttachment, TaskComment, TaskChecklist, TaskTimeEntry
-from accounts.models import User
+from accounts.models import User, Team
 from .models_automation import AutomationRule
 from .utils import send_slack_webhook, send_email, generate_presigned_post, scan_file_with_clamav
 from rest_framework import status
@@ -25,6 +25,7 @@ from .serializers import (
 )
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from django.utils import timezone
 
 
 class OrgScopedMixin:
@@ -39,6 +40,20 @@ class OrgScopedMixin:
         org = getattr(self.request.user, 'organization', None)
         serializer.save(organization=org)
 
+
+FACTORY_CHECKLIST = [
+    "Depo - MDF İnişi",
+    "MDF Dilimleme",
+    "Yarı Otomatik Hat #1",
+    "Yarı Otomatik Hat #2",
+    "Tam Otomatik Hat",
+    "PWC Sarma",
+    "Vakum Odası",
+    "Birleştirme",
+    "Pres",
+    "Ebatlama",
+    "Kalite Kontrol / Çıkış",
+]
 
 class TicketViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = TicketSerializer
@@ -116,13 +131,29 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         if org:
             qs = qs.filter(organization=org)
         role = getattr(self.request.user, 'role', '')
-        if role not in ['Admin', 'Manager']:
-            user = self.request.user
+        user = self.request.user
+        if role == 'Worker':
+            user_teams = user.teams.all()
+            qs = qs.filter(
+                Q(team__in=user_teams) | 
+                Q(current_team__in=user_teams) |
+                Q(assignee=user) |
+                Q(owner=user)
+            ).distinct()
+        elif role not in ['Admin', 'Manager']:
             qs = qs.filter(Q(owner=user) | Q(assignee=user) | Q(team__members=user)).distinct()
         return qs
 
     def perform_create(self, serializer):
         instance = serializer.save(organization=self.request.user.organization, owner=self.request.user)
+        # Sabit görevler için fabrika checklist ekle
+        if getattr(instance, 'mode', 'manual') == 'fixed':
+            TaskChecklist.objects.bulk_create(
+                [
+                    TaskChecklist(task=instance, title=title, order=idx)
+                    for idx, title in enumerate(FACTORY_CHECKLIST)
+                ]
+            )
         log_entity_action(instance, 'created', user=self.request.user)
         push_event(
             {
@@ -219,11 +250,216 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             }
         )
 
+    @action(detail=True, methods=['post'])
+    def claim(self, request, pk=None):
+        task = self.get_object()
+        if task.organization_id != request.user.organization_id:
+            raise PermissionDenied("Farklı organizasyon")
+        user_team = request.user.teams.first()
+        task.assignee = request.user
+        task.current_team = user_team or task.current_team or task.team
+        task.save(update_fields=['assignee', 'current_team', 'updated_at'])
+        TaskComment.objects.create(
+            task=task,
+            author=request.user,
+            type='activity',
+            text=f"{request.user.username} görevi üstlendi",
+        )
+        push_event(
+            {
+                "type": "task.claimed",
+                "task_id": task.id,
+                "organization": task.organization_id,
+                "by": getattr(request.user, "email", None),
+            }
+        )
+        return Response(TaskSerializer(task, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'])
+    def handover(self, request, pk=None):
+        task = self.get_object()
+        if task.organization_id != request.user.organization_id:
+            raise PermissionDenied("Farklı organizasyon")
+        target_team_id = request.data.get('team')
+        target_user_id = request.data.get('assignee')
+        note = request.data.get('note', '')
+        handover_type = request.data.get('type', 'manual')
+        target_team = None
+        if target_team_id:
+            target_team = Team.objects.filter(id=target_team_id, organization=request.user.organization).first()
+        target_user = None
+        if target_user_id:
+            target_user = User.objects.filter(id=target_user_id, organization=request.user.organization).first()
+        
+        from_team = task.current_team or task.team
+        history = task.handover_history or []
+        history.append(
+            {
+                "from_team": getattr(from_team, 'id', None),
+                "from_team_name": getattr(from_team, 'name', None),
+                "to_team": getattr(target_team, 'id', None),
+                "to_team_name": getattr(target_team, 'name', None),
+                "by": request.user.username,
+                "note": note,
+                "type": handover_type,
+                "at": timezone.now().isoformat(),
+            }
+        )
+        task.current_team = target_team or task.current_team or task.team
+        if target_user:
+            task.assignee = target_user
+        task.handover_reason = note
+        task.handover_at = timezone.now()
+        task.handover_history = history
+        task.save(update_fields=['current_team', 'assignee', 'handover_reason', 'handover_at', 'handover_history', 'updated_at'])
+        TaskComment.objects.create(
+            task=task,
+            author=request.user,
+            type='activity',
+            text=f"Devir: {getattr(from_team, 'name', '—')} → {getattr(target_team, 'name', '—')} (not: {note})",
+        )
+        push_event(
+            {
+                "type": "task.handover",
+                "task_id": task.id,
+                "organization": task.organization_id,
+                "to_team": getattr(target_team, 'id', None),
+                "by": getattr(request.user, "email", None),
+            }
+        )
+        return Response(TaskSerializer(task, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'])
+    def self_handover(self, request, pk=None):
+        """Worker kendi görevini başka ekibe devredebilir (bölüm değişimi için)"""
+        task = self.get_object()
+        if task.organization_id != request.user.organization_id:
+            raise PermissionDenied("Farklı organizasyon")
+        if task.assignee_id != request.user.id:
+            raise PermissionDenied("Sadece size atanan görevi devredebilirsiniz")
+        
+        target_team_id = request.data.get('team')
+        reason = request.data.get('reason', 'Bölüm değişimi - başka alanda çalışıyorum')
+        
+        if not target_team_id:
+            raise PermissionDenied("Hedef ekip belirtilmeli")
+        
+        target_team = Team.objects.filter(id=target_team_id, organization=request.user.organization).first()
+        if not target_team:
+            raise PermissionDenied("Hedef ekip bulunamadı")
+        
+        from_team = task.current_team or task.team
+        history = task.handover_history or []
+        history.append(
+            {
+                "from_team": getattr(from_team, 'id', None),
+                "from_team_name": getattr(from_team, 'name', None),
+                "to_team": target_team.id,
+                "to_team_name": target_team.name,
+                "by": request.user.username,
+                "note": reason,
+                "type": "self-initiated",
+                "at": timezone.now().isoformat(),
+            }
+        )
+        
+        task.current_team = target_team
+        task.assignee = None
+        task.handover_reason = reason
+        task.handover_at = timezone.now()
+        task.handover_history = history
+        task.save(update_fields=['current_team', 'assignee', 'handover_reason', 'handover_at', 'handover_history', 'updated_at'])
+        
+        TaskComment.objects.create(
+            task=task,
+            author=request.user,
+            type='activity',
+            text=f"🔄 {request.user.username} görevi {target_team.name} ekibine devretti (Sebep: {reason})",
+        )
+        
+        push_event(
+            {
+                "type": "task.self_handover",
+                "task_id": task.id,
+                "organization": task.organization_id,
+                "from_team": getattr(from_team, 'id', None),
+                "to_team": target_team.id,
+                "by": getattr(request.user, "email", None),
+                "reason": reason,
+            }
+        )
+        
+        return Response(TaskSerializer(task, context={'request': request}).data)
+
+    @action(detail=False, methods=['get'], url_path='worker-tracking')
+    def worker_tracking(self, request):
+        """
+        Admin/Manager için worker tracking endpoint'i.
+        Her worker'ın hangi departmanda çalıştığını gösterir.
+        """
+        # Sadece Admin ve Manager erişebilir
+        if request.user.role not in ['Admin', 'Manager']:
+            raise PermissionDenied("Bu endpoint'e sadece Admin ve Manager erişebilir")
+        
+        org = request.user.organization
+        
+        # Tüm worker'ları al
+        workers = User.objects.filter(organization=org, role='Worker')
+        
+        tracking_data = []
+        for worker in workers:
+            # Worker'ın aktif görevlerini al
+            active_tasks = Task.objects.filter(
+                organization=org,
+                assignee=worker,
+                status__in=['todo', 'in-progress']
+            ).select_related('team', 'current_team').order_by('-updated_at')
+            
+            # Worker'ın son self-handover'ını bul
+            last_handover = None
+            for task in active_tasks:
+                if task.handover_history:
+                    for h in reversed(task.handover_history):
+                        if h.get('type') == 'self-initiated' and h.get('by') == worker.username:
+                            last_handover = h
+                            break
+                    if last_handover:
+                        break
+            
+            # Worker'ın ana ekibi
+            primary_teams = list(worker.teams.values_list('name', flat=True))
+            
+            # Worker'ın şu an çalıştığı departman
+            current_department = None
+            if active_tasks.exists():
+                task = active_tasks.first()
+                current_department = task.current_team.name if task.current_team else (task.team.name if task.team else None)
+            
+            tracking_data.append({
+                'worker_id': worker.id,
+                'worker_name': worker.username,
+                'worker_email': worker.email,
+                'primary_teams': primary_teams,
+                'current_department': current_department,
+                'active_tasks_count': active_tasks.count(),
+                'last_handover': last_handover,
+                'last_activity': active_tasks.first().updated_at if active_tasks.exists() else None,
+            })
+        
+        return Response({
+            'workers': tracking_data,
+            'total_workers': len(tracking_data),
+            'timestamp': timezone.now().isoformat(),
+        })
+
     def perform_destroy(self, instance):
         log_entity_action(instance, 'deleted', user=self.request.user)
         instance.delete()
 
     def run_automations(self, task, trigger, extra=None):
+        if getattr(task, '_automation_in_progress', False):
+            return
+        task._automation_in_progress = True
         org = getattr(self.request.user, 'organization', None)
         rules = AutomationRule.objects.filter(organization=org, is_active=True, trigger=trigger)
         for rule in rules:
@@ -303,6 +539,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                     )
             except Exception as e:
                 TaskComment.objects.create(task=task, author=None, type='activity', text=f"Otomasyon hata: {e}")
+        task._automation_in_progress = False
 
 
 class TaskAttachmentViewSet(OrgScopedMixin, viewsets.ModelViewSet):

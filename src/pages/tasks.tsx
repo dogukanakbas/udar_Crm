@@ -21,7 +21,6 @@ import { formatDate } from '@/lib/utils'
 import type { Task } from '@/types'
 import { Calendar, Plus, Paperclip, Download } from 'lucide-react'
 import { RbacGuard } from '@/components/rbac'
-import { Link } from '@tanstack/react-router'
 import { useParams } from '@tanstack/react-router'
 import { CardDescription } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -40,6 +39,89 @@ const TASK_TEMPLATES: { id: string; name: string; checklist: string[] }[] = [
   { id: 'delivery', name: 'Teslimat', checklist: ['Ekip ataması', 'Takvim doğrula', 'Müşteri bilgilendir', 'QA tamamla'] },
 ]
 const WIP_DEFAULTS: Record<Task['status'], number> = { todo: 5, 'in-progress': 4, done: 999 }
+const MODEL_CODES = [
+  'AY-01',
+  'AY-02',
+  'AY-03',
+  'AY-04',
+  'AY-05',
+  'AY-06',
+  'AY-07',
+  'AY-08',
+  'AY-09',
+  'AY-10',
+  'AY-11',
+  'AY-12',
+  'AY-13',
+  'AY-14',
+  'AY-15',
+  'AY-16',
+  'AY-17',
+  'AY-18',
+  'AY-19',
+  'AY-20',
+  'AY-21',
+  'AY-22',
+  'AY-23',
+  'AY-24',
+  'AY-25',
+  'AY-27',
+  'AY-28',
+  'AY-30',
+  'AY-31',
+  'AY-35',
+]
+const BASE_VARIANTS = [
+  { id: 'A1', label: 'A1', duration: 4, blade: '1 mm' },
+  { id: 'A2', label: 'A2', duration: 4, blade: '1 mm' },
+  { id: 'A3', label: 'A3', duration: 4, blade: '3.5 mm' },
+  { id: 'A5', label: 'A5', duration: 4, blade: '3 mm' },
+  { id: 'A7', label: 'A7', duration: 4, blade: '6.1 mm' },
+  { id: 'camli', label: 'Camlı', duration: 8, blade: '1.5 mm' },
+  { id: 'giyotin', label: 'Giyotin', duration: 4.5, blade: '3 mm' },
+]
+const MODEL_DEFAULTS: Record<string, { duration: number; blade: string; sizes?: string[] }> = {
+  'AY-01': { duration: 4, blade: '1 mm' },
+  'AY-02': { duration: 4, blade: '1 mm' },
+  'AY-03': { duration: 4, blade: '1.5 mm' },
+  'AY-04': { duration: 3, blade: '1.5 mm' },
+  'AY-05': { duration: 4, blade: '3 mm' },
+  'AY-06': { duration: 4, blade: '1.5 mm' },
+  'AY-07': { duration: 4, blade: '1.5 mm' },
+  'AY-08': { duration: 4.5, blade: '1.5 mm' },
+  'AY-09': { duration: 4, blade: '1.5 mm' },
+  'AY-10': { duration: 4, blade: '1.5 mm' },
+  'AY-11': { duration: 3, blade: '1.5 mm' },
+  'AY-12': { duration: 2, blade: '1.5 mm' },
+  'AY-13': { duration: 3.5, blade: '1.5 mm' },
+  'AY-14': { duration: 4, blade: '1.5 mm' },
+  'AY-15': { duration: 4, blade: '1.5 mm' },
+  'AY-16': { duration: 4, blade: '1.5 mm' },
+  'AY-17': { duration: 4, blade: '1.5 mm' },
+  'AY-18': { duration: 4, blade: '1.5 mm' },
+  'AY-19': { duration: 4, blade: '1.5 mm' },
+  'AY-20': { duration: 4, blade: '1.5 mm' },
+  'AY-21': { duration: 4, blade: '1.5 mm' },
+  'AY-22': { duration: 4, blade: '1.5 mm' },
+  'AY-23': { duration: 4, blade: '1.5 mm' },
+  'AY-24': { duration: 4, blade: '1.5 mm' },
+  'AY-25': { duration: 4, blade: '1.5 mm' },
+  'AY-27': { duration: 4, blade: '1.5 mm' },
+  'AY-28': { duration: 4, blade: '1.5 mm' },
+  'AY-30': { duration: 4, blade: '1.5 mm' },
+  'AY-31': { duration: 4, blade: '1.5 mm' },
+  'AY-35': { duration: 4, blade: '1.5 mm' },
+}
+const MODEL_PRESETS = MODEL_CODES.map((code) => {
+  const def = MODEL_DEFAULTS[code] || { duration: 4, blade: '1.5 mm' }
+  return {
+    code,
+    sizes: def.sizes || ['73x210', '83x210', '93x210'],
+    variants: BASE_VARIANTS,
+    baseDuration: def.duration,
+    baseBlade: def.blade,
+  }
+})
 
 const taskSchema = z
   .object({
@@ -53,6 +135,19 @@ const taskSchema = z
     end: z.string(),
     due: z.string().optional(),
     notes: z.string().max(2000, 'Not çok uzun').optional(),
+    mode: z.enum(['manual', 'fixed']).default('manual'),
+    modelCode: z.string().optional(),
+    variant: z.string().optional(),
+    quantity: z.preprocess((v) => (v === '' || v === undefined ? 1 : Number(v)), z.number().min(1, 'Adet >=1 olmalı')),
+    modelDurationMinutes: z.preprocess(
+      (v) => (v === '' || v === undefined ? 0 : Number(v)),
+      z.number().min(0, '>=0 olmalı')
+    ),
+    totalPlannedMinutes: z.preprocess(
+      (v) => (v === '' || v === undefined ? 0 : Number(v)),
+      z.number().min(0, '>=0 olmalı')
+    ),
+    modelBladeDepth: z.string().optional(),
     plannedHours: z.preprocess(
       (v) => (v === '' || v === undefined ? 0 : Number(v)),
       z.number().min(0, '>=0 olmalı')
@@ -70,6 +165,10 @@ const taskSchema = z
     message: 'Vade tarihi başlangıçtan önce olamaz',
     path: ['due'],
   })
+  .refine(
+    (v) => v.mode === 'manual' || (v.modelCode && v.variant && v.quantity && v.quantity > 0),
+    { message: 'Model ve varyant seçilmeli', path: ['modelCode'] }
+  )
 
 const slaStatus = (task: Task) => {
   const due = task.due || task.end
@@ -111,7 +210,11 @@ export function TasksPage() {
   const { toast } = useToast()
   const [notifMuted, setNotifMuted] = useState(false)
   const [status, setStatus] = useState('all')
-  const [assignee, setAssignee] = useState('all')
+  const defaultAssignee =
+    typeof window !== 'undefined' && data.settings.role === 'Worker'
+      ? localStorage.getItem('current-user-id') || 'all'
+      : 'all'
+  const [assignee, setAssignee] = useState(defaultAssignee)
   const [teamFilter, setTeamFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [uploading, setUploading] = useState(false)
@@ -180,6 +283,16 @@ export function TasksPage() {
   useEffect(() => {
     localStorage.setItem('board-views', JSON.stringify(savedBoards))
   }, [savedBoards])
+
+  // Worker rolü için varsayılan olarak kendi görevlerini göster
+  useEffect(() => {
+    if (data.settings.role === 'Worker') {
+      const me = typeof window !== 'undefined' ? localStorage.getItem('current-user-id') : null
+      if (me && assignee !== me) {
+        setAssignee(me)
+      }
+    }
+  }, [data.settings.role])
 
   useEffect(() => {
     // notification settings: mute + slack/email endpoints (only mute used client-side)
@@ -413,7 +526,18 @@ export function TasksPage() {
   }, [filtered, data.teams])
 
   const columns: ColumnDef<Task>[] = [
-    { accessorKey: 'title', header: 'Görev' },
+    {
+      accessorKey: 'title',
+      header: 'Görev',
+      cell: ({ row }) => (
+        <button
+          onClick={() => window.location.href = `/tasks/${row.original.id}`}
+          className="font-medium text-blue-600 hover:text-blue-800 hover:underline cursor-pointer bg-transparent border-none p-0"
+        >
+          {row.original.title}
+        </button>
+      ),
+    },
     {
       accessorKey: 'assignee',
       header: 'Atanan',
@@ -449,12 +573,12 @@ export function TasksPage() {
       header: '',
       cell: ({ row }) => (
         <div className="flex gap-2">
-          <Link
-            to={`/tasks/${row.original.id}` as any}
-            className="text-xs text-blue-600 underline underline-offset-4"
+          <button
+            onClick={() => window.location.href = `/tasks/${row.original.id}`}
+            className="text-xs text-blue-600 underline underline-offset-4 cursor-pointer bg-transparent border-none p-0"
           >
             Detay
-          </Link>
+          </button>
           <RbacGuard perm="tasks.edit">
             <TaskModal
               task={row.original}
@@ -876,9 +1000,12 @@ export function TasksPage() {
                   <div
                     key={t.id}
                     draggable
-                    onDragStart={(e) => e.dataTransfer.setData('text/plain', t.id)}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/plain', t.id)
+                    }}
+                    onClick={() => window.location.href = `/tasks/${t.id}`}
                     className={cn(
-                      'rounded-lg border bg-card/80 p-3 shadow-sm hover:border-primary/60',
+                      'block rounded-lg border bg-card/80 p-3 shadow-sm hover:border-primary/60 hover:shadow-md transition-all cursor-pointer',
                       slaStatus(t) === 'overdue' && 'border-destructive/70'
                     )}
                   >
@@ -896,7 +1023,7 @@ export function TasksPage() {
                     <p className="text-xs text-muted-foreground">
                       Atanan: {data.users.find((u) => u.id === t.assignee)?.username || '—'}
                     </p>
-                    <div className="mt-2 flex items-center gap-2 text-xs">
+                    <div className="mt-2 flex items-center gap-2 text-xs" onClick={(e) => e.stopPropagation()}>
                       <Select
                         value={t.priority}
                         onValueChange={(v) => updateTask(t.id, { priority: v as Task['priority'] })}
@@ -911,17 +1038,17 @@ export function TasksPage() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="mt-2 flex items-center gap-2">
+                    <div className="mt-2 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => updateTask(t.id, { status: st === 'todo' ? 'in-progress' : 'done' })}
+                        onClick={(e) => {
+                          e.preventDefault()
+                          updateTask(t.id, { status: st === 'todo' ? 'in-progress' : 'done' })
+                        }}
                       >
                         {st === 'todo' ? 'Başlat' : 'Tamamla'}
                       </Button>
-                      <Link to={`/tasks/${t.id}` as any} className="text-xs text-blue-600 underline underline-offset-4">
-                        Detay
-                      </Link>
                       <div className="flex flex-wrap items-center gap-1 text-[11px]">
                         {(t.tags || []).map((tag) => (
                           <Badge key={tag} variant="outline">
@@ -1159,10 +1286,15 @@ export function TaskDetailPage() {
     useAppStore()
   const task = data.tasks.find((t) => t.id === taskId)
   const { toast } = useToast()
+  const quantityInitial = task?.quantity ?? 1
   const [comment, setComment] = useState('')
   const [timelineFilter, setTimelineFilter] = useState<'all' | 'comment' | 'activity' | 'attachment'>('all')
   const [checkTitle, setCheckTitle] = useState('')
   const [selectedTemplate, setSelectedTemplate] = useState<string>('onboarding')
+  const [qtyEdit, setQtyEdit] = useState<number>(Number(quantityInitial))
+  const [handoverTeam, setHandoverTeam] = useState<string>((task as any)?.currentTeam || task?.teamId || 'none')
+  const [handoverAssignee, setHandoverAssignee] = useState<string>(task?.assignee || 'none')
+  const [handoverNote, setHandoverNote] = useState<string>('')
   if (!task) {
     return (
       <div className="space-y-2">
@@ -1219,6 +1351,41 @@ export function TaskDetailPage() {
   const timeline = timelineAll
     .sort((a, b) => (a.at < b.at ? 1 : -1))
     .filter((i) => (timelineFilter === 'all' ? true : i.type === timelineFilter))
+
+  const refreshTask = async () => {
+    const res = await api.get(`/tasks/${task.id}/`)
+    await updateTask(task.id, res.data)
+  }
+
+  const handleClaim = async () => {
+    await api.post(`/tasks/${task.id}/claim/`)
+    await refreshTask()
+    toast({ title: 'Görev üstlenildi' })
+  }
+
+  const handleHandover = async () => {
+    await api.post(`/tasks/${task.id}/handover/`, {
+      team: handoverTeam && handoverTeam !== 'none' ? handoverTeam : null,
+      assignee: handoverAssignee && handoverAssignee !== 'none' ? handoverAssignee : null,
+      note: handoverNote || '',
+    })
+    await refreshTask()
+    toast({ title: 'Görev devredildi' })
+  }
+
+  const handleSelfHandover = async () => {
+    if (!handoverTeam || handoverTeam === 'none') {
+      toast({ title: 'Hata', description: 'Hedef takım seçilmeli', variant: 'destructive' })
+      return
+    }
+    await api.post(`/tasks/${task.id}/self_handover/`, {
+      team: handoverTeam,
+      reason: handoverNote || 'Bölüm değişimi - başka alanda çalışıyorum',
+    })
+    await refreshTask()
+    toast({ title: '🔄 Görev devredildi', description: 'Başka bölümde çalışma kaydedildi' })
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -1231,7 +1398,89 @@ export function TaskDetailPage() {
           <CardDescription>Sahip, atanan, tarih ve ekler</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="rounded border p-3 space-y-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold">Görev üstlenme / devir</p>
+                <p className="text-xs text-muted-foreground">
+                  Aktif takım: {data.teams.find((t) => t.id === (task as any)?.currentTeam)?.name || teamName || '—'}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={handleClaim}>
+                  Ben üstleniyorum
+                </Button>
+                <Button size="sm" variant="outline" onClick={handleHandover}>
+                  Devret
+                </Button>
+                <Button size="sm" variant="secondary" onClick={handleSelfHandover}>
+                  🔄 Başka bölümde çalışıyorum
+                </Button>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div>
+                <Label>Hedef takım</Label>
+                <Select value={handoverTeam} onValueChange={setHandoverTeam}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Takım seç" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-56 overflow-y-auto">
+                    <SelectItem value="none">—</SelectItem>
+                    {data.teams.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Hedef kişi</Label>
+                <Select value={handoverAssignee} onValueChange={setHandoverAssignee}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Kişi seç" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-56 overflow-y-auto">
+                    <SelectItem value="none">—</SelectItem>
+                    {data.users.map((u) => (
+                      <SelectItem key={u.id} value={String(u.id)}>
+                        {u.username}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Not</Label>
+                <Input value={handoverNote} onChange={(e) => setHandoverNote(e.target.value)} placeholder="Kısa not" />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Son devir: {task.handoverAt ? formatDate(task.handoverAt) : '—'} {task.handoverReason ? `• ${task.handoverReason}` : ''}
+            </p>
+            {(task as any).handoverHistory && (task as any).handoverHistory.length > 0 && (
+              <div className="mt-3 space-y-2">
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Devir Geçmişi</p>
+                <div className="space-y-1">
+                  {((task as any).handoverHistory || []).slice(-5).reverse().map((h: any, idx: number) => (
+                    <div key={idx} className="rounded border bg-muted/30 px-2 py-1 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">
+                          {h.from_team_name || h.from_team || '—'} → {h.to_team_name || h.to_team || '—'}
+                        </span>
+                        <span className="text-muted-foreground">{h.at ? formatDate(h.at) : ''}</span>
+                      </div>
+                      <div className="mt-0.5 text-muted-foreground">
+                        {h.by} {h.type === 'self-initiated' && '(kendi isteği)'} {h.note && `• ${h.note}`}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
             <DetailRow label="Sahip" value={ownerName} />
             <DetailRow label="Atanan" value={assigneeName} />
             <DetailRow label="Ekip" value={teamName || '—'} />
@@ -1248,6 +1497,56 @@ export function TaskDetailPage() {
               )}
             </div>
           </div>
+          {task.mode === 'fixed' && (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="rounded border p-3">
+                <p className="text-xs uppercase text-muted-foreground mb-1">Model bilgisi</p>
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <Badge variant="secondary">{task.modelCode || 'Model yok'}</Badge>
+                  <Badge variant="outline">{task.variant || 'Varyant yok'}</Badge>
+                  <Badge variant="outline">{task.modelBladeDepth || 'Bıçak —'}</Badge>
+                  <Badge variant="outline">
+                    {task.modelDurationMinutes ? `${task.modelDurationMinutes} dk` : 'Süre —'}
+                  </Badge>
+                  <Badge variant="outline">
+                    {task.totalPlannedMinutes ? `${task.totalPlannedMinutes} dk plan` : 'Plan —'}
+                  </Badge>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Ölçüler: {(task.modelSizes || []).length > 0 ? (task.modelSizes || []).join(', ') : '—'}
+                </p>
+              </div>
+              <div className="rounded border p-3">
+                <p className="text-xs uppercase text-muted-foreground mb-2">Adet (inline düzenleme)</p>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <Input
+                    type="number"
+                    min={1}
+                    value={qtyEdit}
+                    onChange={(e) => setQtyEdit(Number(e.target.value) || 1)}
+                    className="w-full sm:w-32"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={async () => {
+                      const qty = Math.max(1, Number(qtyEdit) || 1)
+                      const duration = Number(task.modelDurationMinutes || 0)
+                      const total = duration * qty
+                      await updateTask(task.id, {
+                        quantity: qty,
+                        totalPlannedMinutes: total,
+                        plannedHours: Number((total / 60).toFixed(2)),
+                      })
+                      toast({ title: 'Adet güncellendi', description: `${qty} adet` })
+                    }}
+                  >
+                    Kaydet
+                  </Button>
+                  <span className="text-xs text-muted-foreground">Güncel: {task.quantity || 1}</span>
+                </div>
+              </div>
+            </div>
+          )}
           <div>
             <p className="text-xs uppercase text-muted-foreground mb-1">Notlar</p>
             <p className="rounded-md border border-dashed border-border/70 bg-muted/30 p-3 text-sm">
@@ -1580,6 +1879,13 @@ function TaskModal({
       notes: '',
       plannedHours: task?.plannedHours ?? 0,
       plannedCost: task?.plannedCost ?? 0,
+      mode: (task as any)?.mode ?? 'manual',
+      modelCode: (task as any)?.modelCode ?? '',
+      variant: (task as any)?.variant ?? '',
+      quantity: (task as any)?.quantity ?? 1,
+      modelDurationMinutes: (task as any)?.modelDurationMinutes ?? 0,
+      totalPlannedMinutes: (task as any)?.totalPlannedMinutes ?? 0,
+      modelBladeDepth: (task as any)?.modelBladeDepth ?? '',
     },
   })
 
@@ -1587,6 +1893,35 @@ function TaskModal({
   const [droppedFiles, setDroppedFiles] = useState<File[]>([])
   const errors = form.formState.errors
   const { toast } = useToast()
+  const watchMode = form.watch('mode')
+  const watchModel = form.watch('modelCode')
+  const watchVariant = form.watch('variant')
+  const watchQty = form.watch('quantity')
+  const currentPreset = useMemo(
+    () => MODEL_PRESETS.find((m) => m.code === watchModel) || MODEL_PRESETS[0],
+    [watchModel]
+  )
+  useEffect(() => {
+    if (watchMode !== 'fixed') return
+    const preset = MODEL_PRESETS.find((m) => m.code === watchModel) || MODEL_PRESETS[0]
+    const variantObj = preset?.variants.find((v) => v.id === watchVariant)
+    if (preset && !watchModel) {
+      form.setValue('modelCode', preset.code)
+    }
+    if (preset) {
+      form.setValue('modelDurationMinutes', preset.baseDuration)
+      form.setValue('modelBladeDepth', preset.baseBlade || '')
+    }
+    if (variantObj) {
+      form.setValue('modelDurationMinutes', variantObj.duration)
+      form.setValue('modelBladeDepth', variantObj.blade || '')
+    }
+    const duration = variantObj?.duration ?? preset?.baseDuration ?? form.getValues('modelDurationMinutes') ?? 0
+    const qty = watchQty || 1
+    const total = Number(duration) * Number(qty)
+    form.setValue('totalPlannedMinutes', Number(total.toFixed(2)))
+    form.setValue('plannedHours', Number((total / 60).toFixed(2)))
+  }, [watchMode, watchModel, watchVariant, watchQty])
 
   const uploadAttachments = async (taskId: string, files: File[] | FileList | null) => {
     if (!files || (files as FileList).length === 0) return
@@ -1652,7 +1987,7 @@ function TaskModal({
   return (
     <Dialog>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{task ? 'Görevi düzenle' : 'Görev oluştur'}</DialogTitle>
         </DialogHeader>
@@ -1660,7 +1995,21 @@ function TaskModal({
           className="space-y-3"
           onSubmit={form.handleSubmit(async (values) => {
             try {
-              await onSubmit(values as any)
+              const payload = { ...values }
+              if (payload.mode === 'fixed') {
+                const preset = MODEL_PRESETS.find((m) => m.code === payload.modelCode) || MODEL_PRESETS[0]
+                const variantObj = preset?.variants.find((v) => v.id === payload.variant)
+                const duration = variantObj?.duration ?? payload.modelDurationMinutes ?? 0
+                const qty = payload.quantity ?? 1
+                const total = Number(duration) * Number(qty)
+                payload.modelDurationMinutes = duration
+                payload.modelBladeDepth = payload.modelBladeDepth || variantObj?.blade || ''
+                payload.totalPlannedMinutes = Number(total.toFixed(2))
+                payload.plannedHours = Number((total / 60).toFixed(2))
+                ;(payload as any).modelSizes = preset?.sizes || []
+                payload.modelCode = payload.modelCode || preset?.code || ''
+              }
+              await onSubmit(payload as any)
               if (task?.id) {
                 const buffered = droppedFiles.length > 0 ? droppedFiles : fileInputRef.current?.files ?? null
                 await uploadAttachments(task.id, buffered)
@@ -1688,7 +2037,96 @@ function TaskModal({
             <Input {...form.register('title')} className={cn(errors.title && 'border-destructive')} />
             <FormError message={errors.title?.message} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-3 rounded-md border p-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div>
+                <Label>Görev modu</Label>
+                <Select value={form.watch('mode')} onValueChange={(v) => form.setValue('mode', v as any)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="manual">Manuel</SelectItem>
+                    <SelectItem value="fixed">Sabit (model bazlı)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {form.watch('mode') === 'fixed' && (
+                <div>
+                  <Label>Adet</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    {...form.register('quantity', { valueAsNumber: true })}
+                    className={cn(errors.quantity && 'border-destructive')}
+                  />
+                  <FormError message={errors.quantity?.message as any} />
+                </div>
+              )}
+            </div>
+            {form.watch('mode') === 'fixed' && (
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div>
+                  <Label>Model</Label>
+                  <Select value={form.watch('modelCode') || MODEL_PRESETS[0].code} onValueChange={(v) => form.setValue('modelCode', v)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-64 overflow-y-auto">
+                      {MODEL_PRESETS.map((m) => (
+                        <SelectItem key={m.code} value={m.code}>
+                          {m.code}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormError message={errors.modelCode?.message as any} />
+                </div>
+                <div>
+                  <Label>Varyant</Label>
+                  <Select value={form.watch('variant') || ''} onValueChange={(v) => form.setValue('variant', v)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Varyant seç" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(currentPreset?.variants || []).map((v) => (
+                        <SelectItem key={v.id} value={v.id}>
+                          {v.label} ({v.duration} dk)
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormError message={errors.variant?.message as any} />
+                </div>
+                <div>
+                  <Label>Model süresi (dk)</Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    {...form.register('modelDurationMinutes', { valueAsNumber: true })}
+                    className={cn(errors.modelDurationMinutes && 'border-destructive')}
+                  />
+                </div>
+                <div>
+                  <Label>Toplam planlanan (dk)</Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    {...form.register('totalPlannedMinutes', { valueAsNumber: true })}
+                    className={cn(errors.totalPlannedMinutes && 'border-destructive')}
+                  />
+                </div>
+                <div>
+                  <Label>Bıçak derinliği</Label>
+                  <Input {...form.register('modelBladeDepth')} />
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Ölçüler: {(currentPreset?.sizes || []).join(', ')}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div>
               <Label>Sahip</Label>
               <Select value={form.watch('owner')} onValueChange={(v) => form.setValue('owner', v)}>
@@ -1741,7 +2179,7 @@ function TaskModal({
             </Select>
           </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div>
               <Label>Durum</Label>
               <Select value={form.watch('status')} onValueChange={(v) => form.setValue('status', v as any)}>
@@ -1769,7 +2207,7 @@ function TaskModal({
               </Select>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <div>
               <Label>Başlangıç</Label>
               <Input type="datetime-local" {...form.register('start')} className={cn(errors.start && 'border-destructive')} />

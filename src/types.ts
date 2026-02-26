@@ -152,12 +152,24 @@ export interface Task {
   status: 'todo' | 'in-progress' | 'done'
   assignee?: string
   teamId?: string
+  currentTeam?: string
+  mode?: 'manual' | 'fixed'
+  modelCode?: string
+  variant?: string
+  quantity?: number
+  modelDurationMinutes?: number
+  totalPlannedMinutes?: number
+  modelBladeDepth?: string
+  modelSizes?: string[]
   start?: string
   end?: string
   priority?: 'low' | 'medium' | 'high'
   tags?: string[]
   plannedHours?: number
   plannedCost?: number
+  handoverReason?: string
+  handoverAt?: string
+  handoverHistory?: any[]
   attachments?: Attachment[]
   comments?: TaskComment[]
   checklist?: TaskChecklistItem[]
@@ -234,6 +246,8 @@ export interface TaskTimeEntry {
   task: string
   user?: string
   user_name?: string
+  team?: string
+  section?: string
   started_at: string
   ended_at?: string
   note?: string

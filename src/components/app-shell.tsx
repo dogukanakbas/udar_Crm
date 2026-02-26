@@ -84,6 +84,7 @@ const nav = [
     children: [{ label: 'Ticketlar', to: '/support/tickets' }],
   },
   { label: 'Görevler', to: '/tasks', icon: ClipboardCheckIcon, roles: ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse', 'Worker'] },
+  { label: 'Çalışan Takibi', to: '/worker-tracking', icon: Activity, roles: ['Admin', 'Manager'] },
   { label: 'Takvim', to: '/calendar', icon: CalendarIconMini, roles: ['Admin', 'Manager', 'Sales', 'Support'] },
   { label: 'Raporlar', to: '/reports', icon: BarChart3, roles: ['Admin', 'Manager', 'Finance'] },
   { label: 'Ayarlar', to: '/settings', icon: Settings, roles: ['Admin', 'Manager'] },

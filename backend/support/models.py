@@ -31,11 +31,20 @@ class TicketMessage(models.Model):
 class Task(models.Model):
     STATUSES = [('todo', 'todo'), ('in-progress', 'in-progress'), ('done', 'done')]
     PRIORITIES = [('low', 'low'), ('medium', 'medium'), ('high', 'high')]
+    MODES = [('manual', 'manual'), ('fixed', 'fixed')]
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='tasks')
     title = models.CharField(max_length=255)
     owner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='tasks_owned')
     assignee = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='tasks_assigned')
     team = models.ForeignKey('accounts.Team', on_delete=models.SET_NULL, null=True, blank=True, related_name='tasks')
+    mode = models.CharField(max_length=20, choices=MODES, default='manual')
+    model_code = models.CharField(max_length=50, blank=True, default='')
+    variant = models.CharField(max_length=50, blank=True, default='')
+    quantity = models.PositiveIntegerField(default=1)
+    model_duration_minutes = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    total_planned_minutes = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    model_blade_depth = models.CharField(max_length=50, blank=True, default='')
+    model_sizes = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=20, choices=STATUSES, default='todo')
     priority = models.CharField(max_length=20, choices=PRIORITIES, default='medium')
     start = models.DateTimeField(null=True, blank=True)
@@ -44,6 +53,10 @@ class Task(models.Model):
     tags = models.JSONField(default=list, blank=True)
     planned_hours = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     planned_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    current_team = models.ForeignKey('accounts.Team', on_delete=models.SET_NULL, null=True, blank=True, related_name='tasks_current')
+    handover_reason = models.CharField(max_length=255, blank=True, default='')
+    handover_at = models.DateTimeField(null=True, blank=True)
+    handover_history = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -104,6 +117,8 @@ class TaskComment(models.Model):
 class TaskTimeEntry(models.Model):
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='time_entries')
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    team = models.ForeignKey('accounts.Team', on_delete=models.SET_NULL, null=True, blank=True)
+    section = models.CharField(max_length=100, blank=True, default='')
     started_at = models.DateTimeField()
     ended_at = models.DateTimeField(null=True, blank=True)
     note = models.CharField(max_length=255, blank=True, default='')

@@ -2,7 +2,7 @@ services:
   db:
     image: postgres:15
     env_file:
-      - ./backend/.env.prod
+      - ./backend/.env
     environment:
       - POSTGRES_DB
       - POSTGRES_USER
@@ -20,7 +20,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     env_file:
-      - ./backend/.env.prod
+      - ./backend/.env
     depends_on:
       - db
       - redis
@@ -34,7 +34,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     env_file:
-      - ./backend/.env.prod
+      - ./backend/.env
     command: ["celery", "-A", "core", "worker", "-l", "info"]
     depends_on:
       - db
@@ -46,7 +46,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     env_file:
-      - ./backend/.env.prod
+      - ./backend/.env
     command: ["celery", "-A", "core", "beat", "-l", "info"]
     depends_on:
       - db

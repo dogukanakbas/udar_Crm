@@ -11,18 +11,29 @@ import { TicketsPage } from '@/pages/support'
 import { TasksPage, TaskDetailPage } from '@/pages/tasks'
 import { QuotesPage, QuoteDetailPage } from '@/pages/quotes'
 import { CalendarPage } from '@/pages/calendar'
+import { WorkerTrackingPage } from '@/pages/worker-tracking'
 import { LoginPage } from '@/pages/login'
 import { ActivatePage } from '@/pages/activate'
 import AccessLogsPage from '@/pages/access-logs'
 import { getTokens } from '@/lib/auth'
+import { useAppStore } from '@/state/use-app-store'
 
 const rootRoute = new RootRoute({
   component: AppShell,
-  beforeLoad: ({ location }) => {
+  beforeLoad: async ({ location }) => {
     if (location.pathname === '/login' || location.pathname === '/activate') return
     const tokens = getTokens()
     if (!tokens) {
       throw redirect({ to: '/login' })
+    }
+    
+    // CRITICAL: Her route değişiminde verileri tazele (stale data önleme)
+    try {
+      const store = useAppStore.getState()
+      await store.hydrateFromApi()
+    } catch (err) {
+      console.error('Route hydration failed', err)
+      // Hata olsa bile route'a izin ver (offline durumlar için)
     }
   },
 })
@@ -141,6 +152,12 @@ const calendarRoute = new Route({
   component: CalendarPage,
 })
 
+const workerTrackingRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/worker-tracking',
+  component: WorkerTrackingPage,
+})
+
 const loginRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/login',
@@ -193,6 +210,7 @@ const routeTree = rootRoute.addChildren([
   tasksRoute,
   taskDetailRoute,
   calendarRoute,
+  workerTrackingRoute,
   reportsRoute,
   settingsRoute,
   accessLogsRoute,

@@ -11,6 +11,7 @@ export function LoginPage() {
   const [username, setUsername] = useState('admin')
   const [password, setPassword] = useState('password')
   const [loading, setLoading] = useState(false)
+  const [hydrating, setHydrating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const setRole = useAppStore((s) => s.setRole)
   const hydrate = useAppStore((s) => s.hydrateFromApi)
@@ -22,24 +23,32 @@ export function LoginPage() {
     setError(null)
     try {
       await login(username, password)
+      
+      // CRITICAL: Role bilgisi gelene kadar bekle
+      setHydrating(true)
       try {
         const me = await api.get('/auth/me/')
         if (me?.data?.role) {
           setRole(me.data.role)
+          localStorage.setItem('current-user-role', me.data.role)
         }
       } catch {
         /* ignore */
       }
-      // Yeni oturum için store'u tazele ve SSE başlat
+      
+      // Store'u tazele ve SSE başlat
       await hydrate()
       if (startSse) {
         startSse()
       }
+      setHydrating(false)
+      
       navigate({ to: '/' })
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'Giriş başarısız')
     } finally {
       setLoading(false)
+      setHydrating(false)
     }
   }
 
@@ -56,8 +65,8 @@ export function LoginPage() {
           <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required />
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
-        <Button type="submit" className="w-full" disabled={loading}>
-          {loading ? 'Giriş yapılıyor...' : 'Giriş yap'}
+        <Button type="submit" className="w-full" disabled={loading || hydrating}>
+          {hydrating ? 'Yükleniyor...' : loading ? 'Giriş yapılıyor...' : 'Giriş yap'}
         </Button>
         <p className="text-xs text-slate-500">Demo kullanıcı: admin / password</p>
       </form>

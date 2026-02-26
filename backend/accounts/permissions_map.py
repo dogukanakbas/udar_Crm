@@ -47,10 +47,11 @@ DEFAULT_ROLE_PERMS = {
     ],
     "Support": ["tickets.view", "tickets.edit", "tasks.view", "tasks.edit"],
     "Warehouse": ["products.view", "orders.view", "orders.receive", "inventory.view", "inventory.edit", "logistics.view", "logistics.edit"],
-    # Worker: saha/operasyon kullanıcıları için genişletilmiş salt-okuma + görev düzenleme
+    # Worker: saha/operasyon kullanıcıları için genişletilmiş salt-okuma + görev düzenleme + devir
     "Worker": [
         "tasks.view",
         "tasks.edit",
+        "tasks.handover",
         "products.view",
         "partners.view",
         "contacts.view",

@@ -65,6 +65,9 @@ class TaskSerializer(serializers.ModelSerializer):
             'assignee': {'required': False, 'allow_null': True},
             'organization': {'required': False},
             'team': {'required': False, 'allow_null': True},
+            'current_team': {'required': False, 'allow_null': True},
+            'handover_reason': {'required': False, 'allow_null': True},
+            'handover_at': {'required': False, 'allow_null': True},
             'planned_hours': {'required': False, 'allow_null': True},
             'planned_cost': {'required': False, 'allow_null': True},
         }
@@ -83,6 +86,20 @@ class TaskSerializer(serializers.ModelSerializer):
             val = attrs.get(field)
             if val in (None, '', 'null'):
                 attrs[field] = 0
+        # current_team yoksa team'e eşitle
+        if not attrs.get('current_team') and getattr(self.instance, 'current_team', None) is None:
+            attrs['current_team'] = attrs.get('team') or getattr(self.instance, 'team', None)
+        # Fixed görevler için süre/adet hesapla
+        mode = attrs.get('mode') or getattr(self.instance, 'mode', 'manual')
+        if mode == 'fixed':
+            qty = attrs.get('quantity') or getattr(self.instance, 'quantity', 1) or 1
+            duration = attrs.get('model_duration_minutes') or getattr(self.instance, 'model_duration_minutes', 0) or 0
+            total = attrs.get('total_planned_minutes') or 0
+            if not total or float(total) == 0:
+                total = float(duration) * int(qty)
+                attrs['total_planned_minutes'] = total
+            if attrs.get('planned_hours') in (None, 0, '', 'null') and total:
+                attrs['planned_hours'] = round(float(total) / 60, 2)
         # Tarih aralığı doğrulaması
         start = attrs.get('start')
         end = attrs.get('end')
@@ -111,7 +128,7 @@ class TaskTimeEntrySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TaskTimeEntry
-        fields = ['id', 'task', 'user', 'user_name', 'started_at', 'ended_at', 'note', 'created_at']
+        fields = ['id', 'task', 'user', 'user_name', 'team', 'section', 'started_at', 'ended_at', 'note', 'created_at']
         read_only_fields = ['user_name', 'created_at']
 
     def get_user_name(self, obj):

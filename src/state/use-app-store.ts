@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist, createJSONStorage } from 'zustand/middleware'
 
 import api from '@/lib/api'
 import { clearTokens, getTokens } from '@/lib/auth'
@@ -122,7 +123,9 @@ const mapQuote = (q: any, idx = 0) => ({
   terms: { payment: q.payment_terms || '', delivery: q.delivery_terms || '' },
 })
 
-export const useAppStore = create<AppState>((set, get) => ({
+export const useAppStore = create<AppState>()(
+  persist(
+    (set, get) => ({
   data: emptySnapshot,
   resetDemo: () => set(() => ({ data: emptySnapshot })),
   logAccess: (action, meta) => {
@@ -159,6 +162,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const meRes = await api.get('/auth/me/')
       const userRole = meRes.data?.role as Role | undefined
+      // current user bilgilerini lokal sakla (UI tarafında filtre varsayılanları için)
+      if (meRes.data?.id) {
+        try {
+          localStorage.setItem('current-user-id', String(meRes.data.id))
+        } catch {
+          /* ignore */
+        }
+      }
+      try {
+        localStorage.setItem('current-user-role', String(userRole || 'Worker'))
+      } catch {
+        /* ignore */
+      }
       // Role bilgisini hemen state'e yaz (UI guard’ları için)
       set((state) => ({
         data: { ...state.data, settings: { ...state.data.settings, role: (userRole as Role) || 'Worker' } },
@@ -490,6 +506,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     })(),
   updateOpportunityStage: (id, stage) =>
     (async () => {
+      const prev = get().data.opportunities
+      const optimistic = prev.map((o) => (String(o.id) === String(id) ? { ...o, stage } : o))
+      set((state) => ({ data: { ...state.data, opportunities: optimistic } }))
+      
       try {
         await api.patch(`/opportunities/${id}/`, {
           stage,
@@ -498,6 +518,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         await get().hydrateFromApi()
       } catch (err) {
         console.error('API updateOpportunityStage failed', err)
+        set((state) => ({ data: { ...state.data, opportunities: prev } }))
+        
+        // CRITICAL: Kullanıcıyı bilgilendir
+        import('@/components/ui/use-toast').then(({ toast }) => {
+          toast({
+            title: 'Değişiklik Kaydedilemedi',
+            description: 'Fırsat aşaması güncellenemedi, lütfen tekrar deneyin',
+            variant: 'destructive',
+          })
+        })
       }
     })(),
   addTicketMessage: (id, message) =>
@@ -544,6 +574,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     })(),
   adjustInventory: (sku, delta) =>
     (async () => {
+      const prev = get().data.products
+      const optimistic = prev.map((p) => 
+        p.sku === sku ? { ...p, stock: p.stock + delta } : p
+      )
+      set((state) => ({ data: { ...state.data, products: optimistic } }))
+      
       try {
         await api.post('/stock-movements/', {
           movement_type: delta >= 0 ? 'IN' : 'OUT',
@@ -554,6 +590,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         await get().hydrateFromApi()
       } catch (err) {
         console.error('API adjustInventory failed', err)
+        set((state) => ({ data: { ...state.data, products: prev } }))
+        
+        // CRITICAL: Kullanıcıyı bilgilendir
+        import('@/components/ui/use-toast').then(({ toast }) => {
+          toast({
+            title: 'Değişiklik Kaydedilemedi',
+            description: 'Stok güncellenemedi, lütfen tekrar deneyin',
+            variant: 'destructive',
+          })
+        })
       }
     })(),
   upsertProduct: async (product) => {
@@ -601,8 +647,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         team: task.teamId ? Number(task.teamId) : null,
         planned_hours: (task as any).plannedHours,
         planned_cost: (task as any).plannedCost,
+        mode: (task as any).mode || 'manual',
+        model_code: (task as any).modelCode || '',
+        variant: (task as any).variant || '',
+        quantity: (task as any).quantity ?? 1,
+        model_duration_minutes: (task as any).modelDurationMinutes ?? 0,
+        total_planned_minutes: (task as any).totalPlannedMinutes ?? 0,
+        model_blade_depth: (task as any).modelBladeDepth || '',
+        model_sizes: (task as any).modelSizes || [],
       }
       delete (payload as any).teamId
+      delete (payload as any).modelCode
+      delete (payload as any).modelDurationMinutes
+      delete (payload as any).totalPlannedMinutes
+      delete (payload as any).modelBladeDepth
       await api.post('/tasks/', payload)
       await get().hydrateFromApi()
     } catch (err) {
@@ -625,11 +683,28 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
         if ('plannedHours' in payload) payload.planned_hours = (payload as any).plannedHours
         if ('plannedCost' in payload) payload.planned_cost = (payload as any).plannedCost
+        if ('mode' in payload) payload.mode = (payload as any).mode
+        if ('modelCode' in payload) payload.model_code = (payload as any).modelCode
+        if ('variant' in payload) payload.variant = (payload as any).variant
+        if ('quantity' in payload) payload.quantity = (payload as any).quantity
+        if ('modelDurationMinutes' in payload) payload.model_duration_minutes = (payload as any).modelDurationMinutes
+        if ('totalPlannedMinutes' in payload) payload.total_planned_minutes = (payload as any).totalPlannedMinutes
+        if ('modelBladeDepth' in payload) payload.model_blade_depth = (payload as any).modelBladeDepth
+        if ('modelSizes' in payload) payload.model_sizes = (payload as any).modelSizes
         await api.patch(`/tasks/${id}/`, payload)
         await get().hydrateFromApi()
       } catch (err) {
         console.error('API updateTask failed', err)
         set((state) => ({ data: { ...state.data, tasks: prev } }))
+        
+        // CRITICAL: Kullanıcıyı bilgilendir
+        import('@/components/ui/use-toast').then(({ toast }) => {
+          toast({
+            title: 'Değişiklik Kaydedilemedi',
+            description: 'Görev güncellenemedi, lütfen tekrar deneyin',
+            variant: 'destructive',
+          })
+        })
       }
     })(),
 
@@ -645,6 +720,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       } catch (err) {
         console.error('API moveTask failed', err)
         set((state) => ({ data: { ...state.data, tasks: prev } }))
+        
+        // CRITICAL: Kullanıcıyı bilgilendir
+        import('@/components/ui/use-toast').then(({ toast }) => {
+          toast({
+            title: 'Değişiklik Kaydedilemedi',
+            description: 'Görev durumu güncellenemedi, lütfen tekrar deneyin',
+            variant: 'destructive',
+          })
+        })
       }
     })(),
   deleteTask: (id) =>
@@ -688,6 +772,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       } catch (err) {
         console.error('API toggleChecklistItem failed', err)
         set((state) => ({ data: { ...state.data, tasks: prev } }))
+        
+        // CRITICAL: Kullanıcıyı bilgilendir
+        import('@/components/ui/use-toast').then(({ toast }) => {
+          toast({
+            title: 'Değişiklik Kaydedilemedi',
+            description: 'Checklist güncellenemedi, lütfen tekrar deneyin',
+            variant: 'destructive',
+          })
+        })
       }
     })(),
   deleteAttachment: (id) =>
@@ -777,6 +870,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       console.error('API deletePricingRule failed', err)
     }
   },
-}))
+    }),
+    {
+      name: 'udar-app-storage',
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        // Sadece kritik verileri persist et, SSE ve geçici verileri hariç tut
+        data: {
+          ...state.data,
+          // today verilerini persist etme (her seferinde API'den gelsin)
+          today: { tasks: [], meetings: [], overdueInvoices: [], lowStockSkus: [] },
+        },
+      }),
+    }
+  )
+)
 
 

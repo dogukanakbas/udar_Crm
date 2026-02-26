@@ -17,23 +17,58 @@ api.interceptors.request.use((config) => {
 })
 
 let refreshing: Promise<string | null> | null = null
+let refreshToastDismiss: (() => void) | null = null
 
 async function refreshToken(refresh: string): Promise<string | null> {
-  const resp = await axios.post(`${baseURL}/auth/refresh/`, { refresh })
-  const data = resp.data as { access?: string }
-  if (data?.access) {
-    const tokens = getTokens()
-    const newTokens: Tokens = { access: data.access, refresh: tokens?.refresh || refresh }
-    saveTokens(newTokens)
-    return data.access
+  // Loading toast göster (sadece bir kez)
+  if (!refreshToastDismiss) {
+    import('@/components/ui/use-toast').then(({ toast }) => {
+      const result = toast({
+        title: 'Oturum yenileniyor...',
+        description: 'Lütfen bekleyin',
+      })
+      refreshToastDismiss = result.dismiss
+    })
   }
-  return null
+  
+  try {
+    const resp = await axios.post(`${baseURL}/auth/refresh/`, { refresh })
+    const data = resp.data as { access?: string }
+    if (data?.access) {
+      const tokens = getTokens()
+      const newTokens: Tokens = { access: data.access, refresh: tokens?.refresh || refresh }
+      saveTokens(newTokens)
+      return data.access
+    }
+    return null
+  } finally {
+    // Toast'u kapat
+    if (refreshToastDismiss) {
+      refreshToastDismiss()
+      refreshToastDismiss = null
+    }
+  }
 }
 
 api.interceptors.response.use(
   (resp) => resp,
   async (error) => {
     const original = error.config
+    
+    // 403: Yetki yok - Kullanıcıyı bilgilendir
+    if (error.response?.status === 403) {
+      // Toast dinamik import (circular dependency önlemek için)
+      import('@/components/ui/use-toast').then(({ toast }) => {
+        toast({
+          title: 'Yetki Hatası',
+          description: 'Bu işlem için yetkiniz yok',
+          variant: 'destructive',
+        })
+      })
+      return Promise.reject(error)
+    }
+    
+    // 401: Token refresh dene
     if (error.response?.status === 401 && !original.__isRetryRequest) {
       const tokens = getTokens()
       if (tokens?.refresh) {
@@ -50,6 +85,10 @@ api.interceptors.response.use(
         }
       }
       clearTokens()
+      // Login sayfasında değilsek yönlendir
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+        window.location.replace('/login')
+      }
     }
     return Promise.reject(error)
   }
