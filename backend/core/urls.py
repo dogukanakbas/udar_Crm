@@ -37,6 +37,10 @@ from support.views import (
     AutomationRuleViewSet,
     TaskTimeEntryViewSet,
 )
+# NEW: Product website imports
+from blog.views import PublicBlogViewSet, AdminBlogViewSet, BlogCategoryViewSet
+from contact.views import contact_form_submit, AdminContactViewSet
+from tenants.views import AdminTenantViewSet, AdminPlanViewSet, AdminSubscriptionViewSet
 
 router = routers.DefaultRouter()
 router.register(r'quotes', QuoteViewSet, basename='quotes')
@@ -64,6 +68,17 @@ router.register(r'automation-rules', AutomationRuleViewSet, basename='automation
 router.register(r'task-time-entries', TaskTimeEntryViewSet, basename='task-time-entries')
 router.register(r'teams', TeamViewSet, basename='teams')
 
+# NEW: Public APIs (no auth required)
+router.register(r'v1/blog', PublicBlogViewSet, basename='public-blog')
+router.register(r'v1/blog-categories', BlogCategoryViewSet, basename='blog-categories')
+
+# NEW: Admin APIs (superadmin only)
+router.register(r'v1/admin/blog', AdminBlogViewSet, basename='admin-blog')
+router.register(r'v1/admin/contact', AdminContactViewSet, basename='admin-contact')
+router.register(r'v1/admin/tenants', AdminTenantViewSet, basename='admin-tenants')
+router.register(r'v1/admin/plans', AdminPlanViewSet, basename='admin-plans')
+router.register(r'v1/admin/subscriptions', AdminSubscriptionViewSet, basename='admin-subscriptions')
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
@@ -78,4 +93,6 @@ urlpatterns = [
     path('api/calendar/ics/', CalendarICSView.as_view(), name='calendar-ics'),
     path('api/stream/', SSEView.as_view(), name='sse-stream'),
     path('api/health/', health, name='health'),
+    # NEW: Contact form (public, rate limited)
+    path('api/v1/contact/', contact_form_submit, name='contact-submit'),
 ]

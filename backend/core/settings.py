@@ -30,6 +30,10 @@ INSTALLED_APPS = [
     'workflow',
     'audit.apps.AuditConfig',
     'support',
+    # New apps for product website
+    'tenants',
+    'blog',
+    'contact',
 ]
 
 MIDDLEWARE = [

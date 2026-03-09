@@ -38,6 +38,7 @@ class User(AbstractUser):
     notification_prefs = models.JSONField(default=dict, blank=True)
     otp_enabled = models.BooleanField(default=False)
     otp_secret = models.CharField(max_length=64, blank=True, default='')
+    is_superadmin = models.BooleanField(default=False, help_text='Platform owner/superadmin access')
 
     def __str__(self):
         return f"{self.username} ({self.role})"

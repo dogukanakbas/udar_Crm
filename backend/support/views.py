@@ -42,17 +42,14 @@ class OrgScopedMixin:
 
 
 FACTORY_CHECKLIST = [
-    "Depo - MDF İnişi",
+    "PVC Dilimleme",
     "MDF Dilimleme",
-    "Yarı Otomatik Hat #1",
-    "Yarı Otomatik Hat #2",
-    "Tam Otomatik Hat",
-    "PWC Sarma",
-    "Vakum Odası",
-    "Birleştirme",
-    "Pres",
-    "Ebatlama",
-    "Kalite Kontrol / Çıkış",
+    "CNC",
+    "Laminasyon + Laminasyon Vakum",
+    "Kanat Hattı",
+    "Kasa Hattı",
+    "Pervaz Hattı",
+    "Paketleme",
 ]
 
 class TicketViewSet(OrgScopedMixin, viewsets.ModelViewSet):

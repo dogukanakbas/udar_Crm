@@ -44,6 +44,7 @@ class MeView(APIView):
         "last_name": user.last_name,
         "role": getattr(user, "role", None),
         "organization": user.organization.id if user.organization else None,
+        "is_superadmin": getattr(user, "is_superadmin", False),  # NEW: for auth gateway
       }
     )
 
