@@ -29,6 +29,17 @@ import { downloadCsv } from '@/utils/download-csv'
 import { downloadICS } from '@/utils/ics'
 import { cn } from '@/lib/utils'
 import type { TaskTimeEntry } from '@/types'
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 const MENTION_REGEX = /@([\w.-]+)/g
 const MAX_FILE_MB = 10
@@ -169,6 +180,20 @@ const taskSchema = z
     (v) => v.mode === 'manual' || (v.modelCode && v.variant && v.quantity && v.quantity > 0),
     { message: 'Model ve varyant seçilmeli', path: ['modelCode'] }
   )
+
+function parseBladeMin(v: string | undefined): string {
+  if (!v) return ''
+  const parts = v.split('-')
+  if (parts[0]?.trim()) return parts[0].trim()
+  return v.match(/[\d.]+/)?.[0] || ''
+}
+function parseBladeMax(v: string | undefined): string {
+  if (!v) return ''
+  const parts = v.split('-')
+  if (parts[1]?.trim()) return parts[1].trim()
+  const num = v.match(/[\d.]+/)?.[0]
+  return num || ''
+}
 
 const slaStatus = (task: Task) => {
   const due = task.due || task.end
@@ -680,23 +705,25 @@ export function TasksPage() {
                 <TabsTrigger value="workload">İş yükü</TabsTrigger>
               </TabsList>
             </Tabs>
-            <RbacGuard perm="tasks.edit">
-              <TaskModal
-                users={data.users}
-                teams={data.teams}
-                uploading={uploading}
-                setUploading={setUploading}
-                onSubmit={(values) => {
-                  createTask(values as any)
-                  toast({ title: 'Görev oluşturuldu' })
-                }}
-              >
-                <Button size="sm">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Görev oluştur
-                </Button>
-              </TaskModal>
-            </RbacGuard>
+            {data.settings.role !== 'Worker' && (
+              <RbacGuard perm="tasks.edit">
+                <TaskModal
+                  users={data.users}
+                  teams={data.teams}
+                  uploading={uploading}
+                  setUploading={setUploading}
+                  onSubmit={(values) => {
+                    createTask(values as any)
+                    toast({ title: 'Görev oluşturuldu' })
+                  }}
+                >
+                  <Button size="sm">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Görev oluştur
+                  </Button>
+                </TaskModal>
+              </RbacGuard>
+            )}
           <Button size="sm" variant="outline" onClick={exportCsv}>
             <Download className="mr-2 h-4 w-4" />
             CSV dışa aktar
@@ -1280,10 +1307,49 @@ export function TasksPage() {
   )
 }
 
+function SortableChecklistItem({
+  item,
+  onToggle,
+}: {
+  item: { id: string; title: string; done: boolean }
+  onToggle: (checked: boolean) => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        'flex items-center gap-3 rounded border px-3 py-2',
+        isDragging && 'opacity-70 shadow-md z-10'
+      )}
+    >
+      <span
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing touch-none text-muted-foreground hover:text-foreground mr-1"
+        aria-label="Sırayı değiştir"
+      >
+        ⋮⋮
+      </span>
+      <Checkbox checked={item.done} onCheckedChange={(c) => onToggle(Boolean(c))} />
+      <span className={`text-sm flex-1 ${item.done ? 'line-through text-muted-foreground' : ''}`}>{item.title}</span>
+    </div>
+  )
+}
+
 export function TaskDetailPage() {
   const { taskId } = useParams({ from: '/tasks/$taskId' })
-  const { data, updateTask, addTaskComment, addChecklistItem, toggleChecklistItem, deleteAttachment, addTimeEntry, updateAttachment } =
+  const { data, updateTask, addTaskComment, addChecklistItem, toggleChecklistItem, reorderChecklistItems, deleteAttachment, addTimeEntry, updateAttachment } =
     useAppStore()
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
   const task = data.tasks.find((t) => t.id === taskId)
   const { toast } = useToast()
   const quantityInitial = task?.quantity ?? 1
@@ -1486,6 +1552,22 @@ export function TaskDetailPage() {
             <DetailRow label="Ekip" value={teamName || '—'} />
             <DetailRow label="Başlangıç" value={formatDate(task.start ?? '')} />
             <DetailRow label="Bitiş" value={formatDate(task.end ?? '')} />
+            <div className="space-y-1">
+              <p className="text-xs uppercase text-muted-foreground">Vade tarihi</p>
+              <RbacGuard perm="tasks.edit" fallback={<p className="font-medium">{task.due ? formatDate(task.due) : '—'}</p>}>
+                <Input
+                  type="datetime-local"
+                  value={task.due ? new Date(task.due).toISOString().slice(0, 16) : ''}
+                  onChange={async (e) => {
+                    const val = e.target.value
+                    if (!val) return
+                    await updateTask(task.id, { due: new Date(val).toISOString() })
+                    toast({ title: 'Vade tarihi güncellendi' })
+                  }}
+                  className="max-w-[200px]"
+                />
+              </RbacGuard>
+            </div>
             <div className="flex items-center gap-2 text-sm">
               <span className="text-xs uppercase text-muted-foreground">SLA</span>
               {slaStatus(task) ? (
@@ -1609,18 +1691,54 @@ export function TaskDetailPage() {
             </div>
             <div className="space-y-2">
               {checklist.length === 0 && <p className="text-sm text-muted-foreground">Checklist boş</p>}
-              {checklist.map((item) => (
-                <div key={item.id} className="flex items-center gap-3 rounded border px-3 py-2">
-                  <Checkbox
-                    checked={item.done}
-                    onCheckedChange={async (checked) => {
-                      await toggleChecklistItem(item.id, Boolean(checked))
-                      toast({ title: 'Checklist güncellendi' })
-                    }}
-                  />
-                  <span className={`text-sm ${item.done ? 'line-through text-muted-foreground' : ''}`}>{item.title}</span>
-                </div>
-              ))}
+              <RbacGuard
+                perm="tasks.edit"
+                fallback={
+                  <div className="space-y-2">
+                    {checklist.map((item) => (
+                      <div key={item.id} className="flex items-center gap-3 rounded border px-3 py-2">
+                        <Checkbox
+                          checked={item.done}
+                          onCheckedChange={async (checked) => {
+                            await toggleChecklistItem(item.id, Boolean(checked))
+                            toast({ title: 'Checklist güncellendi' })
+                          }}
+                        />
+                        <span className={`text-sm ${item.done ? 'line-through text-muted-foreground' : ''}`}>{item.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                }
+              >
+                <DndContext
+                  sensors={dndSensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={(e: DragEndEvent) => {
+                    const { active, over } = e
+                    if (!over || active.id === over.id) return
+                    const ids = checklist.map((c) => String(c.id))
+                    const oldIdx = ids.indexOf(String(active.id))
+                    const newIdx = ids.indexOf(String(over.id))
+                    if (oldIdx === -1 || newIdx === -1) return
+                    const reordered = arrayMove(ids, oldIdx, newIdx)
+                    reorderChecklistItems(task.id, reordered)
+                    toast({ title: 'Sıra güncellendi' })
+                  }}
+                >
+                  <SortableContext items={checklist.map((c) => String(c.id))} strategy={verticalListSortingStrategy}>
+                    {checklist.map((item) => (
+                      <SortableChecklistItem
+                        key={item.id}
+                        item={item}
+                        onToggle={async (checked) => {
+                          await toggleChecklistItem(item.id, Boolean(checked))
+                          toast({ title: 'Checklist güncellendi' })
+                        }}
+                      />
+                    ))}
+                  </SortableContext>
+                </DndContext>
+              </RbacGuard>
             </div>
           </div>
           <div className="space-y-2">
@@ -1897,6 +2015,9 @@ function TaskModal({
   const watchModel = form.watch('modelCode')
   const watchVariant = form.watch('variant')
   const watchQty = form.watch('quantity')
+  const watchDuration = form.watch('modelDurationMinutes')
+  const watchStart = form.watch('start')
+  const watchTotalPlanned = form.watch('totalPlannedMinutes')
   const currentPreset = useMemo(
     () => MODEL_PRESETS.find((m) => m.code === watchModel) || MODEL_PRESETS[0],
     [watchModel]
@@ -1910,11 +2031,15 @@ function TaskModal({
     }
     if (preset) {
       form.setValue('modelDurationMinutes', preset.baseDuration)
-      form.setValue('modelBladeDepth', preset.baseBlade || '')
+      const blade = preset.baseBlade || ''
+      const num = blade.match(/[\d.]+/)?.[0]
+      form.setValue('modelBladeDepth', num ? `${num}-${num}` : blade)
     }
     if (variantObj) {
       form.setValue('modelDurationMinutes', variantObj.duration)
-      form.setValue('modelBladeDepth', variantObj.blade || '')
+      const blade = variantObj.blade || ''
+      const num = blade.match(/[\d.]+/)?.[0]
+      form.setValue('modelBladeDepth', num ? `${num}-${num}` : blade)
     }
     const duration = variantObj?.duration ?? preset?.baseDuration ?? form.getValues('modelDurationMinutes') ?? 0
     const qty = watchQty || 1
@@ -1922,6 +2047,25 @@ function TaskModal({
     form.setValue('totalPlannedMinutes', Number(total.toFixed(2)))
     form.setValue('plannedHours', Number((total / 60).toFixed(2)))
   }, [watchMode, watchModel, watchVariant, watchQty])
+
+  // Manuel mod: süre veya adet değişince toplam planlanan süreyi hesapla
+  useEffect(() => {
+    if (watchMode !== 'manual') return
+    const duration = Number(watchDuration || 0)
+    const qty = Number(watchQty || 1)
+    const total = duration * qty
+    form.setValue('totalPlannedMinutes', Number(total.toFixed(2)))
+    form.setValue('plannedHours', Number((total / 60).toFixed(2)))
+  }, [watchMode, watchDuration, watchQty])
+
+  // Başlangıç tarihi değişince, toplam planlanan süre varsa bitiş tarihini otomatik hesapla
+  useEffect(() => {
+    if (!watchStart || !watchTotalPlanned || Number(watchTotalPlanned) <= 0) return
+    const startMs = new Date(watchStart).getTime()
+    const endMs = startMs + Number(watchTotalPlanned) * 60 * 1000
+    const endStr = new Date(endMs).toISOString().slice(0, 16)
+    form.setValue('end', endStr)
+  }, [watchStart, watchTotalPlanned])
 
   const uploadAttachments = async (taskId: string, files: File[] | FileList | null) => {
     if (!files || (files as FileList).length === 0) return
@@ -1993,7 +2137,7 @@ function TaskModal({
         </DialogHeader>
         <form
           className="space-y-3"
-          onSubmit={form.handleSubmit(async (values) => {
+            onSubmit={form.handleSubmit(async (values) => {
             try {
               const payload = { ...values }
               if (payload.mode === 'fixed') {
@@ -2008,6 +2152,12 @@ function TaskModal({
                 payload.plannedHours = Number((total / 60).toFixed(2))
                 ;(payload as any).modelSizes = preset?.sizes || []
                 payload.modelCode = payload.modelCode || preset?.code || ''
+              } else if (payload.mode === 'manual') {
+                const duration = Number(payload.modelDurationMinutes || 0)
+                const qty = Number(payload.quantity ?? 1)
+                const total = duration * qty
+                payload.totalPlannedMinutes = Number(total.toFixed(2))
+                payload.plannedHours = Number((total / 60).toFixed(2))
               }
               await onSubmit(payload as any)
               if (task?.id) {
@@ -2063,6 +2213,39 @@ function TaskModal({
                   <FormError message={errors.quantity?.message as any} />
                 </div>
               )}
+              {form.watch('mode') === 'manual' && (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3 col-span-2">
+                  <div>
+                    <Label>Adet</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      {...form.register('quantity', { valueAsNumber: true })}
+                      className={cn(errors.quantity && 'border-destructive')}
+                    />
+                  </div>
+                  <div>
+                    <Label>Model süresi (dk)</Label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      min={0}
+                      {...form.register('modelDurationMinutes', { valueAsNumber: true })}
+                      className={cn(errors.modelDurationMinutes && 'border-destructive')}
+                    />
+                  </div>
+                  <div>
+                    <Label>Toplam planlanan (dk)</Label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      readOnly
+                      {...form.register('totalPlannedMinutes', { valueAsNumber: true })}
+                      className="bg-muted"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
             {form.watch('mode') === 'fixed' && (
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -2116,9 +2299,36 @@ function TaskModal({
                     className={cn(errors.totalPlannedMinutes && 'border-destructive')}
                   />
                 </div>
-                <div>
-                  <Label>Bıçak derinliği</Label>
-                  <Input {...form.register('modelBladeDepth')} />
+                <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <Label>Bıçak derinliği (min-mm)</Label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      placeholder="1"
+                      value={parseBladeMin(form.watch('modelBladeDepth'))}
+                      onChange={(e) => {
+                        const min = e.target.value
+                        const max = parseBladeMax(form.watch('modelBladeDepth'))
+                        form.setValue('modelBladeDepth', max ? `${min}-${max}` : min)
+                      }}
+                    />
+                  </div>
+                  <span className="pt-6">–</span>
+                  <div className="flex-1">
+                    <Label>Bıçak derinliği (max-mm)</Label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      placeholder="3"
+                      value={parseBladeMax(form.watch('modelBladeDepth'))}
+                      onChange={(e) => {
+                        const max = e.target.value
+                        const min = parseBladeMin(form.watch('modelBladeDepth'))
+                        form.setValue('modelBladeDepth', min ? `${min}-${max}` : max)
+                      }}
+                    />
+                  </div>
                 </div>
                 <div className="text-xs text-muted-foreground">
                   Ölçüler: {(currentPreset?.sizes || []).join(', ')}

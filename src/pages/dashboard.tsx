@@ -10,10 +10,16 @@ import { useAppStore } from '@/state/use-app-store'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Switch } from '@/components/ui/switch'
 import { useEffect, useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import api from '@/lib/api'
 
 export function DashboardPage() {
   const { data } = useAppStore()
+  const isWorker = data.settings.role === 'Worker'
+  const currentUserId = typeof window !== 'undefined' ? localStorage.getItem('current-user-id') : null
+  const myTasks = (data.tasks || []).filter(
+    (t) => String(t.assignee) === String(currentUserId) && t.status !== 'done'
+  )
   const [pendingApprovals, setPendingApprovals] = useState<
     { id: string; quote_id: string; quote_number: string; role: string; status: string }[]
   >([])
@@ -107,6 +113,42 @@ export function DashboardPage() {
     inflow: inv.amount * 0.6,
     outflow: inv.amount * 0.35,
   }))
+
+  if (isWorker) {
+    return (
+      <div>
+        <PageHeader
+          title="Görevlerim"
+          description="Size atanan görevler"
+        />
+        <Card>
+          <CardHeader>
+            <CardTitle>Bana atanan görevler</CardTitle>
+            <CardDescription>Tıklayarak görev detayına gidebilirsiniz</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {myTasks.length === 0 ? (
+              <p className="text-muted-foreground">Size atanmış görev yok</p>
+            ) : (
+              <div className="space-y-2">
+                {myTasks.map((task) => (
+                  <Link
+                    key={task.id}
+                    to="/tasks/$taskId"
+                    params={{ taskId: task.id }}
+                    className="flex items-center justify-between rounded-lg border border-border/80 p-3 text-sm hover:bg-muted/50 transition-colors block"
+                  >
+                    <span className="font-semibold">{task.title}</span>
+                    <Badge variant="outline">{task.status}</Badge>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <div>

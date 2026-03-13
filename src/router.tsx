@@ -12,6 +12,7 @@ import { TasksPage, TaskDetailPage } from '@/pages/tasks'
 import { QuotesPage, QuoteDetailPage } from '@/pages/quotes'
 import { CalendarPage } from '@/pages/calendar'
 import { WorkerTrackingPage } from '@/pages/worker-tracking'
+import { WorkerDetailPage } from '@/pages/worker-detail'
 import { LoginPage } from '@/pages/login'
 import { ActivatePage } from '@/pages/activate'
 import AccessLogsPage from '@/pages/access-logs'
@@ -158,6 +159,12 @@ const workerTrackingRoute = new Route({
   component: WorkerTrackingPage,
 })
 
+const workerDetailRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/worker-tracking/$workerId',
+  component: WorkerDetailPage,
+})
+
 const loginRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/login',
@@ -211,6 +218,7 @@ const routeTree = rootRoute.addChildren([
   taskDetailRoute,
   calendarRoute,
   workerTrackingRoute,
+  workerDetailRoute,
   reportsRoute,
   settingsRoute,
   accessLogsRoute,

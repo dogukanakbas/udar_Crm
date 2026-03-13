@@ -55,6 +55,7 @@ type AppState = {
   addTaskComment: (payload: { task: string; text: string; type?: 'comment' | 'activity' }) => void
   addChecklistItem: (payload: { task: string; title: string }) => void
   toggleChecklistItem: (id: string, done: boolean) => void
+  reorderChecklistItems: (taskId: string, orderedIds: string[]) => void
   deleteAttachment: (id: string) => void
   updateAttachment: (id: string, patch: { description?: string; tags?: string[] }) => void
   addTimeEntry: (payload: { task: string; started_at: string; ended_at?: string; note?: string }) => void
@@ -781,6 +782,15 @@ export const useAppStore = create<AppState>()(
             variant: 'destructive',
           })
         })
+      }
+    })(),
+  reorderChecklistItems: (taskId, orderedIds) =>
+    (async () => {
+      try {
+        await api.post('/task-checklist/reorder/', { task: taskId, order: orderedIds })
+        await get().hydrateFromApi()
+      } catch (err) {
+        console.error('API reorderChecklistItems failed', err)
       }
     })(),
   deleteAttachment: (id) =>

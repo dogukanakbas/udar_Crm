@@ -129,19 +129,16 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             qs = qs.filter(organization=org)
         role = getattr(self.request.user, 'role', '')
         user = self.request.user
+        # Worker: tüm bölümler/kullanıcılar yeni görevleri görsün (org genelinde)
         if role == 'Worker':
-            user_teams = user.teams.all()
-            qs = qs.filter(
-                Q(team__in=user_teams) | 
-                Q(current_team__in=user_teams) |
-                Q(assignee=user) |
-                Q(owner=user)
-            ).distinct()
+            pass  # Org içindeki tüm görevleri göster
         elif role not in ['Admin', 'Manager']:
             qs = qs.filter(Q(owner=user) | Q(assignee=user) | Q(team__members=user)).distinct()
         return qs
 
     def perform_create(self, serializer):
+        if getattr(self.request.user, 'role', '') == 'Worker':
+            raise PermissionDenied("Worker rolündeki kullanıcılar görev atayamaz")
         instance = serializer.save(organization=self.request.user.organization, owner=self.request.user)
         # Sabit görevler için fabrika checklist ekle
         if getattr(instance, 'mode', 'manual') == 'fixed':
@@ -447,6 +444,61 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             'workers': tracking_data,
             'total_workers': len(tracking_data),
             'timestamp': timezone.now().isoformat(),
+        })
+
+    @action(detail=False, methods=['get'], url_path='worker-detail')
+    def worker_detail(self, request):
+        """Çalışan detay: günlük/aylık süre, aktif/biten görevler. Query: ?worker_id=123"""
+        if request.user.role not in ['Admin', 'Manager']:
+            raise PermissionDenied("Bu endpoint'e sadece Admin ve Manager erişebilir")
+        org = request.user.organization
+
+        worker_id = request.query_params.get('worker_id')
+        if not worker_id:
+            return Response({'detail': 'worker_id gerekli'}, status=400)
+        worker = User.objects.filter(organization=org, id=worker_id, role='Worker').first()
+        if not worker:
+            return Response({'detail': 'Çalışan bulunamadı'}, status=404)
+
+        # Görevler: atanan veya sahip
+        tasks = Task.objects.filter(organization=org).filter(
+            Q(assignee=worker) | Q(owner=worker)
+        ).select_related('team', 'current_team').order_by('-updated_at')
+
+        active_tasks = list(tasks.filter(status__in=['todo', 'in-progress']).values(
+            'id', 'title', 'status', 'priority', 'due', 'start', 'end', 'updated_at'
+        ))
+        completed_tasks = list(tasks.filter(status='done').values(
+            'id', 'title', 'status', 'priority', 'due', 'start', 'end', 'updated_at'
+        ))[:50]
+
+        # Zaman kayıtlarından günlük/aylık toplam
+        from .models import TaskTimeEntry
+        entries = TaskTimeEntry.objects.filter(
+            task__organization=org,
+            user=worker
+        ).only('started_at', 'ended_at')
+
+        daily_hours = {}
+        monthly_hours = {}
+        for e in entries:
+            start = e.started_at
+            end = e.ended_at or timezone.now()
+            hrs = max(0, (end - start).total_seconds() / 3600)
+            day_key = start.date().isoformat()
+            month_key = start.strftime('%Y-%m')
+            daily_hours[day_key] = daily_hours.get(day_key, 0) + hrs
+            monthly_hours[month_key] = monthly_hours.get(month_key, 0) + hrs
+
+        return Response({
+            'worker_id': worker.id,
+            'worker_name': worker.username,
+            'worker_email': worker.email,
+            'primary_teams': list(worker.teams.values_list('name', flat=True)),
+            'active_tasks': active_tasks,
+            'completed_tasks': completed_tasks,
+            'daily_hours': daily_hours,
+            'monthly_hours': monthly_hours,
         })
 
     def perform_destroy(self, instance):
@@ -862,6 +914,7 @@ class TaskChecklistViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         'destroy': 'tasks.edit',
         'update': 'tasks.edit',
         'partial_update': 'tasks.edit',
+        'reorder': 'tasks.edit',
     }
     queryset = TaskChecklist.objects.select_related('task')
 
@@ -872,4 +925,19 @@ class TaskChecklistViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         if org:
             qs = qs.filter(task__organization=org)
         return qs
+
+    @action(detail=False, methods=['post'], url_path='reorder')
+    def reorder(self, request):
+        """Sıra güncelle: { "task": "<task_id>", "order": ["<id1>", "<id2>", ...] }"""
+        task_id = request.data.get('task')
+        order_ids = request.data.get('order', [])
+        if not task_id or not order_ids:
+            return Response({'detail': 'task ve order gerekli'}, status=status.HTTP_400_BAD_REQUEST)
+        org = getattr(request.user, 'organization', None)
+        items = TaskChecklist.objects.filter(task_id=task_id)
+        if org:
+            items = items.filter(task__organization=org)
+        for idx, item_id in enumerate(order_ids):
+            items.filter(id=item_id).update(order=idx)
+        return Response({'ok': True})
 

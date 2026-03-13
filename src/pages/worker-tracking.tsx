@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import { RbacGuard } from '@/components/rbac'
 import api from '@/lib/api'
 
@@ -129,7 +130,13 @@ export function WorkerTrackingPage() {
               {data?.workers.map((worker) => (
                 <tr key={worker.worker_id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-4 py-3">
-                    <div className="font-medium text-slate-900">{worker.worker_name}</div>
+                    <Link
+                      to="/worker-tracking/$workerId"
+                      params={{ workerId: String(worker.worker_id) }}
+                      className="block font-medium text-slate-900 hover:text-blue-600"
+                    >
+                      {worker.worker_name}
+                    </Link>
                     <div className="text-sm text-slate-600">{worker.worker_email}</div>
                   </td>
                   <td className="px-4 py-3">
