@@ -12,15 +12,27 @@ import { Switch } from '@/components/ui/switch'
 import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import api from '@/lib/api'
+import { useToast } from '@/components/ui/use-toast'
 
 export function DashboardPage() {
+  const { toast } = useToast()
   const { data } = useAppStore()
   const updateTask = useAppStore((s) => s.updateTask)
   const hydrateFromApi = useAppStore((s) => s.hydrateFromApi)
   const isWorker = data.settings.role === 'Worker'
   const currentUserId = typeof window !== 'undefined' ? localStorage.getItem('current-user-id') : null
+  const myTeamIds = (data.teams || [])
+    .filter((t) => t.memberIds?.includes(currentUserId || ''))
+    .map((t) => t.id)
   const myTasks = (data.tasks || []).filter(
     (t) => String(t.assignee) === String(currentUserId) && t.status !== 'done'
+  )
+  const teamQueueTasks = (data.tasks || []).filter(
+    (t) =>
+      !t.assignee &&
+      t.status !== 'done' &&
+      t.currentTeam &&
+      myTeamIds.includes(t.currentTeam)
   )
   const [pendingApprovals, setPendingApprovals] = useState<
     { id: string; quote_id: string; quote_number: string; role: string; status: string }[]
@@ -118,11 +130,51 @@ export function DashboardPage() {
 
   if (isWorker) {
     return (
-      <div>
+      <div className="space-y-4">
         <PageHeader
           title="Görevlerim"
-          description="Size atanan görevler"
+          description="Size atanan ve ekibinizdeki görevler"
         />
+        {teamQueueTasks.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Ekibimdeki bekleyen görevler</CardTitle>
+              <CardDescription>Önceki ekipten sizin ekibinize devredilen görevler. Üstlenmek için &quot;Al&quot; tıklayın.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {teamQueueTasks.map((task) => (
+                  <div
+                    key={task.id}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-border/80 p-3 text-sm hover:bg-muted/50"
+                  >
+                    <Link to="/tasks/$taskId" params={{ taskId: task.id }} className="flex-1 min-w-0">
+                      <span className="font-semibold block">{task.title}</span>
+                      <Badge variant="secondary" className="mt-1">
+                        {data.teams.find((t) => t.id === task.currentTeam)?.name || 'Ekip'} sırasında
+                      </Badge>
+                    </Link>
+                    <Button
+                      size="sm"
+                      variant="default"
+                      onClick={async () => {
+                        try {
+                          await api.post(`/tasks/${task.id}/claim/`)
+                          await hydrateFromApi()
+                        } catch (e: any) {
+                          const msg = e?.response?.data?.detail || 'Üstlenilemedi'
+                          toast({ title: 'Hata', description: msg, variant: 'destructive' })
+                        }
+                      }}
+                    >
+                      Al
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
         <Card>
           <CardHeader>
             <CardTitle>Bana atanan görevler</CardTitle>

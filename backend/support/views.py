@@ -252,9 +252,16 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def claim(self, request, pk=None):
+        """Worker ekibindeki bekleyen görevi üstlenir. Sadece task.current_team üyeleri claim edebilir."""
         task = self.get_object()
         if task.organization_id != request.user.organization_id:
             raise PermissionDenied("Farklı organizasyon")
+        current_team = task.current_team or task.team
+        if not current_team:
+            raise PermissionDenied("Görev henüz bir ekibe atanmamış")
+        # Sadece current_team üyeleri claim edebilir
+        if not current_team.members.filter(id=request.user.id).exists():
+            raise PermissionDenied("Bu görevi sadece ilgili ekip üyeleri üstlenebilir")
         user_team = request.user.teams.first()
         task.assignee = request.user
         task.current_team = user_team or task.current_team or task.team
