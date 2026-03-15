@@ -57,11 +57,39 @@ class Task(models.Model):
     handover_reason = models.CharField(max_length=255, blank=True, default='')
     handover_at = models.DateTimeField(null=True, blank=True)
     handover_history = models.JSONField(default=list, blank=True)
+    workflow_team_ids = models.JSONField(default=list, blank=True)  # Sıralı ekip ID listesi: [1,2,3] → 1. ekip bitirince 2'ye, 2 bitirince 3'e, son ekip bitirince done
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return self.title
+
+
+def task_model_image_path(instance, filename):
+    return f"task_models/{instance.organization_id}/{instance.code}/{filename}"
+
+
+class TaskModel(models.Model):
+    """Sabit görevler için model/ürün tanımları (AY-01, AY-02 vb.)"""
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='task_models')
+    code = models.CharField(max_length=50)
+    name = models.CharField(max_length=255, blank=True)
+    image = models.ImageField(upload_to=task_model_image_path, blank=True, null=True)
+    duration_minutes = models.DecimalField(max_digits=8, decimal_places=2, default=4)
+    blade_min = models.DecimalField(max_digits=6, decimal_places=2, default=1.5, null=True, blank=True)
+    blade_max = models.DecimalField(max_digits=6, decimal_places=2, default=1.5, null=True, blank=True)
+    sizes = models.JSONField(default=list, blank=True)  # ['73x210', '83x210', ...]
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['order', 'code']
+        unique_together = [['organization', 'code']]
+
+    def __str__(self):
+        return f"{self.code} ({self.name or '-'})"
 
 
 def task_attachment_path(instance, filename):

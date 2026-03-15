@@ -17,9 +17,9 @@ import { PageHeader } from '@/components/app-shell'
 import { useToast } from '@/components/ui/use-toast'
 import { useAppStore } from '@/state/use-app-store'
 import api from '@/lib/api'
-import { formatDate } from '@/lib/utils'
+import { formatDate, formatDateTime } from '@/lib/utils'
 import type { Task } from '@/types'
-import { Calendar, Plus, Paperclip, Download } from 'lucide-react'
+import { Calendar, Plus, Paperclip, Download, Trash2, GripVertical } from 'lucide-react'
 import { RbacGuard } from '@/components/rbac'
 import { useParams } from '@tanstack/react-router'
 import { CardDescription } from '@/components/ui/card'
@@ -159,6 +159,7 @@ const taskSchema = z
       z.number().min(0, '>=0 olmalı')
     ),
     modelBladeDepth: z.string().optional(),
+    workflowTeamIds: z.array(z.string()).optional(),
     plannedHours: z.preprocess(
       (v) => (v === '' || v === undefined ? 0 : Number(v)),
       z.number().min(0, '>=0 olmalı')
@@ -1307,12 +1308,122 @@ export function TasksPage() {
   )
 }
 
+function WorkflowStepsEditor({
+  teams,
+  value,
+  onChange,
+}: {
+  teams: { id: string; name: string }[]
+  value: string[]
+  onChange: (ids: string[]) => void
+}) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
+  const steps = value.length ? value : []
+  const handleDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e
+    if (!over || active.id === over.id) return
+    const oldIdx = steps.findIndex((_, i) => `step-${i}` === String(active.id))
+    const newIdx = steps.findIndex((_, i) => `step-${i}` === String(over.id))
+    if (oldIdx === -1 || newIdx === -1) return
+    const reordered = arrayMove([...steps], oldIdx, newIdx)
+    onChange(reordered)
+  }
+  const updateStep = (idx: number, teamId: string) => {
+    const next = [...steps]
+    next[idx] = teamId
+    onChange(next)
+  }
+  const removeStep = (idx: number) => {
+    onChange(steps.filter((_, i) => i !== idx))
+  }
+  const addStep = () => onChange([...steps, ''])
+  return (
+    <div className="space-y-2">
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={steps.map((_, i) => `step-${i}`)} strategy={verticalListSortingStrategy}>
+          {steps.map((teamId, i) => (
+            <SortableWorkflowStep
+              key={`step-${i}`}
+              id={`step-${i}`}
+              teamId={teamId}
+              teams={teams}
+              onTeamChange={(v) => updateStep(i, v)}
+              onRemove={() => removeStep(i)}
+            />
+          ))}
+        </SortableContext>
+      </DndContext>
+      <Button type="button" variant="outline" size="sm" onClick={addStep}>
+        <Plus className="mr-2 h-4 w-4" />
+        Adım ekle
+      </Button>
+    </div>
+  )
+}
+
+function SortableWorkflowStep({
+  id,
+  teamId,
+  teams,
+  onTeamChange,
+  onRemove,
+}: {
+  id: string
+  teamId: string
+  teams: { id: string; name: string }[]
+  onTeamChange: (teamId: string) => void
+  onRemove: () => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  const style = { transform: CSS.Transform.toString(transform), transition }
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        'flex items-center gap-2 rounded border px-3 py-2',
+        isDragging && 'opacity-70 shadow-md z-10 bg-background'
+      )}
+    >
+      <span
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing touch-none text-muted-foreground hover:text-foreground"
+        aria-label="Sırayı değiştir"
+      >
+        <GripVertical className="h-4 w-4" />
+      </span>
+      <Select value={teamId || 'none'} onValueChange={(v) => onTeamChange(v === 'none' ? '' : v)}>
+        <SelectTrigger className="flex-1">
+          <SelectValue placeholder="Ekip seç" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none">— Ekip seç —</SelectItem>
+          {teams.map((t) => (
+            <SelectItem key={t.id} value={t.id}>
+              {t.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={onRemove} aria-label="Kaldır">
+        <Trash2 className="h-4 w-4" />
+      </Button>
+    </div>
+  )
+}
+
 function SortableChecklistItem({
   item,
   onToggle,
+  onDelete,
 }: {
   item: { id: string; title: string; done: boolean }
   onToggle: (checked: boolean) => void
+  onDelete: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
   const style = {
@@ -1338,13 +1449,22 @@ function SortableChecklistItem({
       </span>
       <Checkbox checked={item.done} onCheckedChange={(c) => onToggle(Boolean(c))} />
       <span className={`text-sm flex-1 ${item.done ? 'line-through text-muted-foreground' : ''}`}>{item.title}</span>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 text-destructive hover:text-destructive"
+        onClick={onDelete}
+        aria-label="Sil"
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
     </div>
   )
 }
 
 export function TaskDetailPage() {
   const { taskId } = useParams({ from: '/tasks/$taskId' })
-  const { data, updateTask, addTaskComment, addChecklistItem, toggleChecklistItem, reorderChecklistItems, deleteAttachment, addTimeEntry, updateAttachment } =
+  const { data, updateTask, addTaskComment, addChecklistItem, toggleChecklistItem, deleteChecklistItem, reorderChecklistItems, deleteAttachment, addTimeEntry, updateAttachment } =
     useAppStore()
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -1704,7 +1824,7 @@ export function TaskDetailPage() {
                             toast({ title: 'Checklist güncellendi' })
                           }}
                         />
-                        <span className={`text-sm ${item.done ? 'line-through text-muted-foreground' : ''}`}>{item.title}</span>
+                        <span className={`text-sm flex-1 ${item.done ? 'line-through text-muted-foreground' : ''}`}>{item.title}</span>
                       </div>
                     ))}
                   </div>
@@ -1733,6 +1853,10 @@ export function TaskDetailPage() {
                         onToggle={async (checked) => {
                           await toggleChecklistItem(item.id, Boolean(checked))
                           toast({ title: 'Checklist güncellendi' })
+                        }}
+                        onDelete={async () => {
+                          await deleteChecklistItem(item.id)
+                          toast({ title: 'Checklist öğesi silindi' })
                         }}
                       />
                     ))}
@@ -1915,7 +2039,7 @@ export function TaskDetailPage() {
                 <div key={item.id} className="rounded border p-2 text-sm">
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
                     <span>{item.author}</span>
-                    <span>{item.at ? formatDate(item.at) : ''}</span>
+                    <span>{item.at ? formatDateTime(item.at) : ''}</span>
                   </div>
                   <p className="mt-1">
                     {item.type === 'attachment' && item.href ? (
@@ -2004,12 +2128,18 @@ function TaskModal({
       modelDurationMinutes: (task as any)?.modelDurationMinutes ?? 0,
       totalPlannedMinutes: (task as any)?.totalPlannedMinutes ?? 0,
       modelBladeDepth: (task as any)?.modelBladeDepth ?? '',
+      workflowTeamIds: (task as any)?.workflowTeamIds ?? [],
     },
   })
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [droppedFiles, setDroppedFiles] = useState<File[]>([])
+  const [apiTaskModels, setApiTaskModels] = useState<{ code: string; image_url?: string; duration_minutes: number; sizes: string[] }[]>([])
   const errors = form.formState.errors
+
+  useEffect(() => {
+    api.get('/task-models/').then((r) => setApiTaskModels(r.data || [])).catch(() => setApiTaskModels([]))
+  }, [])
   const { toast } = useToast()
   const watchMode = form.watch('mode')
   const watchModel = form.watch('modelCode')
@@ -2024,12 +2154,16 @@ function TaskModal({
   )
   useEffect(() => {
     if (watchMode !== 'fixed') return
+    const apiModel = apiTaskModels.find((m) => m.code === watchModel)
     const preset = MODEL_PRESETS.find((m) => m.code === watchModel) || MODEL_PRESETS[0]
-    const variantObj = preset?.variants.find((v) => v.id === watchVariant)
+    const variantObj = preset?.variants?.find((v) => v.id === watchVariant)
     if (preset && !watchModel) {
       form.setValue('modelCode', preset.code)
     }
-    if (preset) {
+    if (apiModel) {
+      form.setValue('modelDurationMinutes', Number(apiModel.duration_minutes || 4))
+      form.setValue('modelBladeDepth', '1.5-1.5')
+    } else if (preset) {
       form.setValue('modelDurationMinutes', preset.baseDuration)
       const blade = preset.baseBlade || ''
       const num = blade.match(/[\d.]+/)?.[0]
@@ -2041,12 +2175,12 @@ function TaskModal({
       const num = blade.match(/[\d.]+/)?.[0]
       form.setValue('modelBladeDepth', num ? `${num}-${num}` : blade)
     }
-    const duration = variantObj?.duration ?? preset?.baseDuration ?? form.getValues('modelDurationMinutes') ?? 0
+    const duration = variantObj?.duration ?? (apiModel?.duration_minutes ?? preset?.baseDuration ?? form.getValues('modelDurationMinutes') ?? 0)
     const qty = watchQty || 1
     const total = Number(duration) * Number(qty)
     form.setValue('totalPlannedMinutes', Number(total.toFixed(2)))
     form.setValue('plannedHours', Number((total / 60).toFixed(2)))
-  }, [watchMode, watchModel, watchVariant, watchQty])
+  }, [watchMode, watchModel, watchVariant, watchQty, apiTaskModels])
 
   // Manuel mod: süre veya adet değişince toplam planlanan süreyi hesapla
   useEffect(() => {
@@ -2251,18 +2385,27 @@ function TaskModal({
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <div>
                   <Label>Model</Label>
-                  <Select value={form.watch('modelCode') || MODEL_PRESETS[0].code} onValueChange={(v) => form.setValue('modelCode', v)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-64 overflow-y-auto">
-                      {MODEL_PRESETS.map((m) => (
-                        <SelectItem key={m.code} value={m.code}>
-                          {m.code}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="flex gap-2 items-start">
+                    <Select value={form.watch('modelCode') || MODEL_PRESETS[0].code} onValueChange={(v) => form.setValue('modelCode', v)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-64 overflow-y-auto">
+                        {(apiTaskModels.length > 0 ? apiTaskModels.map((m) => ({ code: m.code })) : MODEL_PRESETS).map((m) => (
+                          <SelectItem key={m.code} value={m.code}>
+                            {m.code}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {apiTaskModels.find((m) => m.code === form.watch('modelCode'))?.image_url && (
+                      <img
+                        src={apiTaskModels.find((m) => m.code === form.watch('modelCode'))!.image_url}
+                        alt={form.watch('modelCode')}
+                        className="h-16 w-16 object-cover rounded border"
+                      />
+                    )}
+                  </div>
                   <FormError message={errors.modelCode?.message as any} />
                 </div>
                 <div>
@@ -2389,6 +2532,17 @@ function TaskModal({
             </Select>
           </div>
           </div>
+          <div className="space-y-2 rounded-md border p-3">
+            <Label className="text-sm font-medium">Süreç adımları (iş akışı)</Label>
+            <p className="text-xs text-muted-foreground">
+              Sırayla sorumlu ekipleri ekleyin. 1. ekip bitirince 2. ekibe, son ekip bitirince görev tamamlanır.
+            </p>
+            <WorkflowStepsEditor
+              teams={teams}
+              value={form.watch('workflowTeamIds') || []}
+              onChange={(ids) => form.setValue('workflowTeamIds', ids)}
+            />
+          </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div>
               <Label>Durum</Label>
@@ -2437,7 +2591,7 @@ function TaskModal({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Planlanan saat</Label>
-              <Input type="number" step="0.5" {...form.register('plannedHours')} className={cn(errors.plannedHours && 'border-destructive')} />
+              <Input type="number" step="0.1" {...form.register('plannedHours')} className={cn(errors.plannedHours && 'border-destructive')} />
               <FormError message={errors.plannedHours?.message} />
             </div>
             <div>

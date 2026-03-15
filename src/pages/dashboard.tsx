@@ -15,6 +15,8 @@ import api from '@/lib/api'
 
 export function DashboardPage() {
   const { data } = useAppStore()
+  const updateTask = useAppStore((s) => s.updateTask)
+  const hydrateFromApi = useAppStore((s) => s.hydrateFromApi)
   const isWorker = data.settings.role === 'Worker'
   const currentUserId = typeof window !== 'undefined' ? localStorage.getItem('current-user-id') : null
   const myTasks = (data.tasks || []).filter(
@@ -132,15 +134,44 @@ export function DashboardPage() {
             ) : (
               <div className="space-y-2">
                 {myTasks.map((task) => (
-                  <Link
+                  <div
                     key={task.id}
-                    to="/tasks/$taskId"
-                    params={{ taskId: task.id }}
-                    className="flex items-center justify-between rounded-lg border border-border/80 p-3 text-sm hover:bg-muted/50 transition-colors block"
+                    className="flex items-center justify-between gap-2 rounded-lg border border-border/80 p-3 text-sm hover:bg-muted/50"
                   >
-                    <span className="font-semibold">{task.title}</span>
-                    <Badge variant="outline">{task.status}</Badge>
-                  </Link>
+                    <Link to="/tasks/$taskId" params={{ taskId: task.id }} className="flex-1 min-w-0">
+                      <span className="font-semibold block">{task.title}</span>
+                      <Badge variant="outline" className="mt-1">{task.status === 'in-progress' ? 'Devam ediyor' : 'Yapılacak'}</Badge>
+                    </Link>
+                    <div className="flex gap-1 shrink-0">
+                      {task.status === 'todo' && (
+                        <Button
+                          size="sm"
+                          onClick={async () => {
+                            await updateTask(task.id, { status: 'in-progress' })
+                          }}
+                        >
+                          Başlat
+                        </Button>
+                      )}
+                      {task.status === 'in-progress' && (
+                        <Button
+                          size="sm"
+                          variant="default"
+                          onClick={async () => {
+                            try {
+                              await api.post(`/tasks/${task.id}/complete-stage/`)
+                              await hydrateFromApi()
+                            } catch {
+                              await updateTask(task.id, { status: 'done' })
+                              await hydrateFromApi()
+                            }
+                          }}
+                        >
+                          Bitir
+                        </Button>
+                      )}
+                    </div>
+                  </div>
                 ))}
               </div>
             )}

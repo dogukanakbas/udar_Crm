@@ -15,7 +15,8 @@ import api from '@/lib/api'
 import { DataTable } from '@/components/data-table'
 import { type ColumnDef } from '@tanstack/react-table'
 import type { Team, UserLite } from '@/types'
-import { AlertCircle, ShieldCheck } from 'lucide-react'
+import { AlertCircle, ShieldCheck, Plus, Trash2, ImageIcon } from 'lucide-react'
+import { RbacGuard } from '@/components/rbac'
 
 export function SettingsPage() {
   const { data, resetDemo, setLocale } = useAppStore()
@@ -51,6 +52,11 @@ export function SettingsPage() {
   const [newPassword, setNewPassword] = useState('')
   const [newPassword2, setNewPassword2] = useState('')
   const [health, setHealth] = useState<{ backend?: string; db?: string; redis?: string }>({})
+  const [taskModels, setTaskModels] = useState<{ id: number; code: string; name: string; image_url?: string; duration_minutes: number; blade_min?: number; blade_max?: number; sizes: string[] }[]>([])
+  const [newModelCode, setNewModelCode] = useState('')
+  const [newModelName, setNewModelName] = useState('')
+  const [newModelDuration, setNewModelDuration] = useState(4)
+  const [newModelSizes, setNewModelSizes] = useState('73x210, 83x210, 93x210')
 
   const userColumns: ColumnDef<UserLite>[] = [
     { accessorKey: 'username', header: 'Kullanıcı' },
@@ -71,8 +77,21 @@ export function SettingsPage() {
     setRules(res.data || [])
   }
 
+  const loadTaskModels = async () => {
+    try {
+      const res = await api.get('/task-models/')
+      setTaskModels(res.data || [])
+    } catch {
+      setTaskModels([])
+    }
+  }
+
   useEffect(() => {
     loadRules()
+  }, [])
+
+  useEffect(() => {
+    loadTaskModels()
   }, [])
 
   useEffect(() => {
@@ -575,6 +594,117 @@ export function SettingsPage() {
             </div>
           </CardContent>
         </Card>
+        <RbacGuard perm="tasks.edit">
+          <Card>
+            <CardHeader>
+              <CardTitle>Görev modelleri</CardTitle>
+              <CardDescription>Sabit görevler için model/ürün tanımları. Resim ekleyebilir, model ekleyip silebilirsiniz.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap gap-2 items-end">
+                <div>
+                  <Label className="text-xs">Kod</Label>
+                  <Input value={newModelCode} onChange={(e) => setNewModelCode(e.target.value)} placeholder="AY-01" className="w-24" />
+                </div>
+                <div>
+                  <Label className="text-xs">Ad</Label>
+                  <Input value={newModelName} onChange={(e) => setNewModelName(e.target.value)} placeholder="Model adı" className="w-32" />
+                </div>
+                <div>
+                  <Label className="text-xs">Süre (dk)</Label>
+                  <Input type="number" value={newModelDuration} onChange={(e) => setNewModelDuration(Number(e.target.value) || 4)} className="w-20" />
+                </div>
+                <div>
+                  <Label className="text-xs">Ölçüler</Label>
+                  <Input value={newModelSizes} onChange={(e) => setNewModelSizes(e.target.value)} placeholder="73x210, 83x210" className="w-40" />
+                </div>
+                <Button
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      await api.post('/task-models/', {
+                        code: newModelCode.trim(),
+                        name: newModelName.trim(),
+                        duration_minutes: newModelDuration,
+                        sizes: newModelSizes.split(',').map((s) => s.trim()).filter(Boolean),
+                        blade_min: 1.5,
+                        blade_max: 1.5,
+                      })
+                      await loadTaskModels()
+                      setNewModelCode('')
+                      setNewModelName('')
+                      toast({ title: 'Model eklendi' })
+                    } catch (err: any) {
+                      toast({ title: 'Hata', description: err?.response?.data?.detail || 'Eklenemedi', variant: 'destructive' })
+                    }
+                  }}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Ekle
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {taskModels.length === 0 && <p className="text-sm text-muted-foreground">Henüz model yok. Yukarıdan ekleyin.</p>}
+                {taskModels.map((m) => (
+                  <div key={m.id} className="flex items-center gap-3 rounded border p-2">
+                    {m.image_url ? (
+                      <img src={m.image_url} alt={m.code} className="h-12 w-12 object-cover rounded" />
+                    ) : (
+                      <div className="h-12 w-12 rounded bg-muted flex items-center justify-center">
+                        <ImageIcon className="h-6 w-6 text-muted-foreground" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm">{m.code}</p>
+                      <p className="text-xs text-muted-foreground">{m.name || '—'} • {m.duration_minutes} dk</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        id={`model-img-${m.id}`}
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0]
+                          if (!file) return
+                          const fd = new FormData()
+                          fd.append('image', file)
+                          try {
+                            await api.patch(`/task-models/${m.id}/`, fd)
+                            await loadTaskModels()
+                            toast({ title: 'Resim yüklendi' })
+                          } catch (err: any) {
+                            toast({ title: 'Hata', description: err?.response?.data?.detail || 'Yüklenemedi', variant: 'destructive' })
+                          }
+                          e.target.value = ''
+                        }}
+                      />
+                      <Button variant="outline" size="sm" onClick={() => document.getElementById(`model-img-${m.id}`)?.click()}>
+                        Resim
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive"
+                        onClick={async () => {
+                          try {
+                            await api.delete(`/task-models/${m.id}/`)
+                            await loadTaskModels()
+                            toast({ title: 'Model silindi' })
+                          } catch (err: any) {
+                            toast({ title: 'Hata', description: err?.response?.data?.detail || 'Silinemedi', variant: 'destructive' })
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </RbacGuard>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         <Card>

@@ -55,6 +55,7 @@ type AppState = {
   addTaskComment: (payload: { task: string; text: string; type?: 'comment' | 'activity' }) => void
   addChecklistItem: (payload: { task: string; title: string }) => void
   toggleChecklistItem: (id: string, done: boolean) => void
+  deleteChecklistItem: (id: string) => void
   reorderChecklistItems: (taskId: string, orderedIds: string[]) => void
   deleteAttachment: (id: string) => void
   updateAttachment: (id: string, patch: { description?: string; tags?: string[] }) => void
@@ -347,6 +348,8 @@ export const useAppStore = create<AppState>()(
         owner: String(t.owner ?? ''),
         assignee: t.assignee ? String(t.assignee) : '',
         teamId: t.team ? String(t.team) : undefined,
+        currentTeam: t.current_team ? String(t.current_team) : undefined,
+        workflowTeamIds: (t.workflow_team_ids || []).map((id: any) => String(id)),
         status: t.status,
         priority: t.priority,
         start: t.start,
@@ -641,7 +644,7 @@ export const useAppStore = create<AppState>()(
     })(),
   createTask: async (task) => {
     try {
-      const payload = {
+      const payload: any = {
         ...task,
         owner: task.owner ? Number(task.owner) : null,
         assignee: task.assignee ? Number(task.assignee) : null,
@@ -656,8 +659,12 @@ export const useAppStore = create<AppState>()(
         total_planned_minutes: (task as any).totalPlannedMinutes ?? 0,
         model_blade_depth: (task as any).modelBladeDepth || '',
         model_sizes: (task as any).modelSizes || [],
+        workflow_team_ids: ((task as any).workflowTeamIds || [])
+          .filter((id: string) => id != null && id !== '')
+          .map((id: string) => Number(id)),
       }
-      delete (payload as any).teamId
+      delete payload.teamId
+      delete payload.workflowTeamIds
       delete (payload as any).modelCode
       delete (payload as any).modelDurationMinutes
       delete (payload as any).totalPlannedMinutes
@@ -692,6 +699,12 @@ export const useAppStore = create<AppState>()(
         if ('totalPlannedMinutes' in payload) payload.total_planned_minutes = (payload as any).totalPlannedMinutes
         if ('modelBladeDepth' in payload) payload.model_blade_depth = (payload as any).modelBladeDepth
         if ('modelSizes' in payload) payload.model_sizes = (payload as any).modelSizes
+        if ('workflowTeamIds' in payload) {
+          payload.workflow_team_ids = Array.isArray(payload.workflowTeamIds)
+            ? payload.workflowTeamIds.map((id: string) => Number(id))
+            : []
+          delete payload.workflowTeamIds
+        }
         await api.patch(`/tasks/${id}/`, payload)
         await get().hydrateFromApi()
       } catch (err) {
@@ -782,6 +795,15 @@ export const useAppStore = create<AppState>()(
             variant: 'destructive',
           })
         })
+      }
+    })(),
+  deleteChecklistItem: (id) =>
+    (async () => {
+      try {
+        await api.delete(`/task-checklist/${id}/`)
+        await get().hydrateFromApi()
+      } catch (err) {
+        console.error('API deleteChecklistItem failed', err)
       }
     })(),
   reorderChecklistItems: (taskId, orderedIds) =>

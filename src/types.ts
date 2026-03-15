@@ -153,6 +153,7 @@ export interface Task {
   assignee?: string
   teamId?: string
   currentTeam?: string
+  workflowTeamIds?: string[]  // Sıralı ekip ID listesi: 1. ekip bitirince 2'ye, son ekip bitirince done
   mode?: 'manual' | 'fixed'
   modelCode?: string
   variant?: string

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Ticket, TicketMessage, Task, TaskAttachment, TaskComment, TaskChecklist, TaskTimeEntry
+from .models import Ticket, TicketMessage, Task, TaskAttachment, TaskComment, TaskChecklist, TaskTimeEntry, TaskModel
 from .models_automation import AutomationRule
 
 
@@ -86,6 +86,17 @@ class TaskSerializer(serializers.ModelSerializer):
             val = attrs.get(field)
             if val in (None, '', 'null'):
                 attrs[field] = 0
+        # workflow_team_ids varsa ilk ekip = team ve current_team (create sırasında)
+        workflow_ids = attrs.get('workflow_team_ids')
+        if workflow_ids and isinstance(workflow_ids, list) and len(workflow_ids) > 0:
+            from accounts.models import Team
+            first_id = workflow_ids[0]
+            if first_id is not None:
+                first_team = Team.objects.filter(id=int(first_id)).first()
+                if first_team and not attrs.get('team'):
+                    attrs['team'] = first_team
+                if first_team and not attrs.get('current_team') and getattr(self.instance, 'current_team', None) is None:
+                    attrs['current_team'] = first_team
         # current_team yoksa team'e eşitle
         if not attrs.get('current_team') and getattr(self.instance, 'current_team', None) is None:
             attrs['current_team'] = attrs.get('team') or getattr(self.instance, 'team', None)
@@ -109,6 +120,23 @@ class TaskSerializer(serializers.ModelSerializer):
         if start and due and due < start:
             raise serializers.ValidationError({'due': 'Vade tarihi başlangıçtan önce olamaz'})
         return super().validate(attrs)
+
+
+class TaskModelSerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TaskModel
+        fields = ['id', 'code', 'name', 'image', 'image_url', 'duration_minutes', 'blade_min', 'blade_max', 'sizes', 'order', 'is_active', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+    def get_image_url(self, obj):
+        if obj.image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.image.url)
+            return obj.image.url
+        return None
 
 
 class TaskChecklistSerializer(serializers.ModelSerializer):

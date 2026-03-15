@@ -8,7 +8,7 @@ import os
 import uuid
 from permissions import IsOrgMember, HasAPIPermission, CommentOnlyRestriction, ViewOnlyRestriction
 from audit.utils import log_entity_action
-from .models import Ticket, TicketMessage, Task, TaskAttachment, TaskComment, TaskChecklist, TaskTimeEntry
+from .models import Ticket, TicketMessage, Task, TaskAttachment, TaskComment, TaskChecklist, TaskTimeEntry, TaskModel
 from accounts.models import User, Team
 from .models_automation import AutomationRule
 from .utils import send_slack_webhook, send_email, generate_presigned_post, scan_file_with_clamav
@@ -20,6 +20,7 @@ from .serializers import (
     TaskAttachmentSerializer,
     TaskCommentSerializer,
     TaskChecklistSerializer,
+    TaskModelSerializer,
     AutomationRuleSerializer,
     TaskTimeEntrySerializer,
 )
@@ -156,6 +157,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 "organization": instance.organization_id,
                 "title": instance.title,
                 "assignee": getattr(instance.assignee, "email", None),
+                "assignee_id": instance.assignee_id,
             }
         )
         # Assignee bildirimi ve aktivite kaydı
@@ -214,7 +216,9 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                     "type": "task.status",
                     "task_id": instance.id,
                     "organization": instance.organization_id,
+                    "title": instance.title,
                     "status": serializer.validated_data.get('status'),
+                    "assignee_id": instance.assignee_id,
                     "by": getattr(self.request.user, "email", None),
                 }
             )
@@ -239,6 +243,8 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 "type": "task.updated",
                 "task_id": instance.id,
                 "organization": instance.organization_id,
+                "title": instance.title,
+                "assignee_id": instance.assignee_id,
                 "by": getattr(self.request.user, "email", None),
                 "changes": changes,
             }
@@ -317,6 +323,8 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 "type": "task.handover",
                 "task_id": task.id,
                 "organization": task.organization_id,
+                "title": task.title,
+                "assignee_id": task.assignee_id,
                 "to_team": getattr(target_team, 'id', None),
                 "by": getattr(request.user, "email", None),
             }
@@ -383,6 +391,121 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             }
         )
         
+        return Response(TaskSerializer(task, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'], url_path='complete-stage')
+    def complete_stage(self, request, pk=None):
+        """
+        Worker kendi aşamasını bitirdiğinde: görev sıradaki ekibe otomatik devredilir.
+        Son aşamadaysa görev tamamen tamamlanır (status=done).
+        """
+        task = self.get_object()
+        if task.organization_id != request.user.organization_id:
+            raise PermissionDenied("Farklı organizasyon")
+        if task.assignee_id != request.user.id:
+            raise PermissionDenied("Sadece size atanan görevi bitirebilirsiniz")
+
+        org = request.user.organization
+        from_team = task.current_team or task.team
+
+        # Workflow sırası: Görevde tanımlı workflow_team_ids varsa onu kullan, yoksa FACTORY_CHECKLIST
+        workflow_ids = getattr(task, 'workflow_team_ids', None) or []
+        workflow_ids = [int(x) for x in workflow_ids if x is not None and str(x).isdigit()]
+
+        if workflow_ids:
+            # Görevde tanımlı sıra: [1, 2, 3] → 1. ekip bitirince 2'ye, son ekip bitirince done
+            org_team_ids = set(Team.objects.filter(organization=org).values_list('id', flat=True))
+            ordered_teams = []
+            for tid in workflow_ids:
+                if tid in org_team_ids:
+                    t = Team.objects.filter(id=tid, organization=org).first()
+                    if t:
+                        ordered_teams.append(t)
+        else:
+            # Fallback: FACTORY_CHECKLIST ile eşleşen ekipler
+            def team_matches_stage(team_name, stage_name):
+                tn = (team_name or '').lower()
+                sn = (stage_name or '').lower()
+                if sn in tn or tn in sn or tn == sn:
+                    return True
+                stage_first = sn.split()[0] if sn else ''
+                team_first = tn.split()[0] if tn else ''
+                return stage_first in tn or team_first in sn or stage_first == team_first
+
+            ordered_teams = []
+            for stage in FACTORY_CHECKLIST:
+                for t in Team.objects.filter(organization=org):
+                    if team_matches_stage(t.name, stage):
+                        ordered_teams.append(t)
+                        break
+
+        if not ordered_teams:
+            ordered_teams = list(Team.objects.filter(organization=org).order_by('name'))
+
+        # Mevcut ekip sıradaki konumunu bul
+        current_idx = -1
+        if from_team:
+            for i, t in enumerate(ordered_teams):
+                if t.id == from_team.id:
+                    current_idx = i
+                    break
+
+        # Sıradaki ekibe devret veya tamamla
+        history = task.handover_history or []
+        if current_idx >= 0 and current_idx < len(ordered_teams) - 1:
+            next_team = ordered_teams[current_idx + 1]
+            history.append({
+                "from_team": from_team.id if from_team else None,
+                "from_team_name": from_team.name if from_team else None,
+                "to_team": next_team.id,
+                "to_team_name": next_team.name,
+                "by": request.user.username,
+                "note": "Aşama tamamlandı - sıradaki ekibe devir",
+                "type": "stage-complete",
+                "at": timezone.now().isoformat(),
+            })
+            task.current_team = next_team
+            task.assignee = None
+            task.handover_reason = "Aşama tamamlandı"
+            task.handover_at = timezone.now()
+            task.handover_history = history
+            task.save(update_fields=['current_team', 'assignee', 'handover_reason', 'handover_at', 'handover_history', 'updated_at'])
+            TaskComment.objects.create(
+                task=task,
+                author=request.user,
+                type='activity',
+                text=f"✅ {request.user.username} aşamayı tamamladı → {next_team.name} ekibine devredildi",
+            )
+            push_event({
+                "type": "task.handover",
+                "task_id": task.id,
+                "organization": task.organization_id,
+                "title": task.title,
+                "assignee_id": None,
+                "to_team": next_team.id,
+                "by": getattr(request.user, "email", None),
+            })
+        else:
+            # Son aşama - görev tamamen tamamlandı
+            task.status = 'done'
+            task.assignee = None
+            task.save(update_fields=['status', 'assignee', 'updated_at'])
+            TaskComment.objects.create(
+                task=task,
+                author=request.user,
+                type='activity',
+                text=f"✅ {request.user.username} görevi tamamen tamamladı",
+            )
+            push_event({
+                "type": "task.status",
+                "task_id": task.id,
+                "organization": task.organization_id,
+                "title": task.title,
+                "status": "done",
+                "assignee_id": None,
+                "by": getattr(request.user, "email", None),
+            })
+
         return Response(TaskSerializer(task, context={'request': request}).data)
 
     @action(detail=False, methods=['get'], url_path='worker-tracking')
@@ -904,6 +1027,34 @@ class UploadPresignView(APIView):
             'clamav': os.getenv('CLAMAV_ENABLED', 'false').lower() == 'true',
         }
         return Response(resp)
+
+class TaskModelViewSet(OrgScopedMixin, viewsets.ModelViewSet):
+    """Sabit görev modelleri (AY-01 vb.) - Admin/Manager yönetir."""
+    serializer_class = TaskModelSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'tasks.view'
+    permission_map = {
+        'create': 'tasks.edit',
+        'update': 'tasks.edit',
+        'partial_update': 'tasks.edit',
+        'destroy': 'tasks.edit',
+    }
+    queryset = TaskModel.objects.all()
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['order', 'code']
+    ordering = ['order', 'code']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        org = getattr(self.request.user, 'organization', None)
+        if org:
+            qs = qs.filter(organization=org)
+        return qs
+
+    def perform_create(self, serializer):
+        org = getattr(self.request.user, 'organization', None)
+        serializer.save(organization=org)
+
 
 class TaskChecklistViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = TaskChecklistSerializer

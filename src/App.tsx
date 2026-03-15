@@ -20,6 +20,12 @@ function App() {
     const stop = startSse
       ? startSse((ev) => {
           const t = ev?.type || ''
+          const currentUserId = localStorage.getItem('current-user-id')
+          const userRole = localStorage.getItem('current-user-role') || ''
+          const assigneeId = ev?.assignee_id ? String(ev.assignee_id) : null
+          const isForMe = assigneeId && currentUserId && assigneeId === currentUserId
+          const isAdminOrManager = ['Admin', 'Manager'].includes(userRole)
+
           if (t === 'notification.mention') {
             toast({
               title: 'Mention',
@@ -34,6 +40,26 @@ function App() {
             toast({
               title: 'Otomasyon',
               description: ev.message || 'Otomasyon bildirimi',
+            })
+          } else if (t === 'task.created' && (isForMe || isAdminOrManager)) {
+            toast({
+              title: isForMe ? 'Yeni görev atandı' : 'Yeni görev oluşturuldu',
+              description: ev.title || (isForMe ? 'Size yeni bir görev atandı' : 'Yeni görev oluşturuldu'),
+            })
+          } else if (t === 'task.updated' && (isForMe || isAdminOrManager) && ev.changes?.assignee) {
+            toast({
+              title: isForMe ? 'Görev atandı' : 'Görev güncellendi',
+              description: ev.title ? `${ev.title} ${isForMe ? 'size atandı' : 'güncellendi'}` : 'Görev güncellendi',
+            })
+          } else if (t === 'task.handover' && (isForMe || isAdminOrManager)) {
+            toast({
+              title: isForMe ? 'Görev devredildi' : 'Görev devri',
+              description: ev.title ? `${ev.title} ${isForMe ? 'size devredildi' : 'devredildi'}` : 'Görev devredildi',
+            })
+          } else if (t === 'task.status' && ev.status === 'done' && (isForMe || isAdminOrManager)) {
+            toast({
+              title: 'Görev tamamlandı',
+              description: ev.title ? `${ev.title} tamamlandı` : 'Bir görev tamamlandı',
             })
           }
         })

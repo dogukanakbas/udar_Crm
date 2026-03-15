@@ -3,7 +3,8 @@ import { Link, useParams } from '@tanstack/react-router'
 import { RbacGuard } from '@/components/rbac'
 import api from '@/lib/api'
 import { formatDate } from '@/lib/utils'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, UserMinus } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 
 type WorkerDetailData = {
   worker_id: number
@@ -22,19 +23,29 @@ export function WorkerDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    const fetchDetail = async () => {
-      try {
-        setLoading(true)
-        const res = await api.get('/tasks/worker-detail/', { params: { worker_id: workerId } })
-        setData(res.data)
-        setError(null)
-      } catch (err: any) {
-        setError(err?.response?.data?.detail || 'Veri yüklenemedi')
-      } finally {
-        setLoading(false)
-      }
+  const fetchDetail = async () => {
+    try {
+      setLoading(true)
+      const res = await api.get('/tasks/worker-detail/', { params: { worker_id: workerId } })
+      setData(res.data)
+      setError(null)
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'Veri yüklenemedi')
+    } finally {
+      setLoading(false)
     }
+  }
+
+  const unassignTask = async (taskId: number) => {
+    try {
+      await api.patch(`/tasks/${taskId}/`, { assignee: null })
+      await fetchDetail()
+    } catch (err: any) {
+      console.error('Görev kaldırılamadı', err)
+    }
+  }
+
+  useEffect(() => {
     if (workerId) fetchDetail()
   }, [workerId])
 
@@ -132,19 +143,27 @@ export function WorkerDetailPage() {
             ) : (
               <div className="space-y-2">
                 {data.active_tasks.map((t) => (
-                  <Link
-                    key={t.id}
-                    to="/tasks/$taskId"
-                    params={{ taskId: String(t.id) }}
-                    className="block rounded border p-3 hover:bg-slate-50 transition-colors"
-                  >
-                    <div className="font-medium">{t.title}</div>
-                    <div className="flex gap-2 mt-1 text-xs text-muted-foreground">
-                      <span>{t.status}</span>
-                      <span>{t.priority}</span>
-                      {t.due && <span>Vade: {formatDate(t.due)}</span>}
-                    </div>
-                  </Link>
+                  <div key={t.id} className="flex items-center justify-between gap-2 rounded border p-3 hover:bg-slate-50">
+                    <Link to="/tasks/$taskId" params={{ taskId: String(t.id) }} className="flex-1 min-w-0">
+                      <div className="font-medium">{t.title}</div>
+                      <div className="flex gap-2 mt-1 text-xs text-muted-foreground">
+                        <span>{t.status}</span>
+                        <span>{t.priority}</span>
+                        {t.due && <span>Vade: {formatDate(t.due)}</span>}
+                      </div>
+                    </Link>
+                    <RbacGuard perm="tasks.edit">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:text-destructive shrink-0"
+                        onClick={() => unassignTask(t.id)}
+                        title="Görevden çıkar"
+                      >
+                        <UserMinus className="h-4 w-4" />
+                      </Button>
+                    </RbacGuard>
+                  </div>
                 ))}
               </div>
             )}
