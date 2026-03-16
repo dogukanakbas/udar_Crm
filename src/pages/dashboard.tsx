@@ -84,7 +84,10 @@ export function DashboardPage() {
       setTodayMeetings(d.meetings || todayMeetings)
       setKpiDate(formatDate(new Date()))
     })
-    api.get('/approvals/pending/').then((res) => setPendingApprovals(res.data || [])).catch(() => setPendingApprovals([]))
+    const role = typeof window !== 'undefined' ? localStorage.getItem('current-user-role') : null
+    if (role !== 'Worker') {
+      api.get('/approvals/pending/').then((res) => setPendingApprovals(res.data || [])).catch(() => setPendingApprovals([]))
+    }
 
     // health endpoint backend kökünde (/health/), baseURL /api ise 404 olmaması için tam URL hesapla
     const apiBase = (api.defaults.baseURL || '').replace(/\/$/, '')

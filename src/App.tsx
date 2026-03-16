@@ -51,11 +51,22 @@ function App() {
               title: isForMe ? 'Görev atandı' : 'Görev güncellendi',
               description: ev.title ? `${ev.title} ${isForMe ? 'size atandı' : 'güncellendi'}` : 'Görev güncellendi',
             })
-          } else if (t === 'task.handover' && (isForMe || isAdminOrManager)) {
-            toast({
-              title: isForMe ? 'Görev devredildi' : 'Görev devri',
-              description: ev.title ? `${ev.title} ${isForMe ? 'size devredildi' : 'devredildi'}` : 'Görev devredildi',
-            })
+          } else if (t === 'task.handover') {
+            const toTeamId = ev.to_team ? String(ev.to_team) : null
+            const state = useAppStore.getState?.()
+            const teams = state?.data?.teams || []
+            const myTeamIds = teams.filter((t) => t.memberIds?.includes(currentUserId || '')).map((t) => t.id)
+            const isForMyTeam = toTeamId && myTeamIds.includes(toTeamId)
+            if (isForMe || isForMyTeam || isAdminOrManager) {
+              toast({
+                title: isForMyTeam && !isForMe ? 'Ekibinize yeni görev' : isForMe ? 'Görev devredildi' : 'Görev devri',
+                description: ev.title
+                  ? isForMyTeam && !isForMe
+                    ? `${ev.title} ekibinize devredildi, üstlenmek için Görevlerim sayfasına gidin`
+                    : `${ev.title} ${isForMe ? 'size devredildi' : 'devredildi'}`
+                  : 'Görev devredildi',
+              })
+            }
           } else if (t === 'task.status' && ev.status === 'done' && (isForMe || isAdminOrManager)) {
             toast({
               title: 'Görev tamamlandı',
