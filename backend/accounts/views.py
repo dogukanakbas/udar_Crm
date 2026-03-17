@@ -361,8 +361,7 @@ class OrganizationSettingsView(APIView):
   permission_classes = [IsAuthenticated, IsOrgMember]
 
   def get(self, request):
-    if getattr(request.user, "role", "") not in ["Admin", "Manager"]:
-      return Response({"detail": "Yetkisiz"}, status=status.HTTP_403_FORBIDDEN)
+    # Mesai ayarları tüm org üyeleri tarafından okunabilir (görev zamanlaması için)
     org = request.user.organization
     if not org:
       return Response({"working_hours_start": "08:00", "working_hours_end": "18:00", "working_days": [0, 1, 2, 3, 4]})

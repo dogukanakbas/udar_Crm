@@ -17,7 +17,7 @@ import { PageHeader } from '@/components/app-shell'
 import { useToast } from '@/components/ui/use-toast'
 import { useAppStore } from '@/state/use-app-store'
 import api from '@/lib/api'
-import { formatDate, formatDateTime } from '@/lib/utils'
+import { formatDate, formatDateTime, addWorkingMinutes } from '@/lib/utils'
 import type { Task } from '@/types'
 import { Calendar, Plus, Paperclip, Download, Trash2, GripVertical } from 'lucide-react'
 import { RbacGuard } from '@/components/rbac'
@@ -1580,42 +1580,6 @@ export function TaskDetailPage() {
       <PageHeader
         title={`Görev: ${task.title}`}
         description={`Durum: ${task.status} • Öncelik: ${task.priority || '-'}`}
-        actions={
-          isAssignee && task.status !== 'done' ? (
-            <div className="flex gap-2">
-              {task.status === 'todo' && (
-                <Button
-                  size="sm"
-                  onClick={async () => {
-                    await updateTask(task.id, { status: 'in-progress' })
-                    toast({ title: 'Görev başlatıldı' })
-                  }}
-                >
-                  Başlat
-                </Button>
-              )}
-              {task.status === 'in-progress' && (
-                <Button
-                  size="sm"
-                  variant="default"
-                  onClick={async () => {
-                    try {
-                      await api.post(`/tasks/${task.id}/complete-stage/`)
-                      await hydrateFromApi()
-                      toast({ title: 'Aşama tamamlandı' })
-                    } catch {
-                      await updateTask(task.id, { status: 'done' })
-                      await hydrateFromApi()
-                      toast({ title: 'Görev tamamlandı' })
-                    }
-                  }}
-                >
-                  Bitir
-                </Button>
-              )}
-            </div>
-          ) : undefined
-        }
       />
       <Card>
         <CardHeader>
@@ -1632,15 +1596,50 @@ export function TaskDetailPage() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={handleClaim}>
-                  Ben üstleniyorum
-                </Button>
-                <Button size="sm" variant="outline" onClick={handleHandover}>
-                  Devret
-                </Button>
-                <Button size="sm" variant="secondary" onClick={handleSelfHandover}>
-                  🔄 Başka bölümde çalışıyorum
-                </Button>
+                {isAssignee && task.status !== 'done' ? (
+                  <>
+                    {task.status === 'todo' && (
+                      <Button
+                        size="sm"
+                        onClick={async () => {
+                          await updateTask(task.id, { status: 'in-progress' })
+                          toast({ title: 'Görev başlatıldı' })
+                        }}
+                      >
+                        Başlat
+                      </Button>
+                    )}
+                    {task.status === 'in-progress' && (
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={async () => {
+                          try {
+                            await api.post(`/tasks/${task.id}/complete-stage/`)
+                            await hydrateFromApi()
+                            toast({ title: 'Aşama tamamlandı' })
+                          } catch {
+                            await updateTask(task.id, { status: 'done' })
+                            await hydrateFromApi()
+                            toast({ title: 'Görev tamamlandı' })
+                          }
+                        }}
+                      >
+                        Bitir
+                      </Button>
+                    )}
+                    <Button size="sm" variant="outline" onClick={handleHandover}>
+                      Devret
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={handleSelfHandover}>
+                      🔄 Başka bölümde çalışıyorum
+                    </Button>
+                  </>
+                ) : (
+                  <Button size="sm" onClick={handleClaim}>
+                    Ben üstleniyorum
+                  </Button>
+                )}
               </div>
             </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -1802,7 +1801,7 @@ export function TaskDetailPage() {
                   {doneCount}/{checklist.length} ({completionPct}%)
                 </span>
               </div>
-              <RbacGuard perm="tasks.edit">
+              {data.settings.role === 'Admin' && (
                 <div className="flex flex-wrap items-center gap-2">
                   <Input
                     value={checkTitle}
@@ -1846,29 +1845,11 @@ export function TaskDetailPage() {
                     Şablon uygula
                   </Button>
                 </div>
-              </RbacGuard>
+              )}
             </div>
             <div className="space-y-2">
               {checklist.length === 0 && <p className="text-sm text-muted-foreground">Checklist boş</p>}
-              <RbacGuard
-                perm="tasks.edit"
-                fallback={
-                  <div className="space-y-2">
-                    {checklist.map((item) => (
-                      <div key={item.id} className="flex items-center gap-3 rounded border px-3 py-2">
-                        <Checkbox
-                          checked={item.done}
-                          onCheckedChange={async (checked) => {
-                            await toggleChecklistItem(item.id, Boolean(checked))
-                            toast({ title: 'Checklist güncellendi' })
-                          }}
-                        />
-                        <span className={`text-sm flex-1 ${item.done ? 'line-through text-muted-foreground' : ''}`}>{item.title}</span>
-                      </div>
-                    ))}
-                  </div>
-                }
-              >
+              {data.settings.role === 'Admin' ? (
                 <DndContext
                   sensors={dndSensors}
                   collisionDetection={closestCenter}
@@ -1901,7 +1882,16 @@ export function TaskDetailPage() {
                     ))}
                   </SortableContext>
                 </DndContext>
-              </RbacGuard>
+              ) : (
+                <div className="space-y-2">
+                  {checklist.map((item) => (
+                    <div key={item.id} className="flex items-center gap-3 rounded border px-3 py-2">
+                      <span className={`text-sm flex-1 ${item.done ? 'line-through text-muted-foreground' : ''}`}>{item.title}</span>
+                      {item.done && <span className="text-xs text-muted-foreground">✓</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
           <div className="space-y-2">
@@ -2174,10 +2164,14 @@ function TaskModal({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [droppedFiles, setDroppedFiles] = useState<File[]>([])
   const [apiTaskModels, setApiTaskModels] = useState<{ code: string; image_url?: string; duration_minutes: number; sizes: string[] }[]>([])
+  const [orgSettings, setOrgSettings] = useState<{ working_hours_start: string; working_hours_end: string; working_days: number[] } | null>(null)
   const errors = form.formState.errors
 
   useEffect(() => {
     api.get('/task-models/').then((r) => setApiTaskModels(r.data || [])).catch(() => setApiTaskModels([]))
+  }, [])
+  useEffect(() => {
+    api.get('/auth/organization-settings/').then((r) => setOrgSettings(r.data)).catch(() => setOrgSettings(null))
   }, [])
   const { toast } = useToast()
   const watchMode = form.watch('mode')
@@ -2231,14 +2225,22 @@ function TaskModal({
     form.setValue('plannedHours', Number((total / 60).toFixed(2)))
   }, [watchMode, watchDuration, watchQty])
 
-  // Başlangıç tarihi değişince, toplam planlanan süre varsa bitiş tarihini otomatik hesapla
+  // Başlangıç tarihi değişince, toplam planlanan süre varsa bitiş tarihini mesai gün/saatlerine göre hesapla
   useEffect(() => {
     if (!watchStart || !watchTotalPlanned || Number(watchTotalPlanned) <= 0) return
-    const startMs = new Date(watchStart).getTime()
-    const endMs = startMs + Number(watchTotalPlanned) * 60 * 1000
-    const endStr = new Date(endMs).toISOString().slice(0, 16)
+    const mins = Number(watchTotalPlanned)
+    const start = String(watchStart)
+    const endStr = orgSettings
+      ? addWorkingMinutes(
+          start,
+          mins,
+          orgSettings.working_hours_start || '08:00',
+          orgSettings.working_hours_end || '18:00',
+          orgSettings.working_days?.length ? orgSettings.working_days : [0, 1, 2, 3, 4]
+        )
+      : new Date(new Date(start).getTime() + mins * 60 * 1000).toISOString().slice(0, 16)
     form.setValue('end', endStr)
-  }, [watchStart, watchTotalPlanned])
+  }, [watchStart, watchTotalPlanned, orgSettings])
 
   const uploadAttachments = async (taskId: string, files: File[] | FileList | null) => {
     if (!files || (files as FileList).length === 0) return
