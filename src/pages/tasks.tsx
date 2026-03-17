@@ -1574,6 +1574,8 @@ export function TaskDetailPage() {
 
   const currentUserId = typeof window !== 'undefined' ? localStorage.getItem('current-user-id') : null
   const isAssignee = currentUserId && String(task.assignee) === String(currentUserId)
+  const isWorker = data.settings.role === 'Worker'
+  const isAdmin = data.settings.role === 'Admin'
 
   return (
     <div className="space-y-4">
@@ -1590,7 +1592,7 @@ export function TaskDetailPage() {
           <div className="rounded border p-3 space-y-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-sm font-semibold">Görev üstlenme / devir</p>
+                <p className="text-sm font-semibold">{isWorker ? 'Görev' : 'Görev üstlenme / devir'}</p>
                 <p className="text-xs text-muted-foreground">
                   Aktif takım: {data.teams.find((t) => t.id === (task as any)?.currentTeam)?.name || teamName || '—'}
                 </p>
@@ -1628,115 +1630,125 @@ export function TaskDetailPage() {
                         Bitir
                       </Button>
                     )}
-                    <Button size="sm" variant="outline" onClick={handleHandover}>
-                      Devret
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={handleSelfHandover}>
-                      🔄 Başka bölümde çalışıyorum
-                    </Button>
+                    {!isWorker && (
+                      <>
+                        <Button size="sm" variant="outline" onClick={handleHandover}>
+                          Devret
+                        </Button>
+                        <Button size="sm" variant="secondary" onClick={handleSelfHandover}>
+                          🔄 Başka bölümde çalışıyorum
+                        </Button>
+                      </>
+                    )}
                   </>
-                ) : (
+                ) : !isWorker ? (
                   <Button size="sm" onClick={handleClaim}>
                     Ben üstleniyorum
                   </Button>
+                ) : null}
+              </div>
+            </div>
+            {!isWorker && (
+              <>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <div>
+                    <Label>Hedef takım</Label>
+                    <Select value={handoverTeam} onValueChange={setHandoverTeam}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Takım seç" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-56 overflow-y-auto">
+                        <SelectItem value="none">—</SelectItem>
+                        {data.teams.map((t) => (
+                          <SelectItem key={t.id} value={t.id}>
+                            {t.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Hedef kişi</Label>
+                    <Select value={handoverAssignee} onValueChange={setHandoverAssignee}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Kişi seç" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[300px] overflow-y-auto">
+                        <SelectItem value="none">—</SelectItem>
+                        {data.users.map((u) => (
+                          <SelectItem key={u.id} value={String(u.id)}>
+                            {u.username}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Not</Label>
+                    <Input value={handoverNote} onChange={(e) => setHandoverNote(e.target.value)} placeholder="Kısa not" />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Son devir: {task.handoverAt ? formatDate(task.handoverAt) : '—'} {task.handoverReason ? `• ${task.handoverReason}` : ''}
+                </p>
+                {(task as any).handoverHistory && (task as any).handoverHistory.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    <p className="text-xs font-semibold uppercase text-muted-foreground">Devir Geçmişi</p>
+                    <div className="space-y-1">
+                      {((task as any).handoverHistory || []).slice(-5).reverse().map((h: any, idx: number) => (
+                        <div key={idx} className="rounded border bg-muted/30 px-2 py-1 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium">
+                              {h.from_team_name || h.from_team || '—'} → {h.to_team_name || h.to_team || '—'}
+                            </span>
+                            <span className="text-muted-foreground">{h.at ? formatDate(h.at) : ''}</span>
+                          </div>
+                          <div className="mt-0.5 text-muted-foreground">
+                            {h.by} {h.type === 'self-initiated' && '(kendi isteği)'} {h.note && `• ${h.note}`}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          {isAdmin && (
+            <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
+              <DetailRow label="Sahip" value={ownerName} />
+              <DetailRow label="Atanan" value={assigneeName} />
+              <DetailRow label="Ekip" value={teamName || '—'} />
+              <DetailRow label="Başlangıç" value={formatDate(task.start ?? '')} />
+              <DetailRow label="Bitiş" value={formatDate(task.end ?? '')} />
+              <div className="space-y-1">
+                <p className="text-xs uppercase text-muted-foreground">Vade tarihi</p>
+                <RbacGuard perm="tasks.edit" fallback={<p className="font-medium">{task.due ? formatDate(task.due) : '—'}</p>}>
+                  <Input
+                    type="datetime-local"
+                    value={task.due ? new Date(task.due).toISOString().slice(0, 16) : ''}
+                    onChange={async (e) => {
+                      const val = e.target.value
+                      if (!val) return
+                      await updateTask(task.id, { due: new Date(val).toISOString() })
+                      toast({ title: 'Vade tarihi güncellendi' })
+                    }}
+                    className="max-w-[200px]"
+                  />
+                </RbacGuard>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-xs uppercase text-muted-foreground">SLA</span>
+                {slaStatus(task) ? (
+                  <Badge variant={slaStatus(task) === 'overdue' ? 'destructive' : 'secondary'}>
+                    {slaStatus(task) === 'overdue' ? 'Gecikti' : '24s içinde'}
+                  </Badge>
+                ) : (
+                  <span className="font-medium">—</span>
                 )}
               </div>
             </div>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <div>
-                <Label>Hedef takım</Label>
-                <Select value={handoverTeam} onValueChange={setHandoverTeam}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Takım seç" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-56 overflow-y-auto">
-                    <SelectItem value="none">—</SelectItem>
-                    {data.teams.map((t) => (
-                      <SelectItem key={t.id} value={t.id}>
-                        {t.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Hedef kişi</Label>
-                <Select value={handoverAssignee} onValueChange={setHandoverAssignee}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Kişi seç" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-[300px] overflow-y-auto">
-                    <SelectItem value="none">—</SelectItem>
-                    {data.users.map((u) => (
-                      <SelectItem key={u.id} value={String(u.id)}>
-                        {u.username}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Not</Label>
-                <Input value={handoverNote} onChange={(e) => setHandoverNote(e.target.value)} placeholder="Kısa not" />
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Son devir: {task.handoverAt ? formatDate(task.handoverAt) : '—'} {task.handoverReason ? `• ${task.handoverReason}` : ''}
-            </p>
-            {(task as any).handoverHistory && (task as any).handoverHistory.length > 0 && (
-              <div className="mt-3 space-y-2">
-                <p className="text-xs font-semibold uppercase text-muted-foreground">Devir Geçmişi</p>
-                <div className="space-y-1">
-                  {((task as any).handoverHistory || []).slice(-5).reverse().map((h: any, idx: number) => (
-                    <div key={idx} className="rounded border bg-muted/30 px-2 py-1 text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium">
-                          {h.from_team_name || h.from_team || '—'} → {h.to_team_name || h.to_team || '—'}
-                        </span>
-                        <span className="text-muted-foreground">{h.at ? formatDate(h.at) : ''}</span>
-                      </div>
-                      <div className="mt-0.5 text-muted-foreground">
-                        {h.by} {h.type === 'self-initiated' && '(kendi isteği)'} {h.note && `• ${h.note}`}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
-            <DetailRow label="Sahip" value={ownerName} />
-            <DetailRow label="Atanan" value={assigneeName} />
-            <DetailRow label="Ekip" value={teamName || '—'} />
-            <DetailRow label="Başlangıç" value={formatDate(task.start ?? '')} />
-            <DetailRow label="Bitiş" value={formatDate(task.end ?? '')} />
-            <div className="space-y-1">
-              <p className="text-xs uppercase text-muted-foreground">Vade tarihi</p>
-              <RbacGuard perm="tasks.edit" fallback={<p className="font-medium">{task.due ? formatDate(task.due) : '—'}</p>}>
-                <Input
-                  type="datetime-local"
-                  value={task.due ? new Date(task.due).toISOString().slice(0, 16) : ''}
-                  onChange={async (e) => {
-                    const val = e.target.value
-                    if (!val) return
-                    await updateTask(task.id, { due: new Date(val).toISOString() })
-                    toast({ title: 'Vade tarihi güncellendi' })
-                  }}
-                  className="max-w-[200px]"
-                />
-              </RbacGuard>
-            </div>
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-xs uppercase text-muted-foreground">SLA</span>
-              {slaStatus(task) ? (
-                <Badge variant={slaStatus(task) === 'overdue' ? 'destructive' : 'secondary'}>
-                  {slaStatus(task) === 'overdue' ? 'Gecikti' : '24s içinde'}
-                </Badge>
-              ) : (
-                <span className="font-medium">—</span>
-              )}
-            </div>
-          </div>
+          )}
           {task.mode === 'fixed' && (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <div className="rounded border p-3">
@@ -1787,12 +1799,14 @@ export function TaskDetailPage() {
               </div>
             </div>
           )}
-          <div>
-            <p className="text-xs uppercase text-muted-foreground mb-1">Notlar</p>
-            <p className="rounded-md border border-dashed border-border/70 bg-muted/30 p-3 text-sm">
-              {task.notes || '—'}
-            </p>
-          </div>
+          {isAdmin && (
+            <div>
+              <p className="text-xs uppercase text-muted-foreground mb-1">Notlar</p>
+              <p className="rounded-md border border-dashed border-border/70 bg-muted/30 p-3 text-sm">
+                {task.notes || '—'}
+              </p>
+            </div>
+          )}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">

@@ -262,10 +262,9 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         # Sadece current_team üyeleri claim edebilir
         if not current_team.members.filter(id=request.user.id).exists():
             raise PermissionDenied("Bu görevi sadece ilgili ekip üyeleri üstlenebilir")
-        user_team = request.user.teams.first()
         task.assignee = request.user
-        task.current_team = user_team or task.current_team or task.team
-        task.save(update_fields=['assignee', 'current_team', 'updated_at'])
+        # current_team değiştirilmez - görev zaten doğru ekipte, sadece atama yapılır
+        task.save(update_fields=['assignee', 'updated_at'])
         TaskComment.objects.create(
             task=task,
             author=request.user,
@@ -451,16 +450,27 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
         # Mevcut ekip sıradaki konumunu bul
         current_idx = -1
+        next_team = None
         if from_team:
             for i, t in enumerate(ordered_teams):
                 if t.id == from_team.id:
                     current_idx = i
                     break
+            # Fallback: from_team ordered_teams'ta yoksa workflow_ids içinde sıradaki ekibi bul
+            if current_idx < 0 and workflow_ids:
+                try:
+                    fidx = workflow_ids.index(int(from_team.id))
+                    if fidx < len(workflow_ids) - 1:
+                        next_id = workflow_ids[fidx + 1]
+                        next_team = Team.objects.filter(id=next_id, organization=org).first()
+                except (ValueError, TypeError):
+                    pass
 
         # Sıradaki ekibe devret veya tamamla
         history = task.handover_history or []
-        if current_idx >= 0 and current_idx < len(ordered_teams) - 1:
-            next_team = ordered_teams[current_idx + 1]
+        if next_team or (current_idx >= 0 and current_idx < len(ordered_teams) - 1):
+            if not next_team:
+                next_team = ordered_teams[current_idx + 1]
             history.append({
                 "from_team": from_team.id if from_team else None,
                 "from_team_name": from_team.name if from_team else None,
