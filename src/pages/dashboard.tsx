@@ -13,6 +13,24 @@ import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import api from '@/lib/api'
 import { useToast } from '@/components/ui/use-toast'
+import type { Task } from '@/types'
+
+function mapTaskFromApi(t: any): Task {
+  return {
+    id: String(t.id ?? ''),
+    title: t.title ?? '',
+    owner: String(t.owner ?? ''),
+    assignee: t.assignee ? String(t.assignee) : '',
+    teamId: t.team ? String(t.team) : undefined,
+    currentTeam: t.current_team ? String(t.current_team) : undefined,
+    status: t.status ?? 'todo',
+    priority: t.priority ?? 'medium',
+    start: t.start,
+    end: t.end,
+    due: t.due,
+    workflowTeamIds: (t.workflow_team_ids || []).map((id: any) => String(id)),
+  }
+}
 
 export function DashboardPage() {
   const { toast } = useToast()
@@ -21,19 +39,10 @@ export function DashboardPage() {
   const hydrateFromApi = useAppStore((s) => s.hydrateFromApi)
   const isWorker = data.settings.role === 'Worker'
   const currentUserId = typeof window !== 'undefined' ? localStorage.getItem('current-user-id') : null
-  const myTeamIds = (data.teams || [])
-    .filter((t) => t.memberIds?.includes(currentUserId || ''))
-    .map((t) => t.id)
   const myTasks = (data.tasks || []).filter(
     (t) => String(t.assignee) === String(currentUserId) && t.status !== 'done'
   )
-  const teamQueueTasks = (data.tasks || []).filter(
-    (t) =>
-      !t.assignee &&
-      t.status !== 'done' &&
-      t.currentTeam &&
-      myTeamIds.includes(t.currentTeam)
-  )
+  const [teamQueueTasks, setTeamQueueTasks] = useState<Task[]>([])
   const [pendingApprovals, setPendingApprovals] = useState<
     { id: string; quote_id: string; quote_number: string; role: string; status: string }[]
   >([])
@@ -104,6 +113,23 @@ export function DashboardPage() {
     setTodayMeetings(data.today.meetings)
   }, [data.today])
 
+  const fetchTeamQueue = () => {
+    if (!isWorker) return
+    api
+      .get('/tasks/my-team-queue/')
+      .then((res) => setTeamQueueTasks((res.data || []).map(mapTaskFromApi)))
+      .catch(() => setTeamQueueTasks([]))
+  }
+
+  useEffect(() => {
+    if (isWorker) {
+      api
+        .get('/tasks/my-team-queue/')
+        .then((res) => setTeamQueueTasks((res.data || []).map(mapTaskFromApi)))
+        .catch(() => setTeamQueueTasks([]))
+    }
+  }, [isWorker, data.tasks])
+
   const totals = {
     revenue: data.invoices.reduce((sum, inv) => sum + inv.amount, 0),
     pipeline: data.opportunities.reduce((sum, opp) => sum + opp.value, 0),
@@ -164,6 +190,7 @@ export function DashboardPage() {
                         try {
                           await api.post(`/tasks/${task.id}/claim/`)
                           await hydrateFromApi()
+                          fetchTeamQueue()
                         } catch (e: any) {
                           const msg = e?.response?.data?.detail || 'Üstlenilemedi'
                           toast({ title: 'Hata', description: msg, variant: 'destructive' })

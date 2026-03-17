@@ -57,6 +57,9 @@ export function SettingsPage() {
   const [newModelName, setNewModelName] = useState('')
   const [newModelDuration, setNewModelDuration] = useState(4)
   const [newModelSizes, setNewModelSizes] = useState('73x210, 83x210, 93x210')
+  const [workingHoursStart, setWorkingHoursStart] = useState('08:00')
+  const [workingHoursEnd, setWorkingHoursEnd] = useState('18:00')
+  const [workingDays, setWorkingDays] = useState<number[]>([0, 1, 2, 3, 4])
 
   const userColumns: ColumnDef<UserLite>[] = [
     { accessorKey: 'username', header: 'Kullanıcı' },
@@ -92,6 +95,18 @@ export function SettingsPage() {
 
   useEffect(() => {
     loadTaskModels()
+  }, [])
+
+  useEffect(() => {
+    api
+      .get('/auth/organization-settings/')
+      .then((res) => {
+        const d = res.data || {}
+        setWorkingHoursStart(d.working_hours_start || '08:00')
+        setWorkingHoursEnd(d.working_hours_end || '18:00')
+        setWorkingDays(Array.isArray(d.working_days) ? d.working_days : [0, 1, 2, 3, 4])
+      })
+      .catch(() => null)
   }, [])
 
   useEffect(() => {
@@ -165,6 +180,78 @@ export function SettingsPage() {
             <Button onClick={() => toast({ title: 'Profil kaydedildi (mock)' })}>Kaydet</Button>
           </CardContent>
         </Card>
+        <RbacGuard perm="teams.edit">
+          <Card>
+            <CardHeader>
+              <CardTitle>Mesai saatleri</CardTitle>
+              <CardDescription>Worker ekibi sadece mesai saatleri ve günleri içinde giriş yapabilir</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Mesai başlangıç</Label>
+                  <Input
+                    type="time"
+                    value={workingHoursStart}
+                    onChange={(e) => setWorkingHoursStart(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label>Mesai bitiş</Label>
+                  <Input
+                    type="time"
+                    value={workingHoursEnd}
+                    onChange={(e) => setWorkingHoursEnd(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div>
+                <Label>Mesai günleri</Label>
+                <p className="text-xs text-muted-foreground mb-2">Worker girişi için izin verilen günler (Pzt=0, Paz=6)</p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { v: 0, l: 'Pzt' },
+                    { v: 1, l: 'Sal' },
+                    { v: 2, l: 'Çar' },
+                    { v: 3, l: 'Per' },
+                    { v: 4, l: 'Cum' },
+                    { v: 5, l: 'Cmt' },
+                    { v: 6, l: 'Paz' },
+                  ].map(({ v, l }) => (
+                    <label key={v} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={workingDays.includes(v)}
+                        onChange={(e) => {
+                          if (e.target.checked) setWorkingDays((d) => [...d, v].sort((a, b) => a - b))
+                          else setWorkingDays((d) => d.filter((x) => x !== v))
+                        }}
+                        className="rounded"
+                      />
+                      <span className="text-sm">{l}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <Button
+                onClick={async () => {
+                  try {
+                    await api.patch('/auth/organization-settings/', {
+                      working_hours_start: workingHoursStart,
+                      working_hours_end: workingHoursEnd,
+                      working_days: workingDays,
+                    })
+                    toast({ title: 'Mesai ayarları kaydedildi' })
+                  } catch (err: any) {
+                    toast({ title: 'Hata', description: err?.response?.data?.detail || 'Kaydedilemedi', variant: 'destructive' })
+                  }
+                }}
+              >
+                Kaydet
+              </Button>
+            </CardContent>
+          </Card>
+        </RbacGuard>
         <Card>
           <CardHeader>
             <CardTitle>Kullanıcılar & roller</CardTitle>

@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
+from datetime import time
 from organizations.models import Organization, Branch
 
 
@@ -55,3 +56,16 @@ class Team(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class OrganizationSettings(models.Model):
+    """Mesai saat aralığı ve günleri - Worker giriş kısıtlaması için."""
+    organization = models.OneToOneField(Organization, on_delete=models.CASCADE, related_name='settings')
+    working_hours_start = models.TimeField(default=time(8, 0))   # Mesai başlangıç
+    working_hours_end = models.TimeField(default=time(18, 0))    # Mesai bitiş
+    working_days = models.JSONField(default=list)  # [0,1,2,3,4] = Pzt-Cuma (0=Pzt, 6=Paz)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Ayarlar: {self.organization.name}"

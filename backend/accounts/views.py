@@ -19,7 +19,7 @@ from django.contrib.auth import get_user_model
 from django.utils.crypto import get_random_string
 from rest_framework import viewsets, permissions, filters
 from permissions import IsOrgMember, HasAPIPermission
-from .models import Team
+from .models import Team, OrganizationSettings
 from .serializers import TeamSerializer
 
 
@@ -355,3 +355,54 @@ class TeamViewSet(viewsets.ModelViewSet):
 
   def perform_create(self, serializer):
     serializer.save(organization=self.request.user.organization)
+
+
+class OrganizationSettingsView(APIView):
+  permission_classes = [IsAuthenticated, IsOrgMember]
+
+  def get(self, request):
+    if getattr(request.user, "role", "") not in ["Admin", "Manager"]:
+      return Response({"detail": "Yetkisiz"}, status=status.HTTP_403_FORBIDDEN)
+    org = request.user.organization
+    if not org:
+      return Response({"working_hours_start": "08:00", "working_hours_end": "18:00", "working_days": [0, 1, 2, 3, 4]})
+    try:
+      s = OrganizationSettings.objects.get(organization=org)
+      return Response({
+        "working_hours_start": s.working_hours_start.strftime("%H:%M"),
+        "working_hours_end": s.working_hours_end.strftime("%H:%M"),
+        "working_days": s.working_days or [0, 1, 2, 3, 4],
+      })
+    except OrganizationSettings.DoesNotExist:
+      return Response({"working_hours_start": "08:00", "working_hours_end": "18:00", "working_days": [0, 1, 2, 3, 4]})
+
+  def patch(self, request):
+    if getattr(request.user, "role", "") != "Admin":
+      return Response({"detail": "Sadece Admin güncelleyebilir"}, status=status.HTTP_403_FORBIDDEN)
+    org = request.user.organization
+    if not org:
+      return Response({"detail": "Organizasyon bulunamadı"}, status=status.HTTP_400_BAD_REQUEST)
+    s, _ = OrganizationSettings.objects.get_or_create(organization=org)
+    start = request.data.get("working_hours_start")
+    end = request.data.get("working_hours_end")
+    days = request.data.get("working_days")
+    if start:
+      from datetime import datetime
+      try:
+        s.working_hours_start = datetime.strptime(start, "%H:%M").time()
+      except ValueError:
+        pass
+    if end:
+      from datetime import datetime
+      try:
+        s.working_hours_end = datetime.strptime(end, "%H:%M").time()
+      except ValueError:
+        pass
+    if days is not None:
+      s.working_days = [int(x) for x in days if str(x).isdigit()]
+    s.save()
+    return Response({
+      "working_hours_start": s.working_hours_start.strftime("%H:%M"),
+      "working_hours_end": s.working_hours_end.strftime("%H:%M"),
+      "working_days": s.working_days,
+    })

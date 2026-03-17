@@ -45,7 +45,10 @@ export function LoginPage() {
       
       navigate({ to: '/' })
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Giriş başarısız')
+      const detail = err?.response?.data?.detail
+      setError(
+        Array.isArray(detail) ? detail[0] : typeof detail === 'string' ? detail : 'Giriş başarısız'
+      )
     } finally {
       setLoading(false)
       setHydrating(false)

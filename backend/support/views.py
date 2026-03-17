@@ -515,6 +515,26 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
         return Response(TaskSerializer(task, context={'request': request}).data)
 
+    @action(detail=False, methods=['get'], url_path='my-team-queue')
+    def my_team_queue(self, request):
+        """
+        Worker için: Ekibimdeki bekleyen görevler.
+        current_team'de kullanıcı üye, assignee null, status != done.
+        """
+        user = request.user
+        org = getattr(user, 'organization', None)
+        if not org:
+            return Response([])
+        user_team_ids = list(user.teams.values_list('id', flat=True))
+        if not user_team_ids:
+            return Response([])
+        qs = Task.objects.filter(
+            organization=org,
+            current_team_id__in=user_team_ids,
+            assignee__isnull=True,
+        ).exclude(status='done').select_related('team', 'current_team').order_by('-updated_at')
+        return Response(TaskSerializer(qs, many=True, context={'request': request}).data)
+
     @action(detail=False, methods=['get'], url_path='worker-tracking')
     def worker_tracking(self, request):
         """

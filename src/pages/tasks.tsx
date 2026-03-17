@@ -1464,7 +1464,7 @@ function SortableChecklistItem({
 
 export function TaskDetailPage() {
   const { taskId } = useParams({ from: '/tasks/$taskId' })
-  const { data, updateTask, addTaskComment, addChecklistItem, toggleChecklistItem, deleteChecklistItem, reorderChecklistItems, deleteAttachment, addTimeEntry, updateAttachment } =
+  const { data, updateTask, addTaskComment, addChecklistItem, toggleChecklistItem, deleteChecklistItem, reorderChecklistItems, deleteAttachment, addTimeEntry, updateAttachment, hydrateFromApi } =
     useAppStore()
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -1572,11 +1572,50 @@ export function TaskDetailPage() {
     toast({ title: '🔄 Görev devredildi', description: 'Başka bölümde çalışma kaydedildi' })
   }
 
+  const currentUserId = typeof window !== 'undefined' ? localStorage.getItem('current-user-id') : null
+  const isAssignee = currentUserId && String(task.assignee) === String(currentUserId)
+
   return (
     <div className="space-y-4">
       <PageHeader
         title={`Görev: ${task.title}`}
         description={`Durum: ${task.status} • Öncelik: ${task.priority || '-'}`}
+        actions={
+          isAssignee && task.status !== 'done' ? (
+            <div className="flex gap-2">
+              {task.status === 'todo' && (
+                <Button
+                  size="sm"
+                  onClick={async () => {
+                    await updateTask(task.id, { status: 'in-progress' })
+                    toast({ title: 'Görev başlatıldı' })
+                  }}
+                >
+                  Başlat
+                </Button>
+              )}
+              {task.status === 'in-progress' && (
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={async () => {
+                    try {
+                      await api.post(`/tasks/${task.id}/complete-stage/`)
+                      await hydrateFromApi()
+                      toast({ title: 'Aşama tamamlandı' })
+                    } catch {
+                      await updateTask(task.id, { status: 'done' })
+                      await hydrateFromApi()
+                      toast({ title: 'Görev tamamlandı' })
+                    }
+                  }}
+                >
+                  Bitir
+                </Button>
+              )}
+            </div>
+          ) : undefined
+        }
       />
       <Card>
         <CardHeader>

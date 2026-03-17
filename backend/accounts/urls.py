@@ -16,6 +16,7 @@ from .views import (
     ChangePasswordView,
     InviteUserView,
     ActivateUserView,
+    OrganizationSettingsView,
 )
 
 urlpatterns = [
@@ -35,5 +36,6 @@ urlpatterns = [
     path('change-password/', ChangePasswordView.as_view(), name='change_password'),
     path('invite/', InviteUserView.as_view(), name='invite_user'),
     path('activate/', ActivateUserView.as_view(), name='activate_user'),
+    path('organization-settings/', OrganizationSettingsView.as_view(), name='organization_settings'),
 ]
 

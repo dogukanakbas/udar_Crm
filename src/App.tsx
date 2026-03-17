@@ -66,6 +66,9 @@ function App() {
                     : `${ev.title} ${isForMe ? 'size devredildi' : 'devredildi'}`
                   : 'Görev devredildi',
               })
+              if (isForMyTeam && !isForMe) {
+                hydrate().catch(() => {})
+              }
             }
           } else if (t === 'task.status' && ev.status === 'done' && (isForMe || isAdminOrManager)) {
             toast({
