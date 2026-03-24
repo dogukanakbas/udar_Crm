@@ -90,7 +90,8 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
+# Mesai ve yerel tarih/saat için; Worker giriş kontrolü bu timezone'a göre yapılır (UTC bırakılırsa TR'de mesai yanlış reddedilir)
+TIME_ZONE = os.getenv('DJANGO_TIME_ZONE', 'Europe/Istanbul')
 USE_I18N = True
 USE_TZ = True
 

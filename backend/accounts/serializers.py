@@ -39,7 +39,14 @@ class TwoFATokenObtainPairSerializer(TokenObtainPairSerializer):
                 if s and s.working_days:
                     now = timezone.localtime(timezone.now())
                     wd = now.weekday()
-                    if wd not in s.working_days:
+                    # JSON'dan gelen günler bazen string olabiliyor; weekday ile karşılaştır
+                    working_days_int = []
+                    for x in s.working_days:
+                        try:
+                            working_days_int.append(int(x))
+                        except (TypeError, ValueError):
+                            continue
+                    if working_days_int and wd not in working_days_int:
                         raise serializers.ValidationError({
                             "detail": "Mesai günleri dışında giriş yapılamaz. Lütfen mesai günlerinde tekrar deneyin."
                         })
