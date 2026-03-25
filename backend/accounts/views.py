@@ -17,6 +17,9 @@ from audit.utils import log_entity_action
 from django.core.signing import TimestampSigner
 from django.contrib.auth import get_user_model
 from django.utils.crypto import get_random_string
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.contrib.auth.validators import UnicodeUsernameValidator
+from .user_import import allocate_username, full_name_to_username_base, split_full_name
 from rest_framework import viewsets, permissions, filters
 from permissions import IsOrgMember, HasAPIPermission
 from .models import Team, OrganizationSettings
@@ -40,8 +43,8 @@ class MeView(APIView):
         "id": user.id,
         "email": user.email,
         "username": user.username,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
+        "first_name": user.first_name or "",
+        "last_name": user.last_name or "",
         "role": getattr(user, "role", None),
         "organization": user.organization.id if user.organization else None,
         "is_superadmin": getattr(user, "is_superadmin", False),  # NEW: for auth gateway
@@ -58,7 +61,17 @@ class UsersListView(APIView):
     org = getattr(request.user, "organization", None)
     if org:
       qs = qs.filter(organization=org)
-    data = [{"id": u.id, "username": u.username, "email": u.email, "role": u.role} for u in qs]
+    data = [
+        {
+            "id": u.id,
+            "username": u.username,
+            "email": u.email or "",
+            "role": u.role,
+            "first_name": u.first_name or "",
+            "last_name": u.last_name or "",
+        }
+        for u in qs
+    ]
     return Response(data)
 
 
@@ -92,39 +105,142 @@ class CreateUserView(APIView):
     requester = request.user
     if getattr(requester, "role", "") != "Admin":
       return Response({"detail": "Yalnızca Admin kullanıcı oluşturabilir"}, status=403)
-    email = (request.data.get("email") or "").strip()
-    role = request.data.get("role", "Worker")
-    if not email:
-      return Response({"detail": "E-posta gerekli"}, status=400)
     org = getattr(requester, "organization", None)
     if not org:
       return Response({"detail": "Organizasyon bulunamadı"}, status=400)
+
+    username_in = (request.data.get("username") or "").strip()
+    email_in = (request.data.get("email") or "").strip()
+    full_name = (request.data.get("full_name") or "").strip()
+    role = request.data.get("role", "Worker")
     User = get_user_model()
-    existing = User.objects.filter(username=email).first()
+
+    if username_in:
+      username = username_in
+      email = email_in
+    elif email_in:
+      username = email_in
+      email = email_in
+    else:
+      return Response(
+          {
+              "detail": "Kullanıcı adı veya e-posta zorunludur. "
+              "E-postası olmayan kişiler için kullanıcı adı + (isteğe bağlı) ad soyad kullanın; girişte şifre ile kullanıcı adı yeterlidir.",
+          },
+          status=400,
+      )
+
+    try:
+      UnicodeUsernameValidator()(username)
+    except DjangoValidationError as e:
+      return Response({"detail": " ".join(e.messages)}, status=400)
+
+    first_name, last_name = split_full_name(full_name) if full_name else ("", "")
+
+    existing = User.objects.filter(username=username).first()
     if existing:
       if existing.organization_id != org.id:
         return Response(
-            {"detail": "Bu e-posta başka bir organizasyonda kayıtlı. Farklı bir adres kullanın."},
+            {"detail": "Bu kullanıcı adı başka bir organizasyonda kayıtlı."},
             status=400,
         )
       return Response(
-          {
-              "detail": "Bu e-posta ile kullanıcı zaten bu organizasyonda var. "
-              "Davet bekleyen hesap varsa önce aktivasyonu tamamlayın veya farklı e-posta deneyin."
-          },
+          {"detail": "Bu kullanıcı adı organizasyonda zaten var."},
           status=400,
       )
     password = get_random_string(12)
     user = User(
-        username=email,
-        email=email,
+        username=username,
+        email=email or "",
+        first_name=first_name,
+        last_name=last_name,
         role=role,
         organization=org,
         branch=getattr(requester, "branch", None),
     )
     user.set_password(password)
     user.save()
-    return Response({"id": user.id, "username": user.username, "email": user.email, "role": user.role, "password": password})
+    return Response(
+        {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email or "",
+            "role": user.role,
+            "password": password,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+        }
+    )
+
+
+class BulkCreateUsersView(APIView):
+  """Admin: Her satır 'Ad Soyad' — benzersiz kullanıcı adı ve şifre üretilir (e-posta zorunlu değil)."""
+
+  permission_classes = [IsAuthenticated]
+
+  def post(self, request):
+    requester = request.user
+    if getattr(requester, "role", "") != "Admin":
+      return Response({"detail": "Yalnızca Admin kullanıcı oluşturabilir"}, status=403)
+    org = getattr(requester, "organization", None)
+    if not org:
+      return Response({"detail": "Organizasyon bulunamadı"}, status=400)
+
+    role = request.data.get("role", "Worker")
+    lines_raw = request.data.get("lines")
+    if isinstance(lines_raw, str):
+      lines = [ln.strip() for ln in lines_raw.replace("\r\n", "\n").split("\n") if ln.strip()]
+    elif isinstance(lines_raw, list):
+      lines = [str(ln).strip() for ln in lines_raw if str(ln).strip()]
+    else:
+      return Response({"detail": "lines alanı gerekli (çok satırlı metin veya dizi)."}, status=400)
+
+    User = get_user_model()
+    taken_this_batch: set[str] = set()
+    created = []
+    errors = []
+
+    def is_taken(uname: str) -> bool:
+      if uname in taken_this_batch:
+        return True
+      return User.objects.filter(username=uname).exists()
+
+    for idx, full_name in enumerate(lines, start=1):
+      if not full_name or len(full_name) > 200:
+        errors.append({"line": idx, "full_name": full_name[:50] if full_name else "", "detail": "Geçersiz satır"})
+        continue
+      base = full_name_to_username_base(full_name)
+      try:
+        uname = allocate_username(base, is_taken)
+      except ValueError as e:
+        errors.append({"line": idx, "full_name": full_name, "detail": str(e)})
+        continue
+      taken_this_batch.add(uname)
+      first_name, last_name = split_full_name(full_name)
+      password = get_random_string(12)
+      user = User(
+          username=uname,
+          email="",
+          first_name=first_name,
+          last_name=last_name,
+          role=role,
+          organization=org,
+          branch=getattr(requester, "branch", None),
+      )
+      user.set_password(password)
+      user.save()
+      created.append(
+          {
+              "id": user.id,
+              "username": user.username,
+              "password": password,
+              "full_name": full_name,
+              "first_name": first_name,
+              "last_name": last_name,
+          }
+      )
+
+    return Response({"created": created, "errors": errors, "summary": f"{len(created)} oluşturuldu, {len(errors)} satır atlandı"})
 
 
 class RateLimitedTokenObtainPairView(TokenObtainPairView):

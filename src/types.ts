@@ -192,6 +192,8 @@ export interface UserLite {
   username: string
   email: string
   role: string
+  firstName?: string
+  lastName?: string
 }
 
 export interface Attachment {

@@ -339,8 +339,10 @@ export const useAppStore = create<AppState>()(
       const users: UserLite[] = (usersRes.data || []).map((u: any) => ({
         id: String(u.id),
         username: u.username,
-        email: u.email,
+        email: u.email || '',
         role: u.role,
+        firstName: u.first_name || '',
+        lastName: u.last_name || '',
       }))
       const tasks: Task[] = (tasksRes.data || []).map((t: any, idx: number) => ({
         id: String(t.id ?? idx),

@@ -3,6 +3,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from .views import (
     MeView,
     CreateUserView,
+    BulkCreateUsersView,
     UsersListView,
     DeleteUserView,
     NotificationPrefView,
@@ -26,6 +27,7 @@ urlpatterns = [
     path('me/', MeView.as_view(), name='me'),
     path('notification-prefs/', NotificationPrefView.as_view(), name='notification_prefs'),
     path('create-user/', CreateUserView.as_view(), name='create_user'),
+    path('bulk-create-users/', BulkCreateUsersView.as_view(), name='bulk_create_users'),
     path('users/', UsersListView.as_view(), name='users_list'),
     path('users/<int:pk>/', DeleteUserView.as_view(), name='delete_user'),
     path('password-reset/', PasswordResetRequestView.as_view(), name='password_reset'),

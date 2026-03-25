@@ -3,6 +3,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
@@ -44,9 +45,13 @@ export function SettingsPage() {
   const [notifSlack, setNotifSlack] = useState('')
   const [notifEmail, setNotifEmail] = useState('')
   const [userEmail, setUserEmail] = useState('')
+  const [userUsername, setUserUsername] = useState('')
+  const [userFullName, setUserFullName] = useState('')
   const [userRole, setUserRole] = useState('Worker')
   const [userTeamId, setUserTeamId] = useState<string | undefined>(undefined)
   const [generatedPass, setGeneratedPass] = useState<string | null>(null)
+  const [bulkUserLines, setBulkUserLines] = useState('')
+  const [bulkBusy, setBulkBusy] = useState(false)
   const [teamName, setTeamName] = useState('')
   const [automationName, setAutomationName] = useState('')
   const [automationTrigger, setAutomationTrigger] = useState<'task_status_changed' | 'task_due_soon' | 'task_created'>('task_status_changed')
@@ -80,7 +85,14 @@ export function SettingsPage() {
   const [workingDays, setWorkingDays] = useState<number[]>([0, 1, 2, 3, 4])
 
   const userColumns: ColumnDef<UserLite>[] = [
-    { accessorKey: 'username', header: 'Kullanıcı' },
+    {
+      accessorKey: 'username',
+      header: 'Kullanıcı',
+      cell: ({ row }) => {
+        const d = [row.original.firstName, row.original.lastName].filter(Boolean).join(' ').trim()
+        return d ? `${d} · @${row.original.username}` : row.original.username
+      },
+    },
     { accessorKey: 'email', header: 'E-posta' },
     {
       accessorKey: 'role',
@@ -308,11 +320,28 @@ export function SettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Kullanıcılar & roller</CardTitle>
-            <CardDescription>Yeni kullanıcı oluştur ve ekibe ata</CardDescription>
+            <CardDescription>
+              Tek tek: kullanıcı adı veya e-posta ile oluşturun (e-postası yoksa yalnızca kullanıcı adı + ad soyad yeterli;
+              giriş ekranında şifre ile bu kullanıcı adı kullanılır). Toplu: her satıra bir kişi yazın, sistem kullanıcı adını
+              üretir.
+            </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-6">
             <div className="space-y-2">
-              <Label>Yeni kullanıcı e-posta</Label>
+              <Label>Tek kullanıcı — kullanıcı adı (e-posta yoksa zorunlu)</Label>
+              <Input
+                value={userUsername}
+                onChange={(e) => setUserUsername(e.target.value)}
+                placeholder="örn. ali.yilmaz"
+                autoComplete="off"
+              />
+              <Label>Tek kullanıcı — ad soyad (isteğe bağlı, listede görünür)</Label>
+              <Input
+                value={userFullName}
+                onChange={(e) => setUserFullName(e.target.value)}
+                placeholder="örn. Ali Yılmaz"
+              />
+              <Label>Tek kullanıcı — e-posta (isteğe bağlı; doluysa hem e-posta hem giriş adı olur)</Label>
               <Input value={userEmail} onChange={(e) => setUserEmail(e.target.value)} placeholder="ornek@firma.com" />
               <Label>Rol</Label>
               <Select value={userRole} onValueChange={setUserRole}>
@@ -327,7 +356,7 @@ export function SettingsPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <Label>Ekip</Label>
+              <Label>Ekip (isteğe bağlı)</Label>
               <Select value={userTeamId ?? 'none'} onValueChange={(v) => setUserTeamId(v === 'none' ? undefined : v)}>
                 <SelectTrigger>
                   <SelectValue placeholder="Ekip seç" />
@@ -346,7 +375,22 @@ export function SettingsPage() {
                 size="sm"
                 onClick={async () => {
                   try {
-                    const resp = await api.post('/auth/create-user/', { email: userEmail, role: userRole })
+                    const payload: Record<string, string> = { role: userRole }
+                    const u = userUsername.trim()
+                    const em = userEmail.trim()
+                    const fn = userFullName.trim()
+                    if (u) payload.username = u
+                    if (em) payload.email = em
+                    if (fn) payload.full_name = fn
+                    if (!payload.username && !payload.email) {
+                      toast({
+                        title: 'Eksik bilgi',
+                        description: 'Kullanıcı adı veya e-postadan en az biri gerekli.',
+                        variant: 'destructive',
+                      })
+                      return
+                    }
+                    const resp = await api.post('/auth/create-user/', payload)
                     const newUser = resp.data
                     if (userTeamId) {
                       const team = data.teams.find((t) => String(t.id) === String(userTeamId))
@@ -358,7 +402,13 @@ export function SettingsPage() {
                     }
                     await useAppStore.getState().hydrateFromApi()
                     setGeneratedPass(resp.data.password)
-                    toast({ title: 'Kullanıcı oluşturuldu', description: `Şifre: ${resp.data.password}` })
+                    toast({
+                      title: 'Kullanıcı oluşturuldu',
+                      description: `Giriş adı: ${resp.data.username} — Şifre: ${resp.data.password}`,
+                    })
+                    setUserUsername('')
+                    setUserFullName('')
+                    setUserEmail('')
                   } catch (err: unknown) {
                     toast({ title: 'Hata', description: formatApiError(err), variant: 'destructive' })
                   }
@@ -366,7 +416,76 @@ export function SettingsPage() {
               >
                 Kullanıcı oluştur
               </Button>
-              {generatedPass && <p className="text-xs text-muted-foreground">Üretilen şifre: {generatedPass}</p>}
+              {generatedPass && (
+                <p className="text-xs text-muted-foreground">
+                  Son üretilen şifre (kopyalayın): <span className="font-mono">{generatedPass}</span>
+                </p>
+              )}
+            </div>
+            <div className="space-y-2 border-t border-border pt-4">
+              <p className="text-sm font-semibold">Toplu kullanıcı (sadece ad soyad listesi)</p>
+              <p className="text-xs text-muted-foreground">
+                Her satıra bir kişi: örn. <span className="font-mono">Mehmet Yılmaz</span>. Sistem kullanıcı adını
+                (mehmet.yilmaz vb.) ve rastgele şifreyi üretir. Çıktıyı mutlaka kaydedin.
+              </p>
+              <Label>Rol (toplu)</Label>
+              <Select value={userRole} onValueChange={setUserRole}>
+                <SelectTrigger className="max-w-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {['Worker', 'Support', 'Sales', 'Finance', 'Manager', 'Warehouse', 'Admin'].map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {ROLE_LABEL_TR[r] ?? r}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Textarea
+                value={bulkUserLines}
+                onChange={(e) => setBulkUserLines(e.target.value)}
+                placeholder={'Ahmet Yılm\nAyşe Demir\nVeli Kaya'}
+                className="min-h-[140px] font-mono text-sm"
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  disabled={bulkBusy || !bulkUserLines.trim()}
+                  onClick={async () => {
+                    setBulkBusy(true)
+                    try {
+                      const res = await api.post('/auth/bulk-create-users/', { lines: bulkUserLines, role: userRole })
+                      const created = res.data?.created || []
+                      const errors = res.data?.errors || []
+                      if (created.length) {
+                        const lines = ['kullanici_adi;sifre;ad_soyad', ...created.map((c: any) => `${c.username};${c.password};${c.full_name}`)]
+                        const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' })
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = `yeni_kullanicilar_${new Date().toISOString().slice(0, 10)}.csv`
+                        a.click()
+                        URL.revokeObjectURL(url)
+                      }
+                      toast({
+                        title: res.data?.summary || 'Toplu oluşturma bitti',
+                        description:
+                          errors.length > 0
+                            ? `${errors.length} satır atlandı. Ayrıntı konsol veya yanıt gövdesinde.`
+                            : 'CSV indirildi; şifreleri güvenli paylaşın.',
+                      })
+                      await useAppStore.getState().hydrateFromApi()
+                      setBulkUserLines('')
+                    } catch (err: unknown) {
+                      toast({ title: 'Hata', description: formatApiError(err), variant: 'destructive' })
+                    } finally {
+                      setBulkBusy(false)
+                    }
+                  }}
+                >
+                  Toplu oluştur ve CSV indir
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
