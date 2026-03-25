@@ -605,22 +605,28 @@ export function TasksPage() {
           >
             Detay
           </button>
-          <RbacGuard perm="tasks.edit">
-            <TaskModal
-              task={row.original}
-              users={data.users}
-              teams={data.teams}
-              uploading={uploading}
-              setUploading={setUploading}
-              onSubmit={(values) => {
-                updateTask(row.original.id, values)
-                toast({ title: 'Görev güncellendi' })
-              }}
-            >
-              <Button variant="ghost" size="sm">Düzenle</Button>
-            </TaskModal>
-            <Button variant="ghost" size="sm" onClick={() => deleteTask(row.original.id)}>Sil</Button>
-          </RbacGuard>
+          {data.settings.role !== 'Worker' && (
+            <RbacGuard perm="tasks.edit">
+              <TaskModal
+                task={row.original}
+                users={data.users}
+                teams={data.teams}
+                uploading={uploading}
+                setUploading={setUploading}
+                onSubmit={(values) => {
+                  updateTask(row.original.id, values)
+                  toast({ title: 'Görev güncellendi' })
+                }}
+              >
+                <Button variant="ghost" size="sm">
+                  Düzenle
+                </Button>
+              </TaskModal>
+              <Button variant="ghost" size="sm" onClick={() => deleteTask(row.original.id)}>
+                Sil
+              </Button>
+            </RbacGuard>
+          )}
         </div>
       ),
     },
@@ -2078,21 +2084,25 @@ export function TaskDetailPage() {
               </div>
             ))}
           </div>
-          <RbacGuard perm="tasks.edit">
-            <TaskModal
-              task={task}
-              users={data.users}
-              teams={data.teams}
-              uploading={false}
-              setUploading={() => {}}
-              onSubmit={async (values) => {
-                await updateTask(task.id, values)
-                toast({ title: 'Görev güncellendi' })
-              }}
-            >
-              <Button size="sm" variant="outline">Düzenle</Button>
-            </TaskModal>
-          </RbacGuard>
+          {!isWorker && (
+            <RbacGuard perm="tasks.edit">
+              <TaskModal
+                task={task}
+                users={data.users}
+                teams={data.teams}
+                uploading={false}
+                setUploading={() => {}}
+                onSubmit={async (values) => {
+                  await updateTask(task.id, values)
+                  toast({ title: 'Görev güncellendi' })
+                }}
+              >
+                <Button size="sm" variant="outline">
+                  Düzenle
+                </Button>
+              </TaskModal>
+            </RbacGuard>
+          )}
         </CardContent>
       </Card>
       <Card>
