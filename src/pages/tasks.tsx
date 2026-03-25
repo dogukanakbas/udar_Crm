@@ -18,7 +18,19 @@ import { useToast } from '@/components/ui/use-toast'
 import { useAppStore } from '@/state/use-app-store'
 import api from '@/lib/api'
 import { formatDate, formatDateTime, addWorkingMinutes } from '@/lib/utils'
-import type { Task } from '@/types'
+import type { Task, Team } from '@/types'
+
+function taskVisibleToWorkerTeamMember(t: Task, workerUserId: string | null, teams: Team[]): boolean {
+  if (!workerUserId) return false
+  const myTeams = teams.filter((tm) => tm.memberIds?.some((m) => String(m) === String(workerUserId)))
+  if (myTeams.length === 0) return false
+  const ct = String(t.currentTeam || t.teamId || '')
+  if (!ct) return false
+  const teamRow = myTeams.find((tm) => tm.id === ct)
+  if (!teamRow) return false
+  if (!t.assignee || String(t.assignee).trim() === '') return true
+  return !!teamRow.memberIds?.some((m) => String(m) === String(t.assignee))
+}
 import { Calendar, Plus, Paperclip, Download, Trash2, GripVertical } from 'lucide-react'
 import { RbacGuard } from '@/components/rbac'
 import { useParams } from '@tanstack/react-router'
@@ -353,19 +365,28 @@ export function TasksPage() {
     })
   }, [tasks, notifMuted, toast])
 
-  const filtered = useMemo(
-    () =>
-      tasks.filter(
-        (t) =>
-          (status === 'all' || t.status === status) &&
-          (assignee === 'all' || String(t.assignee) === String(assignee)) &&
-          (teamFilter === 'all' || String(t.teamId) === String(teamFilter)) &&
-          (search.trim().length === 0 ||
-            t.title.toLowerCase().includes(search.trim().toLowerCase()) ||
-            (t.notes || '').toLowerCase().includes(search.trim().toLowerCase()))
-      ),
-    [tasks, status, assignee, teamFilter, search]
-  )
+  const filtered = useMemo(() => {
+    const me =
+      typeof window !== 'undefined' ? localStorage.getItem('current-user-id') : null
+    const isWorker = data.settings.role === 'Worker'
+    return tasks.filter((t) => {
+      const assigneeMatch =
+        assignee === 'all' ||
+        String(t.assignee) === String(assignee) ||
+        (isWorker &&
+          me &&
+          assignee === me &&
+          taskVisibleToWorkerTeamMember(t, me, data.teams))
+      return (
+        (status === 'all' || t.status === status) &&
+        assigneeMatch &&
+        (teamFilter === 'all' || String(t.teamId) === String(teamFilter)) &&
+        (search.trim().length === 0 ||
+          t.title.toLowerCase().includes(search.trim().toLowerCase()) ||
+          (t.notes || '').toLowerCase().includes(search.trim().toLowerCase()))
+      )
+    })
+  }, [tasks, status, assignee, teamFilter, search, data.settings.role, data.teams])
 
   const statusCounts = useMemo(() => {
     return filtered.reduce(

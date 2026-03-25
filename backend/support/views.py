@@ -2,7 +2,7 @@ from rest_framework import viewsets, permissions, filters
 from rest_framework.decorators import action
 from core.events import push_event
 from rest_framework.exceptions import PermissionDenied
-from django.db.models import Q
+from django.db.models import Q, Exists, OuterRef
 import re
 import os
 import uuid
@@ -587,8 +587,8 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='my-team-queue')
     def my_team_queue(self, request):
         """
-        Worker için: Ekibimdeki bekleyen görevler.
-        current_team'de kullanıcı üye, assignee null, status != done.
+        Worker için: Aktif ekip aşamasındaki görevler (üye olan herkes görür).
+        Atanan yoksa veya atanmış kişi o ekibin üyesiyse (ör. usta başı) listelenir.
         """
         user = request.user
         org = getattr(user, 'organization', None)
@@ -597,11 +597,17 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         user_team_ids = list(user.teams.values_list('id', flat=True))
         if not user_team_ids:
             return Response([])
-        qs = Task.objects.filter(
-            organization=org,
-            current_team_id__in=user_team_ids,
-            assignee__isnull=True,
-        ).exclude(status='done').select_related('team', 'current_team').order_by('-updated_at')
+        assignee_in_current_team = Team.members.through.objects.filter(
+            team_id=OuterRef('current_team_id'),
+            user_id=OuterRef('assignee_id'),
+        )
+        qs = (
+            Task.objects.filter(organization=org, current_team_id__in=user_team_ids)
+            .exclude(status='done')
+            .filter(Q(assignee__isnull=True) | Exists(assignee_in_current_team))
+            .select_related('team', 'current_team')
+            .order_by('-updated_at')
+        )
         return Response(TaskSerializer(qs, many=True, context={'request': request}).data)
 
     @action(detail=False, methods=['get'], url_path='worker-tracking')
