@@ -62,30 +62,66 @@ class UsersListView(APIView):
     return Response(data)
 
 
+class DeleteUserView(APIView):
+  """Admin: organizasyondaki kullanıcıyı kalıcı siler (FK'ler SET_NULL ise güvenli)."""
+
+  permission_classes = [IsAuthenticated]
+
+  def delete(self, request, pk):
+    if getattr(request.user, "role", "") != "Admin":
+      return Response({"detail": "Yalnızca Admin kullanıcı silebilir"}, status=status.HTTP_403_FORBIDDEN)
+    if str(request.user.pk) == str(pk):
+      return Response({"detail": "Kendi hesabınızı silemezsiniz"}, status=status.HTTP_400_BAD_REQUEST)
+    User = get_user_model()
+    org = getattr(request.user, "organization", None)
+    if not org:
+      return Response({"detail": "Organizasyon bulunamadı"}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+      user = User.objects.get(pk=pk, organization=org)
+    except User.DoesNotExist:
+      return Response({"detail": "Kullanıcı bulunamadı"}, status=status.HTTP_404_NOT_FOUND)
+    log_entity_action(user, "deleted", user=request.user)
+    user.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class CreateUserView(APIView):
   permission_classes = [IsAuthenticated]
 
   def post(self, request):
     requester = request.user
     if getattr(requester, "role", "") != "Admin":
-      return Response({"detail": "Only Admin can create users"}, status=403)
-    email = request.data.get("email")
+      return Response({"detail": "Yalnızca Admin kullanıcı oluşturabilir"}, status=403)
+    email = (request.data.get("email") or "").strip()
     role = request.data.get("role", "Worker")
     if not email:
-      return Response({"detail": "email required"}, status=400)
+      return Response({"detail": "E-posta gerekli"}, status=400)
+    org = getattr(requester, "organization", None)
+    if not org:
+      return Response({"detail": "Organizasyon bulunamadı"}, status=400)
     User = get_user_model()
+    existing = User.objects.filter(username=email).first()
+    if existing:
+      if existing.organization_id != org.id:
+        return Response(
+            {"detail": "Bu e-posta başka bir organizasyonda kayıtlı. Farklı bir adres kullanın."},
+            status=400,
+        )
+      return Response(
+          {
+              "detail": "Bu e-posta ile kullanıcı zaten bu organizasyonda var. "
+              "Davet bekleyen hesap varsa önce aktivasyonu tamamlayın veya farklı e-posta deneyin."
+          },
+          status=400,
+      )
     password = get_random_string(12)
-    user, created = User.objects.get_or_create(
-      username=email,
-      defaults={
-        "email": email,
-        "role": role,
-        "organization": requester.organization,
-        "branch": getattr(requester, "branch", None),
-      },
+    user = User(
+        username=email,
+        email=email,
+        role=role,
+        organization=org,
+        branch=getattr(requester, "branch", None),
     )
-    if not created:
-      return Response({"detail": "user already exists"}, status=400)
     user.set_password(password)
     user.save()
     return Response({"id": user.id, "username": user.username, "email": user.email, "role": user.role, "password": password})

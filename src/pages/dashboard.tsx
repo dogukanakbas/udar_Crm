@@ -98,12 +98,9 @@ export function DashboardPage() {
       api.get('/approvals/pending/').then((res) => setPendingApprovals(res.data || [])).catch(() => setPendingApprovals([]))
     }
 
-    // health endpoint backend kökünde (/health/), baseURL /api ise 404 olmaması için tam URL hesapla
-    const apiBase = (api.defaults.baseURL || '').replace(/\/$/, '')
-    const rootBase = apiBase.endsWith('/api') ? apiBase.slice(0, -4) : apiBase
-    const healthUrl = `${rootBase}/health/`
+    // Sağlık ucu Django'da /api/health/ altında (baseURL zaten .../api)
     api
-      .get(healthUrl, { baseURL: '' })
+      .get('/health/')
       .then((res) => setHealth(res.data || null))
       .catch(() => setHealth(null))
   }, [])

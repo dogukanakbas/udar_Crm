@@ -5,8 +5,15 @@ import pyotp
 
 
 class TeamSerializer(serializers.ModelSerializer):
-    members = serializers.PrimaryKeyRelatedField(
-        many=True, queryset=User.objects.none(), required=False
+    """
+    members: yazarken tamsayı pk listesi (JSON [1,2,3]).
+    Geçersiz veya başka organizasyona ait pk'lar sessizçe düşürülür — böylece silinmiş
+    kullanıcı kalıntıları yüzünden PATCH 400 oluşmaz.
+    """
+    members = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        allow_empty=True,
     )
     leader = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.none(), allow_null=True, required=False
@@ -22,37 +29,80 @@ class TeamSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         org = getattr(getattr(request, 'user', None), 'organization', None) if request else None
         if org:
-            qs = User.objects.filter(organization=org)
-            self.fields['members'].queryset = qs
-            self.fields['leader'].queryset = qs
+            self.fields['leader'].queryset = User.objects.filter(organization=org)
+
+    def _org_for_write(self):
+        request = self.context.get('request')
+        if self.instance:
+            return self.instance.organization
+        return getattr(getattr(request, 'user', None), 'organization', None)
+
+    def _normalize_member_pks(self, value):
+        """Organizasyondaki geçerli üye pk listesi; sırayı koru, yinelenen/ geçersiz at."""
+        if value is None:
+            return None
+        org = self._org_for_write()
+        if not org:
+            return []
+        allowed = set(User.objects.filter(organization=org).values_list('pk', flat=True))
+        out, seen = [], set()
+        for raw in value:
+            try:
+                pk = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if pk in allowed and pk not in seen:
+                out.append(pk)
+                seen.add(pk)
+        return out
+
+    def validate_members(self, value):
+        if value is None:
+            return None
+        return self._normalize_member_pks(value)
 
     def validate(self, attrs):
-        members = attrs.get('members')
+        members = attrs.get('members', None)
         leader = attrs.get('leader', serializers.empty)
         leader_obj = None if leader is serializers.empty else leader
+
         if leader_obj:
             if members is not None:
-                m_ids = {getattr(m, 'pk', m) for m in members}
-                if leader_obj.pk not in m_ids:
-                    raise serializers.ValidationError({'leader': 'Usta başı mutlaka ekip üyelerinden biri olmalıdır.'})
+                mids = list(members)
+                if leader_obj.pk not in mids:
+                    attrs['members'] = mids + [leader_obj.pk]
             elif self.instance is not None:
-                if not self.instance.members.filter(id=leader_obj.pk).exists():
-                    raise serializers.ValidationError({'leader': 'Usta başı mutlaka ekip üyelerinden biri olmalıdır.'})
+                current = list(self.instance.members.values_list('pk', flat=True))
+                if leader_obj.pk not in current:
+                    attrs['members'] = current + [leader_obj.pk]
+
+        members = attrs.get('members', None)
+        if members is not None:
+            attrs['members'] = self._normalize_member_pks(members)
         return attrs
 
+    def to_representation(self, instance):
+        return {
+            'id': instance.id,
+            'name': instance.name,
+            'organization': instance.organization_id,
+            'members': list(instance.members.values_list('pk', flat=True)),
+            'leader': instance.leader_id,
+        }
+
     def create(self, validated_data):
-        members = validated_data.pop('members', None)
-        instance = Team.objects.create(**validated_data)
-        if members is not None:
-            instance.members.set(members)
+        members_ids = validated_data.pop('members', None)
+        instance = super().create(validated_data)
+        if members_ids is not None:
+            instance.members.set(User.objects.filter(pk__in=members_ids))
         self._clear_leader_if_not_member(instance)
         return instance
 
     def update(self, instance, validated_data):
-        members = validated_data.pop('members', None)
+        members_ids = validated_data.pop('members', None)
         instance = super().update(instance, validated_data)
-        if members is not None:
-            instance.members.set(members)
+        if members_ids is not None:
+            instance.members.set(User.objects.filter(pk__in=members_ids))
         self._clear_leader_if_not_member(instance)
         return instance
 
@@ -90,7 +140,6 @@ class TwoFATokenObtainPairSerializer(TokenObtainPairSerializer):
                 if s and s.working_days:
                     now = timezone.localtime(timezone.now())
                     wd = now.weekday()
-                    # JSON'dan gelen günler bazen string olabiliyor; weekday ile karşılaştır
                     working_days_int = []
                     for x in s.working_days:
                         try:
@@ -107,4 +156,3 @@ class TwoFATokenObtainPairSerializer(TokenObtainPairSerializer):
                             "detail": f"Mesai saatleri dışında giriş yapılamaz. Mesai: {s.working_hours_start.strftime('%H:%M')}-{s.working_hours_end.strftime('%H:%M')}"
                         })
         return data
-

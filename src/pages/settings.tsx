@@ -19,6 +19,23 @@ import type { UserLite } from '@/types'
 import { AlertCircle, ShieldCheck, Plus, Trash2, ImageIcon } from 'lucide-react'
 import { RbacGuard } from '@/components/rbac'
 
+function formatApiError(err: unknown): string {
+  const e = err as { response?: { data?: Record<string, unknown> | string } }
+  const d = e?.response?.data
+  if (!d) return 'İşlem başarısız'
+  if (typeof d === 'string') return d
+  const detail = (d as { detail?: unknown }).detail
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) return detail.map(String).join(', ')
+  const parts: string[] = []
+  for (const [k, v] of Object.entries(d)) {
+    if (k === 'detail') continue
+    parts.push(`${k}: ${Array.isArray(v) ? v.join(', ') : String(v)}`)
+  }
+  if (parts.length) return parts.join(' · ')
+  return 'İşlem başarısız'
+}
+
 export function SettingsPage() {
   const { data, resetDemo, setLocale } = useAppStore()
   const { theme, setTheme } = useTheme()
@@ -65,7 +82,49 @@ export function SettingsPage() {
   const userColumns: ColumnDef<UserLite>[] = [
     { accessorKey: 'username', header: 'Kullanıcı' },
     { accessorKey: 'email', header: 'E-posta' },
-    { accessorKey: 'role', header: 'Rol' },
+    {
+      accessorKey: 'role',
+      header: 'Rol',
+      cell: ({ row }) => ROLE_LABEL_TR[row.original.role] ?? row.original.role,
+    },
+    ...(data.settings.role === 'Admin'
+      ? ([
+          {
+            id: 'user-actions',
+            header: '',
+            cell: ({ row }: { row: { original: UserLite } }) => (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-destructive hover:text-destructive"
+                onClick={async () => {
+                  if (
+                    !confirm(
+                      `${row.original.username} kullanıcısını kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz.`
+                    )
+                  )
+                    return
+                  try {
+                    await api.delete(`/auth/users/${row.original.id}/`)
+                    await useAppStore.getState().hydrateFromApi()
+                    toast({ title: 'Kullanıcı silindi' })
+                  } catch (err: any) {
+                    const d = err?.response?.data
+                    const msg =
+                      (typeof d?.detail === 'string' && d.detail) ||
+                      (Array.isArray(d?.detail) && d.detail[0]) ||
+                      (d && typeof d === 'object' && Object.values(d).flat().find((x) => typeof x === 'string')) ||
+                      'Silinemedi'
+                    toast({ title: 'Hata', description: String(msg), variant: 'destructive' })
+                  }
+                }}
+              >
+                Sil
+              </Button>
+            ),
+          },
+        ] as ColumnDef<UserLite>[])
+      : []),
   ]
 
 
@@ -290,15 +349,18 @@ export function SettingsPage() {
                     const resp = await api.post('/auth/create-user/', { email: userEmail, role: userRole })
                     const newUser = resp.data
                     if (userTeamId) {
-                      const team = data.teams.find((t) => t.id === userTeamId)
-                      const memberIds = team ? team.memberIds : []
-                      await api.patch(`/teams/${userTeamId}/`, { members: [...memberIds, newUser.id] })
+                      const team = data.teams.find((t) => String(t.id) === String(userTeamId))
+                      const memberNums = (team ? team.memberIds : []).map((id) => Number(id))
+                      const uid = Number(newUser.id)
+                      await api.patch(`/teams/${userTeamId}/`, {
+                        members: [...new Set([...memberNums, uid])].filter((n) => Number.isFinite(n)),
+                      })
                     }
                     await useAppStore.getState().hydrateFromApi()
                     setGeneratedPass(resp.data.password)
                     toast({ title: 'Kullanıcı oluşturuldu', description: `Şifre: ${resp.data.password}` })
-                  } catch (err: any) {
-                    toast({ title: 'Hata', description: err?.response?.data?.detail || 'Oluşturulamadı', variant: 'destructive' })
+                  } catch (err: unknown) {
+                    toast({ title: 'Hata', description: formatApiError(err), variant: 'destructive' })
                   }
                 }}
               >
@@ -858,18 +920,18 @@ export function SettingsPage() {
                       <div className="flex flex-col gap-1 sm:flex-row sm:items-center">
                         <Label className="text-xs whitespace-nowrap">Usta başı (lider)</Label>
                         <Select
-                          value={team.leaderId ?? 'none'}
+                          value={team.leaderId != null && String(team.leaderId) !== '' ? String(team.leaderId) : 'none'}
                           onValueChange={async (v) => {
                             const leader = v === 'none' ? null : Number(v)
                             try {
                               await api.patch(`/teams/${team.id}/`, {
                                 leader,
-                                members: team.memberIds.map(Number),
+                                members: team.memberIds.map((id) => Number(id)).filter((n) => Number.isFinite(n)),
                               })
                               await useAppStore.getState().hydrateFromApi()
                               toast({ title: 'Lider güncellendi' })
-                            } catch (err: any) {
-                              toast({ title: 'Hata', description: err?.response?.data?.detail || 'Kaydedilemedi', variant: 'destructive' })
+                            } catch (err: unknown) {
+                              toast({ title: 'Hata', description: formatApiError(err), variant: 'destructive' })
                             }
                           }}
                         >
@@ -879,7 +941,7 @@ export function SettingsPage() {
                           <SelectContent>
                             <SelectItem value="none">— Lider yok</SelectItem>
                             {members.map((u) => (
-                              <SelectItem key={u.id} value={u.id}>
+                              <SelectItem key={u.id} value={String(u.id)}>
                                 {u.username}
                               </SelectItem>
                             ))}
@@ -899,16 +961,19 @@ export function SettingsPage() {
                                 aria-label="Çıkar"
                                 onClick={async () => {
                                   try {
-                                    const nextMembers = team.memberIds.filter((id) => id !== u.id).map(Number)
+                                    const nextMembers = team.memberIds
+                                      .filter((id) => String(id) !== String(u.id))
+                                      .map(Number)
                                     const patch: { members: number[]; leader?: null } = { members: nextMembers }
-                                    if (team.leaderId === u.id) patch.leader = null
+                                    if (team.leaderId != null && String(team.leaderId) === String(u.id))
+                                      patch.leader = null
                                     await api.patch(`/teams/${team.id}/`, patch)
                                     await useAppStore.getState().hydrateFromApi()
                                     toast({ title: 'Üye çıkarıldı' })
-                                  } catch (err: any) {
+                                  } catch (err: unknown) {
                                     toast({
                                       title: 'Hata',
-                                      description: err?.response?.data?.detail || 'İşlem başarısız',
+                                      description: formatApiError(err),
                                       variant: 'destructive',
                                     })
                                   }
@@ -929,12 +994,14 @@ export function SettingsPage() {
                             if (uid === 'none') return
                             try {
                               await api.patch(`/teams/${team.id}/`, {
-                                members: [...team.memberIds, uid].map(Number),
+                                members: [...new Set([...team.memberIds.map((id) => Number(id)), Number(uid)])].filter(
+                                  (n) => Number.isFinite(n),
+                                ),
                               })
                               await useAppStore.getState().hydrateFromApi()
                               toast({ title: 'Üye eklendi' })
-                            } catch (err: any) {
-                              toast({ title: 'Hata', description: err?.response?.data?.detail || 'Eklenemedi', variant: 'destructive' })
+                            } catch (err: unknown) {
+                              toast({ title: 'Hata', description: formatApiError(err), variant: 'destructive' })
                             }
                           }}
                         >
@@ -944,7 +1011,7 @@ export function SettingsPage() {
                           <SelectContent>
                             <SelectItem value="none">—</SelectItem>
                             {addCandidates.map((u) => (
-                              <SelectItem key={u.id} value={u.id}>
+                              <SelectItem key={u.id} value={String(u.id)}>
                                 {u.username} ({u.role})
                               </SelectItem>
                             ))}
