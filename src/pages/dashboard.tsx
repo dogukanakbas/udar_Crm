@@ -310,12 +310,12 @@ export function DashboardPage() {
         <>
           <div className="grid gap-4 lg:grid-cols-3">
             <MetricCard title="Gelir" value={formatCurrency(kpiTotals.revenue || totals.revenue)} delta="+12% geçen aya göre" />
-            <MetricCard title="Satış Pipelinesı" value={formatCurrency(kpiTotals.pipeline || totals.pipeline)} delta="+6% hedefe göre" icon={TrendingUp} />
+            <MetricCard title="Satış hattı" value={formatCurrency(kpiTotals.pipeline || totals.pipeline)} delta="+6% hedefe göre" icon={TrendingUp} />
             <MetricCard title="Alacaklar" value={formatCurrency(kpiTotals.ar || totals.ar)} delta="Açık fatura" icon={Clock3} />
           </div>
           <div className="mt-4 grid gap-4 lg:grid-cols-3">
             <MetricCard title="Stok Değeri" value={formatCurrency(kpiTotals.inventory || totals.inventory)} delta="Rezerve dahil" icon={ArrowUpRight} />
-            <MetricCard title="Destek Biletleri" value={(kpiTotals.tickets || totals.tickets).toString()} delta="Aktif kuyruk" icon={CalendarClock} />
+            <MetricCard title="Destek talepleri" value={(kpiTotals.tickets || totals.tickets).toString()} delta="Aktif kuyruk" icon={CalendarClock} />
             <MetricCard title="Zamanında Teslim" value={totals.onTime} delta="Lojistik KPI" icon={CheckCircle} />
           </div>
         </>
@@ -330,7 +330,7 @@ export function DashboardPage() {
               <CardDescription>Son 12 dönem</CardDescription>
             </div>
           </CardHeader>
-          <CardContent className="h-72 min-h-[280px]">
+          <CardContent className="h-72 min-h-[280px] min-w-0">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={revenueTrend}>
                 <defs>
@@ -353,10 +353,10 @@ export function DashboardPage() {
         {widgets.kpi && (
           <Card className="min-w-0">
             <CardHeader>
-              <CardTitle>Aşama bazlı pipeline</CardTitle>
+              <CardTitle>Aşama bazlı satış hattı</CardTitle>
               <CardDescription>Segment toplamları</CardDescription>
             </CardHeader>
-            <CardContent className="h-72 min-h-[280px]">
+            <CardContent className="h-72 min-h-[280px] min-w-0">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={Object.entries(pipelineByStage).map(([stage, value]) => ({ stage, value }))}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -433,7 +433,7 @@ export function DashboardPage() {
               <CardTitle>Nakit akışı</CardTitle>
               <CardDescription>Planlanan giriş / çıkış</CardDescription>
             </CardHeader>
-          <CardContent className="h-72 min-h-[280px]">
+          <CardContent className="h-72 min-h-[280px] min-w-0">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={cashflow}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -456,7 +456,7 @@ export function DashboardPage() {
             <CardTitle>En çok dönen ürünler</CardTitle>
             <CardDescription>Depolara göre hız</CardDescription>
           </CardHeader>
-          <CardContent className="h-72 min-h-[280px]">
+          <CardContent className="h-72 min-h-[280px] min-w-0">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={topProducts}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -473,12 +473,12 @@ export function DashboardPage() {
           <Card>
             <CardHeader>
               <CardTitle>Servis Sağlığı</CardTitle>
-              <CardDescription>Ticket ve SLA trendleri</CardDescription>
+              <CardDescription>Destek talepleri ve SLA trendleri</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex items-center justify-between rounded-lg border border-border/80 p-3">
                 <div>
-                  <p className="text-sm font-semibold">Açık ticket</p>
+                  <p className="text-sm font-semibold">Açık talep</p>
                   <p className="text-xs text-muted-foreground">Yanıt bekliyor</p>
                 </div>
                 <Badge variant="secondary">{data.tickets.filter((t) => t.status !== 'Closed').length}</Badge>
@@ -492,7 +492,7 @@ export function DashboardPage() {
               </div>
               <div className="flex items-center justify-between rounded-lg border border-border/80 p-3">
                 <div>
-                  <p className="text-sm font-semibold">CSAT</p>
+                  <p className="text-sm font-semibold">Müşteri memnuniyeti</p>
                   <p className="text-xs text-muted-foreground">Son 30 gün</p>
                 </div>
                 <Badge variant="outline">4.6 / 5</Badge>

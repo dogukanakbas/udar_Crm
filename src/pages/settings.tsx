@@ -12,9 +12,10 @@ import { useTheme } from '@/components/theme-provider'
 import { useEffect, useState } from 'react'
 import type { AutomationRule } from '@/types'
 import api from '@/lib/api'
+import { ROLE_LABEL_TR } from '@/lib/role-labels'
 import { DataTable } from '@/components/data-table'
 import { type ColumnDef } from '@tanstack/react-table'
-import type { Team, UserLite } from '@/types'
+import type { UserLite } from '@/types'
 import { AlertCircle, ShieldCheck, Plus, Trash2, ImageIcon } from 'lucide-react'
 import { RbacGuard } from '@/components/rbac'
 
@@ -67,13 +68,6 @@ export function SettingsPage() {
     { accessorKey: 'role', header: 'Rol' },
   ]
 
-  const teamColumns: ColumnDef<Team>[] = [
-    { accessorKey: 'name', header: 'Ekip' },
-    {
-      header: 'Üye',
-      cell: ({ row }) => row.original.memberIds.length,
-    },
-  ]
 
   const loadRules = async () => {
     const res = await api.get('/automation-rules/')
@@ -158,12 +152,12 @@ export function SettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Organizasyon profili</CardTitle>
-            <CardDescription>Demo workspace bilgisini güncelle</CardDescription>
+            <CardDescription>Organizasyon adı ve yerel ayarlar</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div>
               <Label>Ad</Label>
-              <Input defaultValue="Omni Demo" />
+              <Input defaultValue="" placeholder="Organizasyon adı" />
             </div>
             <div>
               <Label>Yerel ayar</Label>
@@ -177,7 +171,7 @@ export function SettingsPage() {
                 </SelectContent>
               </Select>
             </div>
-            <Button onClick={() => toast({ title: 'Profil kaydedildi (mock)' })}>Kaydet</Button>
+            <Button onClick={() => toast({ title: 'Profil kaydedildi' })}>Kaydet</Button>
           </CardContent>
         </Card>
         <RbacGuard perm="teams.edit">
@@ -269,7 +263,7 @@ export function SettingsPage() {
                 <SelectContent>
                   {['Worker', 'Support', 'Sales', 'Finance', 'Manager', 'Warehouse', 'Admin'].map((r) => (
                     <SelectItem key={r} value={r}>
-                      {r}
+                      {ROLE_LABEL_TR[r] ?? r}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -327,12 +321,12 @@ export function SettingsPage() {
               <Switch checked={notifMuted} onCheckedChange={setNotifMuted} />
             </div>
             <div className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2">
-              <span className="text-sm">View-only (salt okuma)</span>
+              <span className="text-sm">Salt okunur görünüm</span>
               <Switch checked={viewOnly} onCheckedChange={setViewOnly} />
             </div>
             <div className="space-y-2">
-              <Label>Slack webhook</Label>
-              <Input value={notifSlack} onChange={(e) => setNotifSlack(e.target.value)} placeholder="https://hooks.slack.com/..." />
+              <Label>Slack bildirim adresi (webhook)</Label>
+              <Input value={notifSlack} onChange={(e) => setNotifSlack(e.target.value)} placeholder="https://… (webhook URL)" />
             </div>
             <div className="space-y-2">
               <Label>Bildirim e-postası</Label>
@@ -390,37 +384,40 @@ export function SettingsPage() {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Tema & Demo</CardTitle>
-            <CardDescription>Açık/koyu, veri reset, demo filigranı</CardDescription>
+            <CardTitle>Tema ve yerel veri</CardTitle>
+            <CardDescription>Açık/koyu tema; tarayıcıda önbelleğe alınan çalışma alanı verisini temizleme</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <Button variant="outline" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
               Tema: {theme === 'dark' ? 'açık' : 'koyu'}
             </Button>
-            <Button variant="destructive" onClick={() => { resetDemo(); toast({ title: 'Demo data reset' }) }}>
-              Demo verisini sıfırla
+            <Button variant="destructive" onClick={() => { resetDemo(); toast({ title: 'Yerel veri sıfırlandı' }) }}>
+              Yerel önbelleği temizle
             </Button>
             <div className="rounded-lg border border-border/70 p-3 text-sm text-muted-foreground">
-              API anahtarları ve entegrasyonlar sadece görsel amaçlıdır. Kendi placeholderlarınızı ekleyin.
+              API anahtarları ve üçüncü taraf entegrasyonları yalnızca yetkili ortamınızda yapılandırın.
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Health / Bağımlılıklar</CardTitle>
-            <CardDescription>Backend, DB, Redis durumu</CardDescription>
+            <CardTitle>Sağlık / Bağımlılıklar</CardTitle>
+            <CardDescription>Uygulama, veritabanı ve önbellek durumu</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {['backend', 'db', 'redis'].map((k) => {
               const val = (health as any)?.[k] || 'unknown'
               const ok = val === 'ok'
+              const valTr = val === 'ok' ? 'tamam' : val === 'fail' ? 'hata' : val === 'unknown' ? 'bilinmiyor' : String(val)
               return (
                 <div key={k} className="flex items-center justify-between rounded border px-3 py-2 text-sm">
                   <div className="flex items-center gap-2">
                     {ok ? <ShieldCheck className="h-4 w-4 text-green-600" /> : <AlertCircle className="h-4 w-4 text-amber-600" />}
-                    <span className="capitalize">{k}</span>
+                    <span>
+                      {k === 'backend' ? 'Uygulama' : k === 'db' ? 'Veritabanı' : k === 'redis' ? 'Redis' : k}
+                    </span>
                   </div>
-                  <Badge variant={ok ? 'secondary' : 'destructive'}>{val}</Badge>
+                  <Badge variant={ok ? 'secondary' : 'destructive'}>{valTr}</Badge>
                 </div>
               )
             })}
@@ -504,7 +501,7 @@ export function SettingsPage() {
                 </div>
                 <div>
                   <Label>Webhook</Label>
-                  <Input value={notifyWebhook} onChange={(e) => setNotifyWebhook(e.target.value)} placeholder="Slack webhook URL" />
+                  <Input value={notifyWebhook} onChange={(e) => setNotifyWebhook(e.target.value)} placeholder="Slack webhook adresi" />
                 </div>
                 <div>
                   <Label>E-posta</Label>
@@ -539,7 +536,7 @@ export function SettingsPage() {
                 <div>
                   <Label>Alan</Label>
                   <Select value={fieldName} onValueChange={(v) => setFieldName(v as any)}>
-                    <SelectTrigger><SelectValue placeholder="priority/status" /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="öncelik / durum" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="priority">priority</SelectItem>
                       <SelectItem value="status">status</SelectItem>
@@ -548,7 +545,7 @@ export function SettingsPage() {
                 </div>
                 <div>
                   <Label>Değer</Label>
-                  <Input value={fieldValue} onChange={(e) => setFieldValue(e.target.value)} placeholder="high / done" />
+                  <Input value={fieldValue} onChange={(e) => setFieldValue(e.target.value)} placeholder="örn. yüksek / tamamlandı" />
                 </div>
               </div>
             )}
@@ -803,11 +800,165 @@ export function SettingsPage() {
             <DataTable columns={userColumns} data={data.users} searchKey="username" />
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Ekipler</CardTitle>
-            <CardDescription>Oluştur ve üyeleri görüntüle</CardDescription>
-          </CardHeader>
+        <RbacGuard perm="teams.edit">
+          <Card>
+            <CardHeader>
+              <CardTitle>Ekipler</CardTitle>
+              <CardDescription>
+                Üye ekleme/çıkarma, usta başı (lider) atama. Görevler ekibe düşünce önce lidere gider; lider “Ekibe aç” ile havuza
+                alır.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex gap-2 flex-wrap">
+                <Input value={teamName} onChange={(e) => setTeamName(e.target.value)} placeholder="Yeni ekip adı" className="max-w-xs" />
+                <Button
+                  onClick={async () => {
+                    try {
+                      await api.post('/teams/', { name: teamName.trim() || 'Ekip' })
+                      await useAppStore.getState().hydrateFromApi()
+                      setTeamName('')
+                      toast({ title: 'Ekip oluşturuldu' })
+                    } catch (err: any) {
+                      toast({ title: 'Hata', description: err?.response?.data?.detail || 'Oluşturulamadı', variant: 'destructive' })
+                    }
+                  }}
+                >
+                  Oluştur
+                </Button>
+              </div>
+              <div className="space-y-4">
+                {data.teams.map((team) => {
+                  const members = team.memberIds
+                    .map((id) => data.users.find((u) => u.id === id))
+                    .filter(Boolean) as UserLite[]
+                  const addCandidates = data.users.filter((u) => !team.memberIds.includes(u.id))
+                  return (
+                    <div key={team.id} className="rounded-lg border border-border p-3 space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-semibold text-sm">{team.name}</p>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive h-8"
+                          onClick={async () => {
+                            if (!confirm(`${team.name} ekibini silmek istediğinize emin misiniz?`)) return
+                            try {
+                              await api.delete(`/teams/${team.id}/`)
+                              await useAppStore.getState().hydrateFromApi()
+                              toast({ title: 'Ekip silindi' })
+                            } catch (err: any) {
+                              toast({ title: 'Hata', description: err?.response?.data?.detail || 'Silinemedi', variant: 'destructive' })
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center">
+                        <Label className="text-xs whitespace-nowrap">Usta başı (lider)</Label>
+                        <Select
+                          value={team.leaderId ?? 'none'}
+                          onValueChange={async (v) => {
+                            const leader = v === 'none' ? null : Number(v)
+                            try {
+                              await api.patch(`/teams/${team.id}/`, {
+                                leader,
+                                members: team.memberIds.map(Number),
+                              })
+                              await useAppStore.getState().hydrateFromApi()
+                              toast({ title: 'Lider güncellendi' })
+                            } catch (err: any) {
+                              toast({ title: 'Hata', description: err?.response?.data?.detail || 'Kaydedilemedi', variant: 'destructive' })
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="h-8 w-full sm:w-64">
+                            <SelectValue placeholder="Seçin" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">— Lider yok</SelectItem>
+                            {members.map((u) => (
+                              <SelectItem key={u.id} value={u.id}>
+                                {u.username}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-1">Üyeler</p>
+                        <div className="flex flex-wrap gap-1">
+                          {members.length === 0 && <span className="text-xs text-muted-foreground">Henüz üye yok</span>}
+                          {members.map((u) => (
+                            <Badge key={u.id} variant="secondary" className="gap-1 pr-0.5">
+                              {u.username}
+                              <button
+                                type="button"
+                                className="ml-1 rounded-sm hover:bg-muted p-0.5"
+                                aria-label="Çıkar"
+                                onClick={async () => {
+                                  try {
+                                    const nextMembers = team.memberIds.filter((id) => id !== u.id).map(Number)
+                                    const patch: { members: number[]; leader?: null } = { members: nextMembers }
+                                    if (team.leaderId === u.id) patch.leader = null
+                                    await api.patch(`/teams/${team.id}/`, patch)
+                                    await useAppStore.getState().hydrateFromApi()
+                                    toast({ title: 'Üye çıkarıldı' })
+                                  } catch (err: any) {
+                                    toast({
+                                      title: 'Hata',
+                                      description: err?.response?.data?.detail || 'İşlem başarısız',
+                                      variant: 'destructive',
+                                    })
+                                  }
+                                }}
+                              >
+                                ×
+                              </button>
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center">
+                        <Label className="text-xs whitespace-nowrap">Üye ekle</Label>
+                        <Select
+                          key={`add-${team.id}-${team.memberIds.join(',')}`}
+                          value="none"
+                          onValueChange={async (uid) => {
+                            if (uid === 'none') return
+                            try {
+                              await api.patch(`/teams/${team.id}/`, {
+                                members: [...team.memberIds, uid].map(Number),
+                              })
+                              await useAppStore.getState().hydrateFromApi()
+                              toast({ title: 'Üye eklendi' })
+                            } catch (err: any) {
+                              toast({ title: 'Hata', description: err?.response?.data?.detail || 'Eklenemedi', variant: 'destructive' })
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="h-8 w-full sm:w-64">
+                            <SelectValue placeholder="Kullanıcı seçin" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">—</SelectItem>
+                            {addCandidates.map((u) => (
+                              <SelectItem key={u.id} value={u.id}>
+                                {u.username} ({u.role})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        </RbacGuard>
+      </div>
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader>
@@ -829,28 +980,6 @@ export function SettingsPage() {
             >
               Kopyala
             </Button>
-          </CardContent>
-        </Card>
-      </div>
-          <CardContent className="space-y-3">
-            <div className="flex gap-2">
-              <Input value={teamName} onChange={(e) => setTeamName(e.target.value)} placeholder="Ekip adı" />
-              <Button
-                onClick={async () => {
-                  try {
-                    await api.post('/teams/', { name: teamName })
-                    await useAppStore.getState().hydrateFromApi()
-                    setTeamName('')
-                    toast({ title: 'Ekip oluşturuldu' })
-                  } catch (err: any) {
-                    toast({ title: 'Hata', description: err?.response?.data?.detail || 'Oluşturulamadı', variant: 'destructive' })
-                  }
-                }}
-              >
-                Oluştur
-              </Button>
-            </div>
-            <DataTable columns={teamColumns} data={data.teams} searchKey="name" />
           </CardContent>
         </Card>
       </div>

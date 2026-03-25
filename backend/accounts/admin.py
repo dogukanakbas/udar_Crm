@@ -15,5 +15,5 @@ class UserAdmin(admin.ModelAdmin):
 
 @admin.register(Team)
 class TeamAdmin(admin.ModelAdmin):
-    list_display = ('name', 'organization')
+    list_display = ('name', 'organization', 'leader')
     list_filter = ('organization',)

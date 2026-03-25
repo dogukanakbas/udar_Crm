@@ -347,7 +347,7 @@ class TeamViewSet(viewsets.ModelViewSet):
   ordering_fields = ['name']
 
   def get_queryset(self):
-    qs = Team.objects.all()
+    qs = Team.objects.all().select_related('leader').prefetch_related('members')
     org = getattr(self.request.user, 'organization', None)
     if org:
       qs = qs.filter(organization=org)

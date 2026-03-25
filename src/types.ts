@@ -183,6 +183,8 @@ export interface Team {
   id: string
   name: string
   memberIds: string[]
+  /** Usta başı / ekip lideri kullanıcı id */
+  leaderId?: string
 }
 
 export interface UserLite {

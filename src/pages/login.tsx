@@ -8,8 +8,8 @@ import { useAppStore } from '@/state/use-app-store'
 
 export function LoginPage() {
   const navigate = useNavigate()
-  const [username, setUsername] = useState('admin')
-  const [password, setPassword] = useState('password')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [hydrating, setHydrating] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -61,7 +61,7 @@ export function LoginPage() {
         <h1 className="text-xl font-semibold text-slate-900">Udar CRM Giriş</h1>
         <div className="space-y-2">
           <label className="text-sm text-slate-600">Kullanıcı adı</label>
-          <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="admin" required />
+          <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Kullanıcı adı" required />
         </div>
         <div className="space-y-2">
           <label className="text-sm text-slate-600">Şifre</label>
@@ -71,7 +71,6 @@ export function LoginPage() {
         <Button type="submit" className="w-full" disabled={loading || hydrating}>
           {hydrating ? 'Yükleniyor...' : loading ? 'Giriş yapılıyor...' : 'Giriş yap'}
         </Button>
-        <p className="text-xs text-slate-500">Demo kullanıcı: admin / password</p>
       </form>
     </div>
   )

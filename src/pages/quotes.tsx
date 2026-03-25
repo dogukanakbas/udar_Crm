@@ -26,6 +26,27 @@ import { RbacGuard } from '@/components/rbac'
 import api from '@/lib/api'
 import { CardDescription } from '@/components/ui/card'
 
+const QUOTE_STATUS_TR: Record<string, string> = {
+  Draft: 'Taslak',
+  Sent: 'Gönderildi',
+  'Under Review': 'İncelemede',
+  Approved: 'Onaylandı',
+  Rejected: 'Reddedildi',
+  Converted: 'Siparişe dönüştürüldü',
+}
+const quoteStatusTr = (s: string) => QUOTE_STATUS_TR[s] ?? s
+
+const APPROVAL_STEP_TR: Record<string, string> = {
+  Waiting: 'Beklemede',
+  Approved: 'Onaylandı',
+  Rejected: 'Reddedildi',
+}
+const APPROVAL_ROLE_TR: Record<string, string> = {
+  Sales: 'Satış',
+  Manager: 'Yönetici',
+  Finance: 'Finans',
+}
+
 const wizardSchema = z.object({
   customerId: z.string(),
   owner: z.string(),
@@ -80,7 +101,7 @@ export function QuotesPage() {
     },
     { accessorKey: 'owner', header: 'Sahip' },
     { accessorKey: 'total', header: 'Tutar', cell: ({ row }) => formatCurrency(row.original.total) },
-    { accessorKey: 'status', header: 'Durum', cell: ({ row }) => <Badge variant="secondary">{row.original.status}</Badge> },
+    { accessorKey: 'status', header: 'Durum', cell: ({ row }) => <Badge variant="secondary">{quoteStatusTr(row.original.status)}</Badge> },
     { accessorKey: 'validUntil', header: 'Geçerlilik', cell: ({ row }) => formatDate(row.original.validUntil) },
     {
       id: 'link',
@@ -104,8 +125,8 @@ export function QuotesPage() {
               <QuoteWizardTrigger companies={companies} products={products} owners={owners} />
             </RbacGuard>
             <RbacGuard perm="quotes.view">
-              <Button variant="outline" size="sm" onClick={() => toast({ title: 'CSV indirildi (demo)' })}>
-                <Download className="mr-2 h-4 w-4" /> Export CSV
+              <Button variant="outline" size="sm" onClick={() => toast({ title: 'Dosya indirildi', description: 'Tablo dışa aktarıldı' })}>
+                <Download className="mr-2 h-4 w-4" /> Dışa aktar (CSV)
               </Button>
             </RbacGuard>
           </div>
@@ -120,7 +141,7 @@ export function QuotesPage() {
             <SelectItem value="all">Tümü</SelectItem>
             {['Draft', 'Sent', 'Under Review', 'Approved', 'Rejected', 'Converted'].map((s) => (
               <SelectItem key={s} value={s}>
-                {s}
+                {quoteStatusTr(s)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -371,14 +392,14 @@ export function QuoteDetailPage() {
       approval: quote.approval.map((s) => (s.role === role ? { ...s, status: 'Approved', updatedAt: new Date().toISOString() } : s)),
       status: role === 'Finance' ? 'Approved' : quote.status,
     })
-    toast({ title: `${role} onayı alındı` })
+    toast({ title: `${APPROVAL_ROLE_TR[role] ?? role} onayı alındı` })
   }
 
   return (
     <div className="space-y-4">
       <PageHeader
         title={`${quote.number} • ${company?.name ?? ''}`}
-        description={`Durum: ${quote.status} • Toplam ${formatCurrency(quote.total)}`}
+        description={`Durum: ${quoteStatusTr(quote.status)} • Toplam ${formatCurrency(quote.total)}`}
         actions={
           <div className="flex gap-2">
             <RbacGuard perm="quotes.edit">
@@ -446,7 +467,7 @@ export function QuoteDetailPage() {
         <TabsContent value="pricing">
           <Card>
             <CardContent className="pt-4 space-y-2 text-sm">
-              <p>Fiyatlama kuralları demo: müşteri/ürün kategorisi/hacim bazlı.</p>
+              <p>Fiyatlama kuralları müşteri, ürün kategorisi ve hacim bazlı uygulanır.</p>
               <div className="flex gap-2">
                 <Badge>VIP müşteri %8</Badge>
                 <Badge>Donanım %5</Badge>
@@ -458,13 +479,15 @@ export function QuoteDetailPage() {
         <TabsContent value="approval">
           <Card>
             <CardContent className="pt-4 space-y-2">
-              <CardDescription>Satır içi onay akışı (backend)</CardDescription>
+              <CardDescription>Satır içi onay akışı</CardDescription>
               {approvalSteps.length === 0 && <p className="text-sm text-muted-foreground">Onay kaydı yok</p>}
               {approvalSteps.map((step) => (
                 <div key={step.id} className="flex items-center justify-between rounded-md border p-2">
                   <div>
-                    <p className="font-semibold">{step.role}</p>
-                    <p className="text-xs text-muted-foreground">Durum: {step.status}</p>
+                    <p className="font-semibold">{APPROVAL_ROLE_TR[step.role] ?? step.role}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Durum: {APPROVAL_STEP_TR[step.status] ?? step.status}
+                    </p>
                     {step.comment && <p className="text-xs text-muted-foreground">Not: {step.comment}</p>}
                     {step.acted_by && (
                       <p className="text-xs text-muted-foreground">

@@ -34,13 +34,13 @@ export default function AccessLogsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Erişim Logları" description="API istek geçmişi (son 200 kayıt)" />
+      <PageHeader title="Erişim Logları" description="Uygulama istek geçmişi (son 200 kayıt)" />
       <Card>
         <CardHeader>
           <CardTitle>Filtre</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-3">
-          <Input placeholder="Ara (path/method)" value={q} onChange={(e) => setQ(e.target.value)} className="w-64" />
+          <Input placeholder="Ara (yol veya HTTP metodu)" value={q} onChange={(e) => setQ(e.target.value)} className="w-64" />
           <Select value={method} onValueChange={setMethod}>
             <SelectTrigger className="w-40">
               <SelectValue placeholder="Metot" />
@@ -64,8 +64,8 @@ export default function AccessLogsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Path</TableHead>
-                <TableHead>Method</TableHead>
+                <TableHead>Yol</TableHead>
+                <TableHead>Metot</TableHead>
                 <TableHead>IP</TableHead>
                 <TableHead>Zaman</TableHead>
               </TableRow>

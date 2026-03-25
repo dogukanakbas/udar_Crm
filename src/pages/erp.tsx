@@ -124,11 +124,11 @@ export function SalesOrdersPage() {
 export function PurchasesPage() {
   const { data } = useAppStore()
   const columns: ColumnDef<(typeof data.purchaseOrders)[number]>[] = [
-    { accessorKey: 'number', header: 'PO' },
+    { accessorKey: 'number', header: 'Satın alma no' },
     { accessorKey: 'supplier', header: 'Tedarikçi' },
     { accessorKey: 'status', header: 'Durum', cell: ({ row }) => <Badge variant="secondary">{row.original.status}</Badge> },
     { accessorKey: 'amount', header: 'Tutar', cell: ({ row }) => formatCurrency(row.original.amount) },
-    { accessorKey: 'expectedDate', header: 'ETA', cell: ({ row }) => formatDate(row.original.expectedDate) },
+    { accessorKey: 'expectedDate', header: 'Beklenen tarih', cell: ({ row }) => formatDate(row.original.expectedDate) },
   ]
   return (
     <div className="space-y-4">
@@ -437,7 +437,7 @@ export function AccountingPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Muhasebe" description="Alacak/Borç özet ve yevmiye" actions={<Badge variant="outline">Demo</Badge>} />
+      <PageHeader title="Muhasebe" description="Alacak/Borç özet ve yevmiye" />
       <div className="grid gap-4 md:grid-cols-3">
         <MiniStat title="Alacaklar" value={formatCurrency(ar)} icon={<Wallet className="h-5 w-5 text-primary" />} />
         <MiniStat title="Borçlar" value={formatCurrency(ap)} icon={<Coins className="h-5 w-5 text-primary" />} />

@@ -103,9 +103,9 @@ const [limit, setLimit] = useState(10)
   }, [query, tags, types, limit, page, open])
 
   const quickActions: QuickAction[] = [
-    { label: 'Lead oluştur', to: '/crm/leads', action: () => toast({ title: 'Lead formu hazır' }) },
-    { label: 'Yeni fatura', to: '/erp/invoicing', action: () => toast({ title: 'Fatura modalı hazır' }) },
-    { label: 'Destek kaydı aç', to: '/support/tickets', action: () => toast({ title: 'Ticket bilgisi girin' }) },
+    { label: 'Aday müşteri oluştur', to: '/crm/leads', action: () => toast({ title: 'Form hazır', description: 'Aday müşteri bilgilerini girin' }) },
+    { label: 'Yeni fatura', to: '/erp/invoicing', action: () => toast({ title: 'Form hazır', description: 'Fatura bilgilerini girin' }) },
+    { label: 'Destek talebi aç', to: '/support/tickets', action: () => toast({ title: 'Form hazır', description: 'Talep bilgilerini girin' }) },
   ]
 
   return (
@@ -128,7 +128,7 @@ const [limit, setLimit] = useState(10)
                 value={limit}
                 onChange={(e) => setLimit(Math.min(50, Math.max(1, Number(e.target.value) || 10)))}
                 className="h-9 w-20"
-                placeholder="Limit"
+                placeholder="Sayfa başına"
               />
               <Input
                 type="number"
@@ -185,7 +185,7 @@ const [limit, setLimit] = useState(10)
           <CommandList>
             <CommandEmpty>{loading ? 'Aranıyor...' : 'Sonuç yok.'}</CommandEmpty>
             <div className="flex items-center justify-between px-3 py-2 text-sm text-muted-foreground">
-              <span>Sayfa {page} / Limit {limit}</span>
+              <span>Sayfa {page} · Sayfa başına {limit}</span>
               <div className="space-x-2">
                 <button
                   className="px-2 py-1 border rounded disabled:opacity-50"

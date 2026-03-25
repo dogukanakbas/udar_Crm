@@ -354,7 +354,7 @@ const makeQuotes = (companies: Company[], products: Product[]): Quote[] => {
       terms: {
         payment: 'Net 30',
         delivery: 'CIF',
-        notes: 'Bu bir demo teklifidir.',
+        notes: 'Örnek teklif notu.',
       },
     }
   })
@@ -414,7 +414,7 @@ export const buildSeed = (): MockDbSnapshot => {
     settings: {
       role: 'Manager',
       locale: 'tr-TR',
-      demoWatermark: true,
+      demoWatermark: false,
       notifications: {
         email: true,
         desktop: true,

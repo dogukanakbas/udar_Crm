@@ -49,6 +49,14 @@ class Team(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='teams')
     name = models.CharField(max_length=255)
     members = models.ManyToManyField(User, related_name='teams', blank=True)
+    leader = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='led_teams',
+        help_text='Usta başı / ekip lideri — görev ekibe düşünce önce bu kişiye atanır.',
+    )
 
     class Meta:
         unique_together = ('organization', 'name')

@@ -30,7 +30,6 @@ type AppState = {
   startSse: () => void | (() => void)
   setRole: (role: Role) => void
   logAccess?: (action: string, meta?: Record<string, any>) => void
-  toggleWatermark: (enabled: boolean) => void
   setLocale: (locale: MockDbSnapshot['settings']['locale']) => void
   createCompany: (payload: Omit<Company, 'id'>) => void
   createContact: (payload: Omit<Contact, 'id'>) => void
@@ -335,6 +334,7 @@ export const useAppStore = create<AppState>()(
         id: String(t.id ?? idx),
         name: t.name,
         memberIds: (t.members || []).map((m: any) => String(m)),
+        leaderId: t.leader != null && t.leader !== '' ? String(t.leader) : undefined,
       }))
       const users: UserLite[] = (usersRes.data || []).map((u: any) => ({
         id: String(u.id),
@@ -436,10 +436,6 @@ export const useAppStore = create<AppState>()(
   setRole: (role) =>
     set((state) => ({
       data: { ...state.data, settings: { ...state.data.settings, role } },
-    })),
-  toggleWatermark: (enabled) =>
-    set((state) => ({
-      data: { ...state.data, settings: { ...state.data.settings, demoWatermark: enabled } },
     })),
   setLocale: (locale) =>
     set((state) => ({

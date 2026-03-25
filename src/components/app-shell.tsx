@@ -24,11 +24,11 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
-import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useTheme } from '@/components/theme-provider'
 import { GlobalSearch } from '@/components/global-search'
 import { useAppStore } from '@/state/use-app-store'
+import { ROLE_LABEL_TR } from '@/lib/role-labels'
 import { cn } from '@/lib/utils'
 import { getTokens, clearTokens } from '@/lib/auth'
 
@@ -82,7 +82,7 @@ const nav = [
     label: 'Destek',
     icon: HeadsetIcon,
     roles: ['Admin', 'Support', 'Manager'],
-    children: [{ label: 'Ticketlar', to: '/support/tickets' }],
+    children: [{ label: 'Destek talepleri', to: '/support/tickets' }],
   },
   { label: 'Görevler', to: '/tasks', icon: ClipboardCheckIcon, roles: ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse', 'Worker'] },
   { label: 'Çalışan Takibi', to: '/worker-tracking', icon: Activity, roles: ['Admin', 'Manager'] },
@@ -135,7 +135,7 @@ export function AppShell() {
   }
 
   return (
-    <div className={cn('min-h-screen bg-gradient-to-b from-background to-muted/30', data.settings.demoWatermark && "relative before:content-['Udar_CRM_Demo'] before:fixed before:right-4 before:bottom-4 before:rotate-[-20deg] before:text-6xl before:font-bold before:text-primary/10 before:pointer-events-none")}>
+    <div className="min-h-screen bg-gradient-to-b from-background to-muted/30">
       <div className="mx-auto flex max-w-[1400px]">
         {loggedIn && (
           <aside className="hidden w-64 shrink-0 border-r border-border/70 bg-card/60 p-4 lg:block">
@@ -145,7 +145,7 @@ export function AppShell() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Udar CRM + ERP</p>
-              <p className="text-base font-semibold">Demo Çalışma Alanı</p>
+              <p className="text-base font-semibold">Çalışma alanı</p>
             </div>
           </div>
           <ScrollArea className="h-[calc(100vh-120px)] pr-2">
@@ -334,7 +334,7 @@ function NotificationMenu() {
 }
 
 function UserMenu() {
-  const { data, toggleWatermark, resetDemo, setRole } = useAppStore()
+  const { data, resetDemo, setRole } = useAppStore()
   const { setTheme, theme } = useTheme()
 
   return (
@@ -347,14 +347,12 @@ function UserMenu() {
       <DropdownMenuContent align="end" className="w-64 space-y-2 bg-card shadow-xl border border-border/70">
         <div className="px-3 pt-2 space-y-1">
           <p className="text-sm font-semibold">Oturum</p>
-          <p className="text-xs text-muted-foreground">Rol: {data.settings.role}</p>
+          <p className="text-xs text-muted-foreground">
+            Rol: {ROLE_LABEL_TR[data.settings.role] ?? data.settings.role}
+          </p>
         </div>
         <Separator />
         <div className="px-3 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-sm">Demo filigranı</span>
-            <Switch checked={data.settings.demoWatermark} onCheckedChange={toggleWatermark} />
-          </div>
           <div className="flex items-center justify-between">
             <span className="text-sm">Tema</span>
             <Button variant="ghost" size="sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
@@ -363,7 +361,7 @@ function UserMenu() {
             </Button>
           </div>
           <div className="flex justify-between text-xs text-muted-foreground">
-            <span>TR / EN dilini Ayarlar sayfasından değiştir.</span>
+            <span>Dil tercihi için Ayarlar sayfasını kullanın.</span>
           </div>
           <Button
             variant="ghost"

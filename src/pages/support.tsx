@@ -31,8 +31,8 @@ export function TicketsPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Destek Ticketları"
-        description="Mesaj akışı, SLA, öncelikler"
+        title="Destek talepleri"
+        description="Mesaj akışı, SLA ve öncelikler"
         actions={
           <RbacGuard perm="tickets.edit">
             <Badge variant="outline">{data.tickets.length} açık</Badge>

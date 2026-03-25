@@ -29,6 +29,18 @@ from rest_framework.response import Response
 from django.utils import timezone
 
 
+def assign_task_to_team_leader(task, team):
+    """Ekibe düşen görev önce usta başına atanır; lider yoksa veya üye değilse havuza (assignee boş) bırakılır."""
+    if not team:
+        task.assignee = None
+        return
+    lid = getattr(team, 'leader_id', None)
+    if lid and team.members.filter(id=lid).exists():
+        task.assignee_id = lid
+    else:
+        task.assignee = None
+
+
 class OrgScopedMixin:
     def get_queryset(self):
         qs = super().get_queryset()
@@ -141,6 +153,11 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         if getattr(self.request.user, 'role', '') == 'Worker':
             raise PermissionDenied("Worker rolündeki kullanıcılar görev atayamaz")
         instance = serializer.save(organization=self.request.user.organization, owner=self.request.user)
+        if not instance.assignee_id:
+            assign_task_to_team_leader(instance, instance.current_team or instance.team)
+            if instance.assignee_id:
+                instance.save(update_fields=['assignee'])
+                instance.refresh_from_db()
         # Sabit görevler için fabrika checklist ekle
         if getattr(instance, 'mode', 'manual') == 'fixed':
             TaskChecklist.objects.bulk_create(
@@ -186,6 +203,13 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             for f in restricted_fields:
                 serializer.validated_data.pop(f, None)
         instance = serializer.save()
+        # Ekip değişti ve atanmış kişi gönderilmediyse usta başına yönlendir
+        if (
+            'assignee' not in serializer.validated_data
+            and ('current_team' in serializer.validated_data or 'team' in serializer.validated_data)
+        ):
+            assign_task_to_team_leader(instance, instance.current_team or instance.team)
+            instance.save(update_fields=['assignee'])
         # Assignee değiştiyse bildirim ve aktivite
         if 'assignee' in serializer.validated_data and instance.assignee != original.assignee:
             if instance.assignee:
@@ -281,6 +305,39 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         )
         return Response(TaskSerializer(task, context={'request': request}).data)
 
+    @action(detail=True, methods=['post'], url_path='release-to-team')
+    def release_to_team(self, request, pk=None):
+        """Usta başı: görevi ekibe açar (assignee temizlenir, üyeler üstlenebilir)."""
+        task = self.get_object()
+        if task.organization_id != request.user.organization_id:
+            raise PermissionDenied("Farklı organizasyon")
+        team = task.current_team or task.team
+        if not team:
+            return Response({"detail": "Görevde ekip yok"}, status=status.HTTP_400_BAD_REQUEST)
+        leader_id = getattr(team, 'leader_id', None)
+        role = getattr(request.user, 'role', '')
+        if role not in ('Admin', 'Manager'):
+            if not leader_id or task.assignee_id != leader_id:
+                raise PermissionDenied("Sadece usta başı veya yönetici görevi ekibe açabilir")
+        task.assignee = None
+        task.save(update_fields=['assignee', 'updated_at'])
+        TaskComment.objects.create(
+            task=task,
+            author=request.user,
+            type='activity',
+            text=f"{request.user.username} görevi ekip havuzuna açtı (üyeler üstlenebilir)",
+        )
+        push_event(
+            {
+                "type": "task.released_to_team",
+                "task_id": task.id,
+                "organization": task.organization_id,
+                "assignee_id": None,
+                "by": getattr(request.user, "email", None),
+            }
+        )
+        return Response(TaskSerializer(task, context={'request': request}).data)
+
     @action(detail=True, methods=['post'])
     def handover(self, request, pk=None):
         task = self.get_object()
@@ -314,6 +371,8 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         task.current_team = target_team or task.current_team or task.team
         if target_user:
             task.assignee = target_user
+        else:
+            assign_task_to_team_leader(task, task.current_team)
         task.handover_reason = note
         task.handover_at = timezone.now()
         task.handover_history = history
@@ -372,7 +431,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         )
         
         task.current_team = target_team
-        task.assignee = None
+        assign_task_to_team_leader(task, target_team)
         task.handover_reason = reason
         task.handover_at = timezone.now()
         task.handover_history = history
@@ -482,7 +541,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 "at": timezone.now().isoformat(),
             })
             task.current_team = next_team
-            task.assignee = None
+            assign_task_to_team_leader(task, next_team)
             task.handover_reason = "Aşama tamamlandı"
             task.handover_at = timezone.now()
             task.handover_history = history
@@ -498,7 +557,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 "task_id": task.id,
                 "organization": task.organization_id,
                 "title": task.title,
-                "assignee_id": None,
+                "assignee_id": task.assignee_id,
                 "to_team": next_team.id,
                 "by": getattr(request.user, "email", None),
             })

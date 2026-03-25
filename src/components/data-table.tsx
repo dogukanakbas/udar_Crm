@@ -52,7 +52,7 @@ export function DataTable<TData>({ columns, data, searchKey, onExport, renderToo
       <div className="flex flex-wrap items-center gap-2">
         {searchKey && (
           <Input
-            placeholder="Search..."
+            placeholder="Ara..."
             value={globalFilter ?? ''}
             onChange={(event) => setGlobalFilter(event.target.value)}
             className="w-60"
@@ -63,7 +63,7 @@ export function DataTable<TData>({ columns, data, searchKey, onExport, renderToo
           {onExport && (
             <Button variant="outline" size="sm" onClick={() => onExport(table.getFilteredRowModel().rows.map((row) => row.original))}>
               <Download className="mr-2 h-4 w-4" />
-              Export CSV
+              Dışa aktar (CSV)
             </Button>
           )}
           <Button

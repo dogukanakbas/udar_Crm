@@ -1,14 +1,65 @@
 from rest_framework import serializers
-from .models import Team
+from .models import Team, User
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 import pyotp
 
 
 class TeamSerializer(serializers.ModelSerializer):
+    members = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=User.objects.none(), required=False
+    )
+    leader = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.none(), allow_null=True, required=False
+    )
+
     class Meta:
         model = Team
-        fields = ['id', 'name', 'organization', 'members']
+        fields = ['id', 'name', 'organization', 'members', 'leader']
         read_only_fields = ['organization']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        org = getattr(getattr(request, 'user', None), 'organization', None) if request else None
+        if org:
+            qs = User.objects.filter(organization=org)
+            self.fields['members'].queryset = qs
+            self.fields['leader'].queryset = qs
+
+    def validate(self, attrs):
+        members = attrs.get('members')
+        leader = attrs.get('leader', serializers.empty)
+        leader_obj = None if leader is serializers.empty else leader
+        if leader_obj:
+            if members is not None:
+                m_ids = {getattr(m, 'pk', m) for m in members}
+                if leader_obj.pk not in m_ids:
+                    raise serializers.ValidationError({'leader': 'Usta başı mutlaka ekip üyelerinden biri olmalıdır.'})
+            elif self.instance is not None:
+                if not self.instance.members.filter(id=leader_obj.pk).exists():
+                    raise serializers.ValidationError({'leader': 'Usta başı mutlaka ekip üyelerinden biri olmalıdır.'})
+        return attrs
+
+    def create(self, validated_data):
+        members = validated_data.pop('members', None)
+        instance = Team.objects.create(**validated_data)
+        if members is not None:
+            instance.members.set(members)
+        self._clear_leader_if_not_member(instance)
+        return instance
+
+    def update(self, instance, validated_data):
+        members = validated_data.pop('members', None)
+        instance = super().update(instance, validated_data)
+        if members is not None:
+            instance.members.set(members)
+        self._clear_leader_if_not_member(instance)
+        return instance
+
+    def _clear_leader_if_not_member(self, instance):
+        if instance.leader_id and not instance.members.filter(id=instance.leader_id).exists():
+            instance.leader = None
+            instance.save(update_fields=['leader'])
 
 
 class TwoFATokenObtainPairSerializer(TokenObtainPairSerializer):
@@ -56,5 +107,4 @@ class TwoFATokenObtainPairSerializer(TokenObtainPairSerializer):
                             "detail": f"Mesai saatleri dışında giriş yapılamaz. Mesai: {s.working_hours_start.strftime('%H:%M')}-{s.working_hours_end.strftime('%H:%M')}"
                         })
         return data
-
 

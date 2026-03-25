@@ -492,7 +492,7 @@ export function TasksPage() {
       return
     }
     downloadCsv('tasks.csv', rows)
-    toast({ title: 'CSV hazır', description: `${rows.length} kayıt` })
+    toast({ title: 'Tablo hazır', description: `${rows.length} kayıt (CSV)` })
   }
 
   const exportICS = () => {
@@ -727,7 +727,7 @@ export function TasksPage() {
             )}
           <Button size="sm" variant="outline" onClick={exportCsv}>
             <Download className="mr-2 h-4 w-4" />
-            CSV dışa aktar
+            Tabloyu dışa aktar (CSV)
           </Button>
           <Button size="sm" variant="outline" onClick={exportICS}>
             <Calendar className="mr-2 h-4 w-4" />
@@ -1175,10 +1175,10 @@ export function TasksPage() {
                       Giris: r.entries,
                     }))
                     downloadCsv('time-users.csv', rows)
-                    toast({ title: 'CSV hazır', description: `${rows.length} satır` })
+                    toast({ title: 'Tablo hazır', description: `${rows.length} satır (CSV)` })
                   }}
                 >
-                  CSV
+                  Dışa aktar
                 </Button>
               </div>
               {timeReportUsers.length === 0 && <p className="text-sm text-muted-foreground">Kayıt yok</p>}
@@ -1217,10 +1217,10 @@ export function TasksPage() {
                       Giris: r.entries,
                     }))
                     downloadCsv('time-teams.csv', rows)
-                    toast({ title: 'CSV hazır', description: `${rows.length} satır` })
+                    toast({ title: 'Tablo hazır', description: `${rows.length} satır (CSV)` })
                   }}
                 >
-                  CSV
+                  Dışa aktar
                 </Button>
               </div>
               {timeReportTeams.length === 0 && <p className="text-sm text-muted-foreground">Kayıt yok</p>}
@@ -1261,10 +1261,10 @@ export function TasksPage() {
                       Atanan: r.assignee,
                     }))
                     downloadCsv('time-budget.csv', rows)
-                    toast({ title: 'CSV hazır', description: `${rows.length} satır` })
+                    toast({ title: 'Tablo hazır', description: `${rows.length} satır (CSV)` })
                   }}
                 >
-                  CSV
+                  Dışa aktar
                 </Button>
               </div>
               <div className="overflow-x-auto">
@@ -1576,6 +1576,15 @@ export function TaskDetailPage() {
   const isAssignee = currentUserId && String(task.assignee) === String(currentUserId)
   const isWorker = data.settings.role === 'Worker'
   const isAdmin = data.settings.role === 'Admin'
+  const currentTeamRow = data.teams.find((t) => t.id === (task as any)?.currentTeam)
+  const isTeamLeader =
+    !!currentUserId &&
+    !!currentTeamRow?.leaderId &&
+    String(currentTeamRow.leaderId) === String(currentUserId)
+  const canReleaseToTeam =
+    task.status !== 'done' &&
+    isAssignee &&
+    (isTeamLeader || data.settings.role === 'Admin' || data.settings.role === 'Manager')
 
   return (
     <div className="space-y-4">
@@ -1628,6 +1637,30 @@ export function TaskDetailPage() {
                         }}
                       >
                         Bitir
+                      </Button>
+                    )}
+                    {canReleaseToTeam && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={async () => {
+                          try {
+                            await api.post(`/tasks/${task.id}/release-to-team/`)
+                            await hydrateFromApi()
+                            toast({
+                              title: 'Ekibe açıldı',
+                              description: 'Üyeler görevi üstlenebilir.',
+                            })
+                          } catch (e: any) {
+                            toast({
+                              title: 'Hata',
+                              description: e?.response?.data?.detail || 'İşlem başarısız',
+                              variant: 'destructive',
+                            })
+                          }
+                        }}
+                      >
+                        Ekibe aç
                       </Button>
                     )}
                     {!isWorker && (

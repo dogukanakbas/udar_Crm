@@ -15,7 +15,7 @@ import type {
   PricingRule,
 } from '@/types'
 
-const STORAGE_KEY = 'canban-demo-v1'
+const STORAGE_KEY = 'canban-workspace-v1'
 
 const migrate = (snapshot: MockDbSnapshot): MockDbSnapshot => {
   const seed = buildSeed()
@@ -43,7 +43,7 @@ const load = (): MockDbSnapshot => {
     const parsed: MockDbSnapshot = JSON.parse(raw)
     return migrate(parsed)
   } catch (err) {
-    console.warn('Failed to load demo data, using seed', err)
+    console.warn('Yerel veri yüklenemedi; başlangıç verisi kullanılıyor', err)
     return buildSeed()
   }
 }

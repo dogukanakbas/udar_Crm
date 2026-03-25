@@ -61,6 +61,16 @@ const opportunitySchema = z.object({
   closeDate: z.string().optional(),
 })
 
+const OPPORTUNITY_STAGE_LABELS: Record<string, string> = {
+  Qualification: 'Ön değerlendirme',
+  Discovery: 'Keşif',
+  Proposal: 'Teklif',
+  Negotiation: 'Müzakere',
+  'Closed Won': 'Kazanıldı',
+  'Closed Lost': 'Kaybedildi',
+}
+const opportunityStageTr = (s: string) => OPPORTUNITY_STAGE_LABELS[s] ?? s
+
 export function LeadsPage() {
   const { data, deleteLead, createLead, updateLead, createCompany, createContact } = useAppStore()
   const [statusFilter, setStatusFilter] = useState('all')
@@ -86,35 +96,35 @@ export function LeadsPage() {
         <Checkbox
           checked={table.getIsAllPageRowsSelected()}
           onCheckedChange={(v) => table.toggleAllPageRowsSelected(!!v)}
-          aria-label="Select all"
+          aria-label="Tümünü seç"
         />
       ),
       cell: ({ row }) => (
-        <Checkbox checked={row.getIsSelected()} onCheckedChange={(v) => row.toggleSelected(!!v)} aria-label="Select row" />
+        <Checkbox checked={row.getIsSelected()} onCheckedChange={(v) => row.toggleSelected(!!v)} aria-label="Satırı seç" />
       ),
       size: 40,
     },
-    { accessorKey: 'name', header: 'Lead' },
+    { accessorKey: 'name', header: 'Aday' },
     {
       accessorKey: 'companyId',
-      header: 'Company',
+      header: 'Şirket',
       cell: ({ row }) => data.companies.find((c) => c.id === row.original.companyId)?.name ?? '—',
     },
     {
       accessorKey: 'status',
-      header: 'Status',
+      header: 'Durum',
       cell: ({ row }) => <Badge variant="secondary">{row.original.status}</Badge>,
     },
-    { accessorKey: 'source', header: 'Source' },
-    { accessorKey: 'owner', header: 'Owner' },
+    { accessorKey: 'source', header: 'Kaynak' },
+    { accessorKey: 'owner', header: 'Sahip' },
     {
       accessorKey: 'score',
-      header: 'Score',
+      header: 'Skor',
       cell: ({ row }) => <Badge variant={row.original.score > 75 ? 'success' : 'outline'}>{row.original.score}</Badge>,
     },
     {
       accessorKey: 'createdAt',
-      header: 'Created',
+      header: 'Oluşturulma',
       cell: ({ row }) => formatDate(row.original.createdAt),
     },
     {
@@ -129,11 +139,11 @@ export function LeadsPage() {
             onSubmit={(values) => updateLead(row.original.id, values as any)}
           >
             <Button variant="ghost" size="sm">
-              Edit
+              Düzenle
             </Button>
           </LeadModal>
           <Button variant="ghost" size="sm" onClick={() => deleteLead(row.original.id)}>
-            Delete
+            Sil
           </Button>
         </div>
       ),
@@ -152,14 +162,14 @@ export function LeadsPage() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'leads.csv'
+    a.download = 'aday_musteriler.csv'
     a.click()
   }
 
   return (
     <div>
       <PageHeader
-        title="Lead Listesi"
+        title="Aday müşteri listesi"
         description="Filtreler, kayıtlı görünümler, satır içi işlemler"
         actions={
           <div className="flex items-center gap-2">
@@ -205,7 +215,7 @@ export function LeadsPage() {
               owners={Array.from(new Set(data.leads.map((l) => l.owner)))}
               onSubmit={(values) => {
                 createLead(values as any)
-                toast({ title: 'Lead oluşturuldu' })
+                toast({ title: 'Aday müşteri oluşturuldu' })
               }}
             >
               <Button size="sm">
@@ -309,7 +319,7 @@ function LeadModal({
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Lead oluştur</DialogTitle>
+          <DialogTitle>Aday müşteri oluştur</DialogTitle>
         </DialogHeader>
         <form
           onSubmit={form.handleSubmit((values) => {
@@ -398,7 +408,7 @@ export function LeadDetailPage() {
   const lead = data.leads.find((l) => l.id === params.leadId)
   const company = data.companies.find((c) => c.id === lead?.companyId)
 
-  if (!lead) return <p className="text-muted-foreground">Lead not found</p>
+  if (!lead) return <p className="text-muted-foreground">Kayıt bulunamadı</p>
 
   return (
     <div className="space-y-4">
@@ -410,8 +420,8 @@ export function LeadDetailPage() {
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Timeline</CardTitle>
-            <CardDescription>Recent notes and emails</CardDescription>
+            <CardTitle>Zaman çizelgesi</CardTitle>
+            <CardDescription>Son notlar ve e-postalar</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {lead.timeline.map((item) => (
@@ -433,15 +443,15 @@ export function LeadDetailPage() {
             <CardDescription>Sahip, kaynak, skor</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <DetailRow label="Owner" value={lead.owner} />
-            <DetailRow label="Title" value={lead.title} />
-            <DetailRow label="Source" value={lead.source} />
-            <DetailRow label="Score" value={lead.score.toString()} />
+            <DetailRow label="Sahip" value={lead.owner} />
+            <DetailRow label="Ünvan" value={lead.title} />
+            <DetailRow label="Kaynak" value={lead.source} />
+            <DetailRow label="Skor" value={lead.score.toString()} />
             <Separator />
-            <DetailRow label="Email" value={lead.email} />
-            <DetailRow label="Phone" value={lead.phone} />
+            <DetailRow label="E-posta" value={lead.email} />
+            <DetailRow label="Telefon" value={lead.phone} />
             <Separator />
-            <DetailRow label="Created" value={formatDate(lead.createdAt)} />
+            <DetailRow label="Oluşturulma" value={formatDate(lead.createdAt)} />
           </CardContent>
         </Card>
       </div>
@@ -655,7 +665,7 @@ function OpportunityModal({
               </Select>
             </div>
             <div>
-              <Label>Lead</Label>
+              <Label>Aday müşteri</Label>
               <Select value={form.watch('leadId') ?? 'none'} onValueChange={(v) => form.setValue('leadId', v === 'none' ? undefined : v)}>
                 <SelectTrigger>
                   <SelectValue />
@@ -673,7 +683,7 @@ function OpportunityModal({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>Stage</Label>
+              <Label>Aşama</Label>
               <Select value={form.watch('stage')} onValueChange={(v) => form.setValue('stage', v)}>
                 <SelectTrigger>
                   <SelectValue />
@@ -681,7 +691,7 @@ function OpportunityModal({
                 <SelectContent>
                   {['Qualification', 'Discovery', 'Proposal', 'Negotiation', 'Closed Won', 'Closed Lost'].map((s) => (
                     <SelectItem key={s} value={s}>
-                      {s}
+                      {opportunityStageTr(s)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -728,7 +738,7 @@ export function OpportunitiesPage() {
     <div className="space-y-4">
       <PageHeader
         title="Fırsatlar"
-        description="Pipeline aşamalarını yönet"
+        description="Satış hattı aşamalarını yönetin"
         actions={
           <div className="flex items-center gap-2">
             <OpportunityModal
@@ -744,7 +754,7 @@ export function OpportunitiesPage() {
                 Yeni fırsat
               </Button>
             </OpportunityModal>
-            <Badge variant="outline">{data.opportunities.length} deals</Badge>
+            <Badge variant="outline">{data.opportunities.length} fırsat</Badge>
           </div>
         }
       />
@@ -753,7 +763,7 @@ export function OpportunitiesPage() {
           <Card key={col.stage} className="bg-muted/30">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
-                <CardTitle className="text-sm">{col.stage}</CardTitle>
+                <CardTitle className="text-sm">{opportunityStageTr(col.stage)}</CardTitle>
                 <CardDescription>{formatCurrency(col.items.reduce((sum, o) => sum + o.value, 0))}</CardDescription>
               </div>
               <Badge variant="secondary">{col.items.length}</Badge>
@@ -769,7 +779,7 @@ export function OpportunitiesPage() {
                   <div className="mt-2 flex items-center gap-2">
                     <Timer className="h-4 w-4 text-muted-foreground" />
                     <span className="text-xs text-muted-foreground">
-                      Close {opp.closeDate ? formatDate(opp.closeDate) : '—'}
+                      Kapanış {opp.closeDate ? formatDate(opp.closeDate) : '—'}
                     </span>
                   </div>
                   <Select
@@ -782,7 +792,7 @@ export function OpportunitiesPage() {
                     <SelectContent>
                       {stages.map((stage) => (
                         <SelectItem key={stage} value={stage}>
-                          {stage}
+                          {opportunityStageTr(stage)}
                         </SelectItem>
                       ))}
                     </SelectContent>

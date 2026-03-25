@@ -26,6 +26,7 @@ from core.views import DashboardKPIView, GlobalSearchView, CalendarICSView, SSEV
 from workflow.views import PendingApprovalsView, ApprovalInstanceViewSet, ApprovalActionView
 from audit.views import AuditLogViewSet
 from core.views import health
+from support.report_views import TaskReportSummaryView, TaskReportExportView
 from support.views import (
     TicketViewSet,
     TicketMessageViewSet,
@@ -83,6 +84,8 @@ router.register(r'v1/admin/subscriptions', AdminSubscriptionViewSet, basename='a
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/task-reports/summary/', TaskReportSummaryView.as_view(), name='task-report-summary'),
+    path('api/task-reports/export/', TaskReportExportView.as_view(), name='task-report-export'),
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='docs'),
     path('api/auth/', include('accounts.urls')),
