@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { RbacGuard } from '@/components/rbac'
+import { Badge } from '@/components/ui/badge'
 import api from '@/lib/api'
 
 type WorkerTracking = {
@@ -18,11 +19,29 @@ type WorkerTracking = {
     at: string
   } | null
   last_activity: string | null
+  has_account?: boolean
+}
+
+type FieldWorkerTracking = {
+  associate_id: number
+  worker_name: string
+  worker_email: string
+  contact: string
+  primary_teams: string[]
+  team_ids: number[]
+  current_department: string | null
+  active_tasks_count: number
+  last_handover: null
+  last_activity: string | null
+  has_account: boolean
+  notes: string
 }
 
 type TrackingResponse = {
   workers: WorkerTracking[]
   total_workers: number
+  field_workers?: FieldWorkerTracking[]
+  total_field_workers?: number
   timestamp: string
 }
 
@@ -95,10 +114,14 @@ export function WorkerTrackingPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-lg border border-slate-200 p-4">
-            <div className="text-sm text-slate-600">Toplam Çalışan</div>
+            <div className="text-sm text-slate-600">Toplam (hesaplı)</div>
             <div className="text-3xl font-bold text-slate-900 mt-1">{data?.total_workers || 0}</div>
+          </div>
+          <div className="bg-white rounded-lg border border-slate-200 p-4">
+            <div className="text-sm text-slate-600">Saha (hesapsız)</div>
+            <div className="text-3xl font-bold text-indigo-700 mt-1">{data?.total_field_workers ?? 0}</div>
           </div>
           <div className="bg-white rounded-lg border border-slate-200 p-4">
             <div className="text-sm text-slate-600">Aktif Görevli</div>
@@ -208,7 +231,60 @@ export function WorkerTrackingPage() {
           </table>
 
           {data?.workers.length === 0 && (
-            <div className="p-8 text-center text-slate-600">Henüz çalışan kaydı yok</div>
+            <div className="p-8 text-center text-slate-600">Henüz Worker hesabı yok</div>
+          )}
+        </div>
+
+        <h2 className="text-lg font-semibold text-slate-900 mt-10 mb-3">Saha / hesapsız ekip çalışanları</h2>
+        <p className="text-sm text-slate-600 mb-4">
+          Ayarlar → Hesapsız ekip çalışanları bölümünden eklenir. Giriş yapamazlar; hangi ekipte oldukları burada
+          görünür.
+        </p>
+        <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-slate-50 border-b border-slate-200">
+              <tr>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">Ad</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">İletişim</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">Ekipler</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">Not</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">Son güncelleme</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {(data?.field_workers || []).map((row) => (
+                <tr key={`assoc-${row.associate_id}`} className="hover:bg-slate-50">
+                  <td className="px-4 py-3">
+                    <span className="font-medium text-slate-900">{row.worker_name}</span>
+                    <Badge variant="outline" className="ml-2 text-xs">
+                      Hesapsız
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600">{row.contact || '—'}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {row.primary_teams.map((team) => (
+                        <span
+                          key={team}
+                          className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-900"
+                        >
+                          {team}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600 max-w-xs truncate" title={row.notes}>
+                    {row.notes || '—'}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600">
+                    {row.last_activity ? new Date(row.last_activity).toLocaleString('tr-TR') : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {(data?.field_workers || []).length === 0 && (
+            <div className="p-8 text-center text-slate-600">Kayıt yok — Ayarlar’dan ekleyebilirsiniz.</div>
           )}
         </div>
       </div>

@@ -29,7 +29,7 @@ export function SalesOrdersPage() {
   const { data, createSalesOrder } = useAppStore()
   const [step, setStep] = useState<'customer' | 'items'>('customer')
   const form = useForm({
-    defaultValues: { customer: data.companies[0]?.id ?? '', items: '' },
+    defaultValues: { customer: data.companies[0]?.id ?? '', items: '', orderQuantity: 0 },
   })
   const { toast } = useToast()
 
@@ -45,6 +45,15 @@ export function SalesOrdersPage() {
     { accessorKey: 'amount', header: 'Tutar', cell: ({ row }) => formatCurrency(row.original.amount) },
     { accessorKey: 'shippingDate', header: 'Sevk', cell: ({ row }) => formatDate(row.original.shippingDate) },
     { accessorKey: 'expectedDelivery', header: 'Teslim', cell: ({ row }) => formatDate(row.original.expectedDelivery) },
+    {
+      id: 'prod',
+      header: 'Adet (üretim)',
+      cell: ({ row }) => (
+        <span className="text-xs">
+          {row.original.orderQuantity ?? 0} / {row.original.quantityProduced ?? 0}
+        </span>
+      ),
+    },
   ]
 
   return (
@@ -88,6 +97,8 @@ export function SalesOrdersPage() {
                   <TabsContent value="items" className="space-y-3 pt-3">
                     <Label>Kalemler</Label>
                     <Textarea placeholder="SKU, adet, notları yazın" {...form.register('items')} />
+                    <Label>Sipariş adedi (üretim takibi)</Label>
+                    <Input type="number" min={0} {...form.register('orderQuantity', { valueAsNumber: true })} />
                     <Button
                       className="w-full"
                     onClick={() => {
@@ -98,6 +109,8 @@ export function SalesOrdersPage() {
                         amount: 0,
                         shipping_date: null,
                         expected_delivery: null,
+                        order_quantity: Number(form.watch('orderQuantity')) || 0,
+                        quantity_produced: 0,
                       })
                       toast({ title: 'Taslak olarak kaydedildi' })
                     }}

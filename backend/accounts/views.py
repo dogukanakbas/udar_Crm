@@ -22,8 +22,8 @@ from django.contrib.auth.validators import UnicodeUsernameValidator
 from .user_import import allocate_username, full_name_to_username_base, split_full_name
 from rest_framework import viewsets, permissions, filters
 from permissions import IsOrgMember, HasAPIPermission
-from .models import Team, OrganizationSettings
-from .serializers import TeamSerializer
+from .models import Team, TeamAssociate, OrganizationSettings
+from .serializers import TeamSerializer, TeamAssociateSerializer
 
 
 class MeView(APIView):
@@ -500,6 +500,33 @@ class TeamViewSet(viewsets.ModelViewSet):
 
   def get_queryset(self):
     qs = Team.objects.all().select_related('leader').prefetch_related('members')
+    org = getattr(self.request.user, 'organization', None)
+    if org:
+      qs = qs.filter(organization=org)
+    return qs
+
+  def perform_create(self, serializer):
+    serializer.save(organization=self.request.user.organization)
+
+
+class TeamAssociateViewSet(viewsets.ModelViewSet):
+  """Hesapsız ekip çalışanları (CRUD)."""
+
+  serializer_class = TeamAssociateSerializer
+  permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+  required_perm = 'teams.view'
+  permission_map = {
+    'create': 'teams.edit',
+    'update': 'teams.edit',
+    'partial_update': 'teams.edit',
+    'destroy': 'teams.edit',
+  }
+  filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+  search_fields = ['full_name', 'phone', 'notes']
+  ordering_fields = ['full_name', 'created_at']
+
+  def get_queryset(self):
+    qs = TeamAssociate.objects.all().prefetch_related('teams')
     org = getattr(self.request.user, 'organization', None)
     if org:
       qs = qs.filter(organization=org)

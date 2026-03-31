@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { Checkbox } from '@/components/ui/checkbox'
 import { useToast } from '@/components/ui/use-toast'
 import { useAppStore } from '@/state/use-app-store'
 import { useTheme } from '@/components/theme-provider'
@@ -79,10 +80,35 @@ export function SettingsPage() {
   const [newModelCode, setNewModelCode] = useState('')
   const [newModelName, setNewModelName] = useState('')
   const [newModelDuration, setNewModelDuration] = useState(4)
+  const [newModelWidth, setNewModelWidth] = useState('')
+  const [newModelHeight, setNewModelHeight] = useState('')
   const [newModelSizes, setNewModelSizes] = useState('73x210, 83x210, 93x210')
   const [workingHoursStart, setWorkingHoursStart] = useState('08:00')
   const [workingHoursEnd, setWorkingHoursEnd] = useState('18:00')
   const [workingDays, setWorkingDays] = useState<number[]>([0, 1, 2, 3, 4])
+  type TeamAssociateRow = {
+    id: number
+    full_name: string
+    phone: string
+    notes: string
+    teams: number[]
+    is_active: boolean
+  }
+  const [teamAssociates, setTeamAssociates] = useState<TeamAssociateRow[]>([])
+  const [assocName, setAssocName] = useState('')
+  const [assocPhone, setAssocPhone] = useState('')
+  const [assocNotes, setAssocNotes] = useState('')
+  const [assocTeamIds, setAssocTeamIds] = useState<number[]>([])
+
+  const loadTeamAssociates = async () => {
+    try {
+      const res = await api.get('/team-associates/')
+      const raw = res.data?.results ?? res.data
+      setTeamAssociates(Array.isArray(raw) ? raw : [])
+    } catch {
+      setTeamAssociates([])
+    }
+  }
 
   const userColumns: ColumnDef<UserLite>[] = [
     {
@@ -160,6 +186,10 @@ export function SettingsPage() {
 
   useEffect(() => {
     loadTaskModels()
+  }, [])
+
+  useEffect(() => {
+    loadTeamAssociates()
   }, [])
 
   useEffect(() => {
@@ -880,18 +910,43 @@ export function SettingsPage() {
                   <Input type="number" value={newModelDuration} onChange={(e) => setNewModelDuration(Number(e.target.value) || 4)} className="w-20" />
                 </div>
                 <div>
-                  <Label className="text-xs">Ölçüler</Label>
-                  <Input value={newModelSizes} onChange={(e) => setNewModelSizes(e.target.value)} placeholder="73x210, 83x210" className="w-40" />
+                  <Label className="text-xs">En (mm)</Label>
+                  <Input
+                    value={newModelWidth}
+                    onChange={(e) => setNewModelWidth(e.target.value)}
+                    placeholder="73"
+                    className="w-16"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Boy (mm)</Label>
+                  <Input
+                    value={newModelHeight}
+                    onChange={(e) => setNewModelHeight(e.target.value)}
+                    placeholder="210"
+                    className="w-16"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Ek ölçüler</Label>
+                  <Input value={newModelSizes} onChange={(e) => setNewModelSizes(e.target.value)} placeholder="83x210, 93x210" className="w-40" />
                 </div>
                 <Button
                   size="sm"
                   onClick={async () => {
                     try {
+                      const w = newModelWidth.trim() ? Number(newModelWidth) : null
+                      const h = newModelHeight.trim() ? Number(newModelHeight) : null
+                      const fromWh =
+                        w != null && h != null && !Number.isNaN(w) && !Number.isNaN(h) ? [`${w}x${h}`] : []
+                      const extraSizes = newModelSizes.split(',').map((s) => s.trim()).filter(Boolean)
                       await api.post('/task-models/', {
                         code: newModelCode.trim(),
                         name: newModelName.trim(),
                         duration_minutes: newModelDuration,
-                        sizes: newModelSizes.split(',').map((s) => s.trim()).filter(Boolean),
+                        width_mm: w,
+                        height_mm: h,
+                        sizes: [...fromWh, ...extraSizes.filter((s) => !fromWh.includes(s))],
                         blade_min: 1.5,
                         blade_max: 1.5,
                       })
@@ -1145,6 +1200,162 @@ export function SettingsPage() {
           </Card>
         </RbacGuard>
       </div>
+      <RbacGuard perm="teams.edit">
+        <Card>
+          <CardHeader>
+            <CardTitle>Hesapsız ekip çalışanları</CardTitle>
+            <CardDescription>
+              Sistem hesabı olmayan fakat ekiplerde çalışan kişileri kaydedin. Çalışan Takibi sayfasında &quot;Saha&quot;
+              listesinde görünür; görev ataması için önce sistem kullanıcısı oluşturmanız gerekir.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <Label className="text-xs">Ad soyad</Label>
+                <Input value={assocName} onChange={(e) => setAssocName(e.target.value)} placeholder="Örn. Ali Yılmaz" />
+              </div>
+              <div>
+                <Label className="text-xs">Telefon (isteğe bağlı)</Label>
+                <Input value={assocPhone} onChange={(e) => setAssocPhone(e.target.value)} placeholder="05xx..." />
+              </div>
+              <div className="sm:col-span-2">
+                <Label className="text-xs">Not</Label>
+                <Input value={assocNotes} onChange={(e) => setAssocNotes(e.target.value)} placeholder="Kısa not" />
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs mb-2 block">Ekipler</Label>
+              <div className="flex flex-wrap gap-3">
+                {data.teams.length === 0 && (
+                  <span className="text-sm text-muted-foreground">Önce ekip oluşturun</span>
+                )}
+                {data.teams.map((t) => {
+                  const tid = Number(t.id)
+                  const checked = assocTeamIds.includes(tid)
+                  return (
+                    <label key={t.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={(c) => {
+                          if (c) setAssocTeamIds((prev) => [...new Set([...prev, tid])])
+                          else setAssocTeamIds((prev) => prev.filter((x) => x !== tid))
+                        }}
+                      />
+                      {t.name}
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+            <Button
+              size="sm"
+              onClick={async () => {
+                if (!assocName.trim()) {
+                  toast({ title: 'Ad soyad gerekli', variant: 'destructive' })
+                  return
+                }
+                try {
+                  await api.post('/team-associates/', {
+                    full_name: assocName.trim(),
+                    phone: assocPhone.trim(),
+                    notes: assocNotes.trim(),
+                    teams: assocTeamIds,
+                    is_active: true,
+                  })
+                  setAssocName('')
+                  setAssocPhone('')
+                  setAssocNotes('')
+                  setAssocTeamIds([])
+                  await loadTeamAssociates()
+                  toast({ title: 'Kayıt eklendi' })
+                } catch (err: unknown) {
+                  toast({ title: 'Hata', description: formatApiError(err), variant: 'destructive' })
+                }
+              }}
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              Ekle
+            </Button>
+            <div className="space-y-2 border-t pt-4">
+              {teamAssociates.length === 0 && (
+                <p className="text-sm text-muted-foreground">Henüz hesapsız çalışan yok.</p>
+              )}
+              {teamAssociates.map((a) => (
+                <div
+                  key={a.id}
+                  className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between rounded-lg border p-3"
+                >
+                  <div>
+                    <p className="font-medium text-sm">{a.full_name}</p>
+                    {a.phone ? <p className="text-xs text-muted-foreground">{a.phone}</p> : null}
+                    {a.notes ? <p className="text-xs text-muted-foreground mt-1">{a.notes}</p> : null}
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {(a.teams || []).length === 0 && (
+                        <span className="text-xs text-amber-600">Ekip seçilmedi</span>
+                      )}
+                      {(a.teams || []).map((tid) => (
+                        <Badge key={`${a.id}-${tid}`} variant="secondary">
+                          {data.teams.find((t) => Number(t.id) === tid)?.name || tid}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <div className="flex flex-wrap gap-2 max-w-md">
+                      {data.teams.map((t) => {
+                        const tid = Number(t.id)
+                        const on = (a.teams || []).includes(tid)
+                        return (
+                          <label key={`${a.id}-e-${t.id}`} className="flex items-center gap-1 text-xs cursor-pointer">
+                            <Checkbox
+                              checked={on}
+                              onCheckedChange={async (c) => {
+                                const next = c
+                                  ? [...new Set([...(a.teams || []), tid])]
+                                  : (a.teams || []).filter((x) => x !== tid)
+                                try {
+                                  await api.patch(`/team-associates/${a.id}/`, { teams: next })
+                                  await loadTeamAssociates()
+                                  toast({ title: 'Ekipler güncellendi' })
+                                } catch (err: unknown) {
+                                  toast({
+                                    title: 'Hata',
+                                    description: formatApiError(err),
+                                    variant: 'destructive',
+                                  })
+                                }
+                              }}
+                            />
+                            {t.name}
+                          </label>
+                        )
+                      })}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive"
+                      onClick={async () => {
+                        if (!confirm(`${a.full_name} kaydını silinsin mi?`)) return
+                        try {
+                          await api.delete(`/team-associates/${a.id}/`)
+                          await loadTeamAssociates()
+                          toast({ title: 'Silindi' })
+                        } catch (err: unknown) {
+                          toast({ title: 'Hata', description: formatApiError(err), variant: 'destructive' })
+                        }
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </RbacGuard>
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader>

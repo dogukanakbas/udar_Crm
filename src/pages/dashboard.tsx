@@ -14,6 +14,7 @@ import { Link } from '@tanstack/react-router'
 import api from '@/lib/api'
 import { useToast } from '@/components/ui/use-toast'
 import type { Task } from '@/types'
+import { taskStatusLabelTR } from '@/lib/task-labels'
 
 function mapTaskFromApi(t: any): Task {
   return {
@@ -219,7 +220,7 @@ export function DashboardPage() {
                   >
                     <Link to="/tasks/$taskId" params={{ taskId: task.id }} className="flex-1 min-w-0">
                       <span className="font-semibold block">{task.title}</span>
-                      <Badge variant="outline" className="mt-1">{task.status === 'in-progress' ? 'Devam ediyor' : 'Yapılacak'}</Badge>
+                      <Badge variant="outline" className="mt-1">{taskStatusLabelTR(task.status)}</Badge>
                     </Link>
                     <div className="flex gap-1 shrink-0">
                       {task.status === 'todo' && (

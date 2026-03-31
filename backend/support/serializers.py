@@ -1,5 +1,16 @@
 from rest_framework import serializers
-from .models import Ticket, TicketMessage, Task, TaskAttachment, TaskComment, TaskChecklist, TaskTimeEntry, TaskModel
+from .models import (
+    Ticket,
+    TicketMessage,
+    Task,
+    TaskAttachment,
+    TaskComment,
+    TaskChecklist,
+    TaskTimeEntry,
+    TaskModel,
+    TaskProductionEntry,
+)
+from .workflow_utils import workflow_team_id_list, ensure_workflow_state
 from .models_automation import AutomationRule
 
 
@@ -51,21 +62,45 @@ class TaskCommentSerializer(serializers.ModelSerializer):
         return obj.author.username if obj.author else None
 
 
+class TaskProductionEntrySerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+    team_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TaskProductionEntry
+        fields = ['id', 'task', 'user', 'user_name', 'team', 'team_name', 'entry_date', 'quantity', 'note', 'created_at']
+        read_only_fields = ['user_name', 'team_name', 'created_at']
+
+    def get_user_name(self, obj):
+        return obj.user.username if obj.user else None
+
+    def get_team_name(self, obj):
+        return obj.team.name if obj.team else None
+
+
 class TaskSerializer(serializers.ModelSerializer):
     attachments = TaskAttachmentSerializer(many=True, read_only=True)
     comments = TaskCommentSerializer(many=True, read_only=True)
     checklist = serializers.SerializerMethodField()
     time_entries = serializers.SerializerMethodField()
+    production_entries = serializers.SerializerMethodField()
 
     class Meta:
         model = Task
-        fields = '__all__'
+        fields = tuple(f.name for f in Task._meta.fields) + (
+            'attachments',
+            'comments',
+            'checklist',
+            'time_entries',
+            'production_entries',
+        )
         extra_kwargs = {
             'owner': {'required': False, 'allow_null': True},
             'assignee': {'required': False, 'allow_null': True},
             'organization': {'required': False},
             'team': {'required': False, 'allow_null': True},
             'current_team': {'required': False, 'allow_null': True},
+            'sales_order': {'required': False, 'allow_null': True},
             'handover_reason': {'required': False, 'allow_null': True},
             'handover_at': {'required': False, 'allow_null': True},
             'planned_hours': {'required': False, 'allow_null': True},
@@ -80,7 +115,14 @@ class TaskSerializer(serializers.ModelSerializer):
         entries = obj.time_entries.all().order_by('-created_at')[:20]
         return TaskTimeEntrySerializer(entries, many=True).data
 
+    def get_production_entries(self, obj):
+        items = obj.production_entries.all().order_by('-entry_date', '-created_at')[:200]
+        return TaskProductionEntrySerializer(items, many=True).data
+
     def validate(self, attrs):
+        # Boş sipariş: üretim düşümü isteğe bağlı
+        if 'sales_order' in attrs and attrs['sales_order'] in ('', None):
+            attrs['sales_order'] = None
         # Boş veya null gelen planlanan değerleri 0'a çevirerek 400 hatasını önler
         for field in ['planned_hours', 'planned_cost']:
             val = attrs.get(field)
@@ -119,15 +161,66 @@ class TaskSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'end': 'Bitiş tarihi başlangıçtan önce olamaz'})
         if start and due and due < start:
             raise serializers.ValidationError({'due': 'Vade tarihi başlangıçtan önce olamaz'})
+        wf = attrs.get('workflow_team_ids')
+        if wf is None and self.instance:
+            wf = getattr(self.instance, 'workflow_team_ids', None)
+        if wf and isinstance(wf, list):
+            ids = [int(x) for x in wf if x is not None and str(x).isdigit()]
+            if len(ids) != len(set(ids)):
+                raise serializers.ValidationError(
+                    {'workflow_team_ids': 'İş akışında aynı ekip iki kez olamaz.'}
+                )
         return super().validate(attrs)
+
+    def create(self, validated_data):
+        instance = super().create(validated_data)
+        if workflow_team_id_list(instance):
+            ensure_workflow_state(instance)
+            instance.save(update_fields=['workflow_stage_state'])
+        return instance
+
+    def update(self, instance, validated_data):
+        instance = super().update(instance, validated_data)
+        if workflow_team_id_list(instance):
+            ensure_workflow_state(instance)
+            instance.save(update_fields=['workflow_stage_state'])
+        return instance
 
 
 class TaskModelSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
 
+    def validate(self, attrs):
+        w = attrs.get('width_mm')
+        h = attrs.get('height_mm')
+        if w is not None and h is not None:
+            sizes = list(attrs.get('sizes') or getattr(self.instance, 'sizes', None) or [])
+            label = f'{w}x{h}'
+            if label not in sizes:
+                attrs['sizes'] = [label] + sizes
+            elif 'sizes' not in attrs:
+                attrs['sizes'] = sizes
+        return super().validate(attrs)
+
     class Meta:
         model = TaskModel
-        fields = ['id', 'code', 'name', 'image', 'image_url', 'duration_minutes', 'blade_min', 'blade_max', 'sizes', 'order', 'is_active', 'created_at', 'updated_at']
+        fields = [
+            'id',
+            'code',
+            'name',
+            'image',
+            'image_url',
+            'duration_minutes',
+            'blade_min',
+            'blade_max',
+            'width_mm',
+            'height_mm',
+            'sizes',
+            'order',
+            'is_active',
+            'created_at',
+            'updated_at',
+        ]
         read_only_fields = ['created_at', 'updated_at']
 
     def get_image_url(self, obj):

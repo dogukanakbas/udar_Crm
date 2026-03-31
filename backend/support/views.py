@@ -8,8 +8,8 @@ import os
 import uuid
 from permissions import IsOrgMember, HasAPIPermission, CommentOnlyRestriction, ViewOnlyRestriction
 from audit.utils import log_entity_action
-from .models import Ticket, TicketMessage, Task, TaskAttachment, TaskComment, TaskChecklist, TaskTimeEntry, TaskModel
-from accounts.models import User, Team
+from .models import Ticket, TicketMessage, Task, TaskAttachment, TaskComment, TaskChecklist, TaskTimeEntry, TaskModel, TaskProductionEntry
+from accounts.models import User, Team, TeamAssociate
 from .models_automation import AutomationRule
 from .utils import send_slack_webhook, send_email, generate_presigned_post, scan_file_with_clamav
 from rest_framework import status
@@ -27,6 +27,9 @@ from .serializers import (
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.utils import timezone
+from datetime import datetime as dt_datetime
+
+from .workflow_utils import ensure_workflow_state, workflow_team_id_list, parallel_queue_visible
 
 
 def assign_task_to_team_leader(task, team):
@@ -158,6 +161,14 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             if instance.assignee_id:
                 instance.save(update_fields=['assignee'])
                 instance.refresh_from_db()
+        if getattr(instance, 'workflow_parallel', False) and instance.assignee_id and workflow_team_id_list(instance):
+            ensure_workflow_state(instance)
+            st = dict(instance.workflow_stage_state or {})
+            ct = instance.current_team_id or instance.team_id
+            if ct and str(ct) in st:
+                st[str(ct)]['assignee_id'] = instance.assignee_id
+                instance.workflow_stage_state = st
+                instance.save(update_fields=['workflow_stage_state'])
         # Sabit görevler için fabrika checklist ekle
         if getattr(instance, 'mode', 'manual') == 'fixed':
             TaskChecklist.objects.bulk_create(
@@ -276,18 +287,58 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def claim(self, request, pk=None):
-        """Worker ekibindeki bekleyen görevi üstlenir. Sadece task.current_team üyeleri claim edebilir."""
+        """Worker ekibindeki bekleyen görevi üstlenir. Paralel akışta workflow içindeki uygun bölümde üstlenir."""
         task = self.get_object()
         if task.organization_id != request.user.organization_id:
             raise PermissionDenied("Farklı organizasyon")
+        if getattr(task, 'workflow_parallel', False) and workflow_team_id_list(task):
+            wf = workflow_team_id_list(task)
+            user_teams = list(request.user.teams.values_list('id', flat=True))
+            user_set = set(user_teams)
+            ensure_workflow_state(task)
+            state = dict(task.workflow_stage_state or {})
+            claimed_tid = None
+            for tid in wf:
+                if tid not in user_set:
+                    continue
+                st = dict(state.get(str(tid), {}))
+                if st.get('stage_done'):
+                    continue
+                aid = st.get('assignee_id')
+                if aid and aid != request.user.id:
+                    continue
+                st['assignee_id'] = request.user.id
+                state[str(tid)] = st
+                task.workflow_stage_state = state
+                task.assignee = request.user
+                task.current_team_id = tid
+                task.save(update_fields=['workflow_stage_state', 'assignee', 'current_team', 'updated_at'])
+                claimed_tid = tid
+                break
+            if not claimed_tid:
+                raise PermissionDenied("Bu görevde üstlenebileceğiniz açık bölüm yok")
+            TaskComment.objects.create(
+                task=task,
+                author=request.user,
+                type='activity',
+                text=f"{request.user.username} görevi ({claimed_tid} bölümü) üstlendi",
+            )
+            push_event(
+                {
+                    "type": "task.claimed",
+                    "task_id": task.id,
+                    "organization": task.organization_id,
+                    "by": getattr(request.user, "email", None),
+                }
+            )
+            return Response(TaskSerializer(task, context={'request': request}).data)
+
         current_team = task.current_team or task.team
         if not current_team:
             raise PermissionDenied("Görev henüz bir ekibe atanmamış")
-        # Sadece current_team üyeleri claim edebilir
         if not current_team.members.filter(id=request.user.id).exists():
             raise PermissionDenied("Bu görevi sadece ilgili ekip üyeleri üstlenebilir")
         task.assignee = request.user
-        # current_team değiştirilmez - görev zaten doğru ekipte, sadece atama yapılır
         task.save(update_fields=['assignee', 'updated_at'])
         TaskComment.objects.create(
             task=task,
@@ -463,12 +514,45 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         """
         Worker kendi aşamasını bitirdiğinde: görev sıradaki ekibe otomatik devredilir.
         Son aşamadaysa görev tamamen tamamlanır (status=done).
+        Paralel akışta: bölüm usta başı onayına düşer (pending_approval).
         """
         task = self.get_object()
         if task.organization_id != request.user.organization_id:
             raise PermissionDenied("Farklı organizasyon")
         if task.assignee_id != request.user.id:
             raise PermissionDenied("Sadece size atanan görevi bitirebilirsiniz")
+
+        if getattr(task, 'workflow_parallel', False) and workflow_team_id_list(task):
+            wf = workflow_team_id_list(task)
+            user_teams = set(request.user.teams.values_list('id', flat=True))
+            ensure_workflow_state(task)
+            state = dict(task.workflow_stage_state or {})
+            active_tid = None
+            for tid in wf:
+                if tid not in user_teams:
+                    continue
+                st = state.get(str(tid), {})
+                if st.get('stage_done'):
+                    continue
+                if st.get('assignee_id') == request.user.id:
+                    active_tid = tid
+                    break
+            if active_tid is None:
+                raise PermissionDenied("Tamamlanacak size atanmış bölümünüz yok")
+            st = dict(state[str(active_tid)])
+            if st.get('pending_approval'):
+                raise PermissionDenied("Bu bölüm zaten onay bekliyor")
+            st['pending_approval'] = True
+            state[str(active_tid)] = st
+            task.workflow_stage_state = state
+            task.save(update_fields=['workflow_stage_state', 'updated_at'])
+            TaskComment.objects.create(
+                task=task,
+                author=request.user,
+                type='activity',
+                text=f"{request.user.username} bölüm çalışmasını tamamladı — usta başı onayı bekleniyor",
+            )
+            return Response(TaskSerializer(task, context={'request': request}).data)
 
         org = request.user.organization
         from_team = task.current_team or task.team
@@ -584,11 +668,184 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
         return Response(TaskSerializer(task, context={'request': request}).data)
 
+    @action(detail=True, methods=['post'], url_path='approve-section')
+    def approve_section(self, request, pk=None):
+        """Usta başı / yönetici: paralel akışta bölüm onayı — sonra görev tüm bölümler bitsin ise done."""
+        task = self.get_object()
+        if task.organization_id != request.user.organization_id:
+            raise PermissionDenied("Farklı organizasyon")
+        team_raw = request.data.get('team')
+        if team_raw is None:
+            return Response({'detail': 'team (ekip id) gerekli'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            team_id = int(team_raw)
+        except (TypeError, ValueError):
+            return Response({'detail': 'Geçersiz ekip'}, status=status.HTTP_400_BAD_REQUEST)
+        team = Team.objects.filter(id=team_id, organization=request.user.organization).first()
+        if not team:
+            return Response({'detail': 'Ekip bulunamadı'}, status=status.HTTP_404_NOT_FOUND)
+        leader_id = getattr(team, 'leader_id', None)
+        role = getattr(request.user, 'role', '')
+        if role not in ('Admin', 'Manager'):
+            if not leader_id or request.user.id != leader_id:
+                raise PermissionDenied("Sadece bölüm usta başı veya yönetici onaylayabilir")
+        wf = workflow_team_id_list(task)
+        if team_id not in wf:
+            return Response({'detail': 'Bu görevde bu bölüm yok'}, status=status.HTTP_400_BAD_REQUEST)
+        ensure_workflow_state(task)
+        state = dict(task.workflow_stage_state or {})
+        st = dict(state.get(str(team_id), {}))
+        if not st.get('pending_approval'):
+            return Response({'detail': 'Onay bekleyen bölüm kaydı yok'}, status=status.HTTP_400_BAD_REQUEST)
+        st['pending_approval'] = False
+        st['stage_done'] = True
+        st['assignee_id'] = None
+        state[str(team_id)] = st
+        task.workflow_stage_state = state
+        all_done = all((state.get(str(tid)) or {}).get('stage_done') for tid in wf)
+        extra_upd = ['workflow_stage_state', 'updated_at']
+        if all_done:
+            task.status = 'done'
+            task.assignee = None
+            extra_upd.extend(['status', 'assignee'])
+        task.save(update_fields=extra_upd)
+        TaskComment.objects.create(
+            task=task,
+            author=request.user,
+            type='activity',
+            text=f"✅ {request.user.username} bölüm ({team.name}) onayladı"
+            + (" — görev tamamlandı" if all_done else ""),
+        )
+        if all_done:
+            push_event(
+                {
+                    "type": "task.status",
+                    "task_id": task.id,
+                    "organization": task.organization_id,
+                    "title": task.title,
+                    "status": "done",
+                    "assignee_id": None,
+                    "by": getattr(request.user, "email", None),
+                }
+            )
+        return Response(TaskSerializer(task, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'], url_path='log-production')
+    def log_production(self, request, pk=None):
+        """Günlük tamamlanan adet — isteğe bağlı siparişe quantity_produced yansır."""
+        task = self.get_object()
+        if task.organization_id != request.user.organization_id:
+            raise PermissionDenied("Farklı organizasyon")
+        try:
+            qty = int(request.data.get('quantity', 0) or 0)
+        except (TypeError, ValueError):
+            qty = 0
+        if qty <= 0:
+            return Response({'detail': 'quantity 0\'dan büyük olmalı'}, status=status.HTTP_400_BAD_REQUEST)
+        day_raw = request.data.get('entry_date')
+        if day_raw:
+            try:
+                day = dt_datetime.strptime(str(day_raw)[:10], '%Y-%m-%d').date()
+            except ValueError:
+                return Response({'detail': 'entry_date YYYY-MM-DD olmalı'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            day = timezone.now().date()
+        user = request.user
+        wf = workflow_team_id_list(task)
+        user_teams = list(user.teams.values_list('id', flat=True))
+        team_raw = request.data.get('team')
+        tid = int(team_raw) if team_raw not in (None, '') else None
+        if tid is None:
+            for t in user_teams:
+                if wf and t in wf:
+                    tid = t
+                    break
+                if not wf and t == (task.current_team_id or task.team_id):
+                    tid = t
+                    break
+        if tid is None:
+            return Response({'detail': 'Bölüm (ekip) belirlenemedi'}, status=status.HTTP_400_BAD_REQUEST)
+        if wf and tid not in wf:
+            return Response({'detail': 'Bu görev akışında bu ekip yok'}, status=status.HTTP_400_BAD_REQUEST)
+        if not Team.objects.filter(id=tid, members=user).exists():
+            raise PermissionDenied("Bu ekibin üyesi değilsiniz")
+        ensure_workflow_state(task)
+        state = dict(task.workflow_stage_state or {})
+        if str(tid) in state:
+            st = dict(state[str(tid)])
+            st['qty_done'] = int(st.get('qty_done', 0) or 0) + qty
+            state[str(tid)] = st
+            task.workflow_stage_state = state
+            task.save(update_fields=['workflow_stage_state', 'updated_at'])
+        TaskProductionEntry.objects.create(
+            task=task,
+            user=user,
+            team_id=tid,
+            entry_date=day,
+            quantity=qty,
+            note=str(request.data.get('note', '') or '')[:255],
+        )
+        if task.sales_order_id:
+            from erp.models import SalesOrder
+
+            so = SalesOrder.objects.filter(id=task.sales_order_id, organization_id=task.organization_id).first()
+            if so:
+                ordered = int(getattr(so, 'order_quantity', 0) or 0)
+                produced = int(getattr(so, 'quantity_produced', 0) or 0)
+                remaining = max(0, ordered - produced)
+                add = min(qty, remaining) if ordered else qty
+                so.quantity_produced = produced + add
+                so.save(update_fields=['quantity_produced'])
+        return Response(TaskSerializer(task, context={'request': request}).data)
+
+    @action(detail=False, methods=['get'], url_path='production-report')
+    def production_report(self, request):
+        """Günlük üretim: ?date=YYYY-MM-DD (yönetici)"""
+        if getattr(request.user, 'role', '') not in ('Admin', 'Manager'):
+            raise PermissionDenied("Bu rapora yalnızca Admin veya Manager erişebilir")
+        org = getattr(request.user, 'organization', None)
+        if not org:
+            return Response({'date': None, 'entries': [], 'total_quantity': 0})
+        day_raw = request.query_params.get('date')
+        if day_raw:
+            try:
+                d = dt_datetime.strptime(str(day_raw)[:10], '%Y-%m-%d').date()
+            except ValueError:
+                return Response({'detail': 'date YYYY-MM-DD olmalı'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            d = timezone.now().date()
+        rows = (
+            TaskProductionEntry.objects.filter(task__organization=org, entry_date=d)
+            .select_related('task', 'user', 'team')
+            .order_by('-created_at')
+        )
+        entries = [
+            {
+                'id': e.id,
+                'task_id': e.task_id,
+                'task_title': e.task.title,
+                'user_id': e.user_id,
+                'user_name': e.user.username if e.user else None,
+                'team_id': e.team_id,
+                'team_name': e.team.name if e.team else None,
+                'quantity': e.quantity,
+                'note': e.note,
+                'created_at': e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in rows
+        ]
+        total_q = sum(e['quantity'] for e in entries)
+        by_team = {}
+        for e in entries:
+            key = e['team_name'] or '—'
+            by_team[key] = by_team.get(key, 0) + e['quantity']
+        return Response({'date': str(d), 'entries': entries, 'total_quantity': total_q, 'by_team': by_team})
+
     @action(detail=False, methods=['get'], url_path='my-team-queue')
     def my_team_queue(self, request):
         """
         Worker için: Aktif ekip aşamasındaki görevler (üye olan herkes görür).
-        Atanan yoksa veya atanmış kişi o ekibin üyesiyse (ör. usta başı) listelenir.
+        Paralel akışta workflow'daki uygun bölümler de listelenir.
         """
         user = request.user
         org = getattr(user, 'organization', None)
@@ -608,7 +865,25 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             .select_related('team', 'current_team')
             .order_by('-updated_at')
         )
-        return Response(TaskSerializer(qs, many=True, context={'request': request}).data)
+        seen = {t.id for t in qs}
+        out = list(qs)
+        par_ids = (
+            Task.objects.filter(organization=org, workflow_parallel=True)
+            .exclude(status='done')
+            .exclude(id__in=seen)
+            .values_list('id', flat=True)
+        )
+        for tid in par_ids:
+            t = (
+                Task.objects.filter(id=tid)
+                .select_related('team', 'current_team')
+                .first()
+            )
+            if t and parallel_queue_visible(t, user, user_team_ids):
+                out.append(t)
+                seen.add(t.id)
+        out.sort(key=lambda x: x.updated_at, reverse=True)
+        return Response(TaskSerializer(out, many=True, context={'request': request}).data)
 
     @action(detail=False, methods=['get'], url_path='worker-tracking')
     def worker_tracking(self, request):
@@ -663,13 +938,42 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 'active_tasks_count': active_tasks.count(),
                 'last_handover': last_handover,
                 'last_activity': active_tasks.first().updated_at if active_tasks.exists() else None,
+                'has_account': True,
             })
         
-        return Response({
-            'workers': tracking_data,
-            'total_workers': len(tracking_data),
-            'timestamp': timezone.now().isoformat(),
-        })
+        field_staff = []
+        for a in (
+            TeamAssociate.objects.filter(organization=org, is_active=True)
+            .prefetch_related('teams')
+            .order_by('full_name', 'id')
+        ):
+            team_names = list(a.teams.values_list('name', flat=True))
+            field_staff.append(
+                {
+                    'associate_id': a.id,
+                    'worker_name': a.full_name,
+                    'worker_email': '',
+                    'contact': a.phone or '—',
+                    'primary_teams': team_names,
+                    'team_ids': list(a.teams.values_list('id', flat=True)),
+                    'current_department': None,
+                    'active_tasks_count': 0,
+                    'last_handover': None,
+                    'last_activity': a.updated_at.isoformat() if a.updated_at else None,
+                    'has_account': False,
+                    'notes': (a.notes or '')[:200],
+                }
+            )
+
+        return Response(
+            {
+                'workers': tracking_data,
+                'total_workers': len(tracking_data),
+                'field_workers': field_staff,
+                'total_field_workers': len(field_staff),
+                'timestamp': timezone.now().isoformat(),
+            }
+        )
 
     @action(detail=False, methods=['get'], url_path='worker-detail')
     def worker_detail(self, request):

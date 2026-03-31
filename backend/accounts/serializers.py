@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Team, User
+from .models import Team, TeamAssociate, User
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 import pyotp
 
@@ -110,6 +110,72 @@ class TeamSerializer(serializers.ModelSerializer):
         if instance.leader_id and not instance.members.filter(id=instance.leader_id).exists():
             instance.leader = None
             instance.save(update_fields=['leader'])
+
+
+class TeamAssociateSerializer(serializers.ModelSerializer):
+    """Hesapsız ekip çalışanı: teams = ekip pk listesi."""
+
+    teams = serializers.ListField(child=serializers.IntegerField(), required=False, allow_empty=True)
+
+    class Meta:
+        model = TeamAssociate
+        fields = ['id', 'full_name', 'phone', 'notes', 'teams', 'is_active', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+    def _valid_team_pks(self, org, raw_ids):
+        if org is None:
+            return []
+        allowed = set(Team.objects.filter(organization=org).values_list('pk', flat=True))
+        out, seen = [], set()
+        for raw in raw_ids or []:
+            try:
+                pk = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if pk in allowed and pk not in seen:
+                out.append(pk)
+                seen.add(pk)
+        return out
+
+    def validate_teams(self, value):
+        request = self.context.get('request')
+        org = getattr(getattr(request, 'user', None), 'organization', None)
+        return self._valid_team_pks(org, value)
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        org = getattr(request.user, 'organization', None) if request else None
+        team_ids = validated_data.pop('teams', [])
+        validated_data.pop('organization', None)
+        inst = TeamAssociate.objects.create(organization=org, **validated_data)
+        if team_ids is not None:
+            ids = self._valid_team_pks(org, team_ids)
+            inst.teams.set(Team.objects.filter(pk__in=ids, organization=org))
+        return inst
+
+    def update(self, instance, validated_data):
+        request = self.context.get('request')
+        org = instance.organization or getattr(getattr(request, 'user', None), 'organization', None)
+        team_ids = validated_data.pop('teams', None)
+        for k, v in validated_data.items():
+            setattr(instance, k, v)
+        instance.save()
+        if team_ids is not None:
+            ids = self._valid_team_pks(org, team_ids)
+            instance.teams.set(Team.objects.filter(pk__in=ids, organization=org))
+        return instance
+
+    def to_representation(self, instance):
+        return {
+            'id': instance.id,
+            'full_name': instance.full_name,
+            'phone': instance.phone or '',
+            'notes': instance.notes or '',
+            'teams': list(instance.teams.values_list('pk', flat=True)),
+            'is_active': instance.is_active,
+            'created_at': instance.created_at.isoformat() if instance.created_at else None,
+            'updated_at': instance.updated_at.isoformat() if instance.updated_at else None,
+        }
 
 
 class TwoFATokenObtainPairSerializer(TokenObtainPairSerializer):

@@ -31,6 +31,15 @@ export const formatDateTime = (value: string | number | Date) =>
     minute: '2-digit',
   }).format(new Date(value))
 
+/** Günlük mesai süresi (dakika). Örn. 08:00–18:00 → 600. */
+export function getWorkingMinutesPerDay(workStart: string, workEnd: string): number {
+  const [startH, startM] = workStart.split(':').map(Number)
+  const [endH, endM] = workEnd.split(':').map(Number)
+  const start = startH * 60 + startM
+  const end = endH * 60 + endM
+  return Math.max(0, end - start)
+}
+
 /** Mesai günleri ve saatleri dikkate alarak başlangıç + planlanan dakika = bitiş hesaplar. */
 export function addWorkingMinutes(
   startISO: string,

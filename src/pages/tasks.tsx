@@ -17,8 +17,28 @@ import { PageHeader } from '@/components/app-shell'
 import { useToast } from '@/components/ui/use-toast'
 import { useAppStore } from '@/state/use-app-store'
 import api from '@/lib/api'
-import { formatDate, formatDateTime, addWorkingMinutes } from '@/lib/utils'
-import type { Task, Team } from '@/types'
+import { formatDate, formatDateTime, formatNumber, addWorkingMinutes, getWorkingMinutesPerDay, cn } from '@/lib/utils'
+import { taskPriorityLabelTR, taskSlaBucketLabelTR, taskStatusLabelTR } from '@/lib/task-labels'
+import type { Task, TaskTimeEntry, Team, UserLite } from '@/types'
+import { Calendar, Plus, Paperclip, Download, Trash2, GripVertical } from 'lucide-react'
+import { RbacGuard } from '@/components/rbac'
+import { useParams } from '@tanstack/react-router'
+import { CardDescription } from '@/components/ui/card'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Checkbox } from '@/components/ui/checkbox'
+import { downloadCsv } from '@/utils/download-csv'
+import { downloadICS } from '@/utils/ics'
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 function taskVisibleToWorkerTeamMember(t: Task, workerUserId: string | null, teams: Team[]): boolean {
   if (!workerUserId) return false
@@ -31,27 +51,27 @@ function taskVisibleToWorkerTeamMember(t: Task, workerUserId: string | null, tea
   if (!t.assignee || String(t.assignee).trim() === '') return true
   return !!teamRow.memberIds?.some((m) => String(m) === String(t.assignee))
 }
-import { Calendar, Plus, Paperclip, Download, Trash2, GripVertical } from 'lucide-react'
-import { RbacGuard } from '@/components/rbac'
-import { useParams } from '@tanstack/react-router'
-import { CardDescription } from '@/components/ui/card'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Checkbox } from '@/components/ui/checkbox'
-import { downloadCsv } from '@/utils/download-csv'
-import { downloadICS } from '@/utils/ics'
-import { cn } from '@/lib/utils'
-import type { TaskTimeEntry } from '@/types'
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core'
-import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
+
+/** Varsayılan görev sahibi: Ömer Faruk (ad / kullanıcı adı eşleşmesi). */
+function pickDefaultTaskOwner(users: UserLite[], explicitOwner?: string): string {
+  if (explicitOwner) return explicitOwner
+  if (!users.length) return ''
+  const norm = (s: string) =>
+    s
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+      .replace(/ı/g, 'i')
+  for (const u of users) {
+    const bundle = norm(`${u.firstName || ''} ${u.lastName || ''} ${u.username}`)
+    if (bundle.includes('omer') && bundle.includes('faruk')) return u.id
+  }
+  for (const u of users) {
+    const un = norm(u.username)
+    if (un.includes('omerfaruk') || un.includes('omer.faruk')) return u.id
+  }
+  return users[0].id
+}
 
 const MENTION_REGEX = /@([\w.-]+)/g
 const MAX_FILE_MB = 10
@@ -172,6 +192,9 @@ const taskSchema = z
     ),
     modelBladeDepth: z.string().optional(),
     workflowTeamIds: z.array(z.string()).optional(),
+    workflowStageTargets: z.array(z.number()).optional(),
+    workflowParallel: z.boolean().optional(),
+    salesOrderId: z.string().optional(),
     plannedHours: z.preprocess(
       (v) => (v === '' || v === undefined ? 0 : Number(v)),
       z.number().min(0, '>=0 olmalı')
@@ -499,8 +522,8 @@ export function TasksPage() {
   const exportCsv = () => {
     const rows = filtered.map((t) => ({
       Başlık: t.title,
-      Durum: t.status,
-      Öncelik: t.priority,
+      Durum: taskStatusLabelTR(t.status),
+      Öncelik: taskPriorityLabelTR(t.priority),
       Atanan: data.users.find((u) => u.id === t.assignee)?.username || '',
       Sahip: data.users.find((u) => u.id === t.owner)?.username || '',
       Ekip: data.teams.find((tm) => tm.id === t.teamId)?.name || '',
@@ -522,7 +545,7 @@ export function TasksPage() {
       .map((t) => ({
         uid: `${t.id}@udarcrm`,
         summary: t.title,
-        description: `Durum: ${t.status} • Öncelik: ${t.priority}`,
+        description: `Durum: ${taskStatusLabelTR(t.status)} • Öncelik: ${taskPriorityLabelTR(t.priority)}`,
         start: t.start || t.due || t.end || new Date().toISOString(),
         end: t.end || undefined,
       }))
@@ -595,8 +618,16 @@ export function TasksPage() {
       header: 'Sahip',
       cell: ({ row }) => data.users.find((u) => u.id === row.original.owner)?.username ?? row.original.owner,
     },
-    { accessorKey: 'status', header: 'Durum', cell: ({ row }) => <Badge variant="secondary">{row.original.status}</Badge> },
-    { accessorKey: 'priority', header: 'Öncelik', cell: ({ row }) => <Badge variant="outline">{row.original.priority}</Badge> },
+    {
+      accessorKey: 'status',
+      header: 'Durum',
+      cell: ({ row }) => <Badge variant="secondary">{taskStatusLabelTR(row.original.status)}</Badge>,
+    },
+    {
+      accessorKey: 'priority',
+      header: 'Öncelik',
+      cell: ({ row }) => <Badge variant="outline">{taskPriorityLabelTR(row.original.priority)}</Badge>,
+    },
     { accessorKey: 'start', header: 'Başlangıç', cell: ({ row }) => formatDate(row.original.start ?? '') },
     { accessorKey: 'end', header: 'Bitiş', cell: ({ row }) => formatDate(row.original.end ?? '') },
     {
@@ -606,7 +637,7 @@ export function TasksPage() {
         const sla = slaStatus(row.original)
         if (!sla) return <span className="text-xs text-muted-foreground">—</span>
         return (
-          <Badge variant={sla === 'overdue' ? 'destructive' : 'default'}>{sla === 'overdue' ? 'Gecikti' : '<24s'}</Badge>
+          <Badge variant={sla === 'overdue' ? 'destructive' : 'default'}>{taskSlaBucketLabelTR(sla)}</Badge>
         )
       },
     },
@@ -632,6 +663,7 @@ export function TasksPage() {
                 task={row.original}
                 users={data.users}
                 teams={data.teams}
+                salesOrders={data.salesOrders}
                 uploading={uploading}
                 setUploading={setUploading}
                 onSubmit={(values) => {
@@ -661,7 +693,11 @@ export function TasksPage() {
     if (!id) return
     const moving = tasks.find((t) => t.id === id)
     if (moving && moving.status !== newStatus && statusCounts[newStatus] >= wipLimits[newStatus]) {
-      toast({ title: 'WIP limiti dolu', description: `${newStatus} için limit: ${wipLimits[newStatus]}`, variant: 'destructive' })
+      toast({
+        title: 'WIP limiti dolu',
+        description: `${taskStatusLabelTR(newStatus)} sütunu için limit: ${wipLimits[newStatus]}`,
+        variant: 'destructive',
+      })
       return
     }
     updateTask(id, { status: newStatus })
@@ -738,6 +774,7 @@ export function TasksPage() {
                 <TaskModal
                   users={data.users}
                   teams={data.teams}
+                  salesOrders={data.salesOrders}
                   uploading={uploading}
                   setUploading={setUploading}
                   onSubmit={(values) => {
@@ -778,13 +815,13 @@ export function TasksPage() {
       <div className="grid gap-3 md:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">WIP (todo)</CardTitle>
+            <CardTitle className="text-sm">WIP · Yapılacak</CardTitle>
           </CardHeader>
           <CardContent className="text-2xl font-semibold">{statusCounts.todo}</CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">WIP (in-progress)</CardTitle>
+            <CardTitle className="text-sm">WIP · Devam ediyor</CardTitle>
           </CardHeader>
           <CardContent className="text-2xl font-semibold">{statusCounts['in-progress']}</CardContent>
         </Card>
@@ -796,7 +833,7 @@ export function TasksPage() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">&lt;24s SLA</CardTitle>
+            <CardTitle className="text-sm">SLA · 24 saat içinde</CardTitle>
           </CardHeader>
           <CardContent className="text-2xl font-semibold">{slaSoon.length}</CardContent>
         </Card>
@@ -804,7 +841,7 @@ export function TasksPage() {
       <Card>
         <CardHeader>
           <CardTitle>SLA listesi</CardTitle>
-          <CardDescription>Geciken ve 24s içinde vadesi gelen görevler</CardDescription>
+          <CardDescription>Geciken ve 24 saat içinde vadesi gelen görevler</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-2">
           <div>
@@ -818,7 +855,7 @@ export function TasksPage() {
             {slaOverdue.length === 0 && <p className="text-xs text-muted-foreground mt-2">Kayıt yok</p>}
           </div>
           <div>
-            <p className="text-sm font-semibold">&lt;24s</p>
+            <p className="text-sm font-semibold">24 saat içinde</p>
             {slaSoon.slice(0, 5).map((t) => (
               <div key={t.id} className="mt-2 flex items-center justify-between rounded border px-3 py-2 text-sm">
                 <span>{t.title}</span>
@@ -880,14 +917,14 @@ export function TasksPage() {
                   <td className="py-2">{formatDate(row.due)}</td>
                   <td className="py-2">
                     <Badge variant={row.sla === 'overdue' ? 'destructive' : row.sla === 'soon' ? 'secondary' : 'outline'}>
-                      {row.sla || '—'}
+                      {row.sla ? taskSlaBucketLabelTR(row.sla) : '—'}
                     </Badge>
                   </td>
                   <td className="py-2">
-                    <Badge variant="outline">{row.status}</Badge>
+                    <Badge variant="outline">{taskStatusLabelTR(row.status)}</Badge>
                   </td>
                   <td className="py-2">
-                    <Badge variant="secondary">{row.priority}</Badge>
+                    <Badge variant="secondary">{taskPriorityLabelTR(row.priority)}</Badge>
                   </td>
                   <td className="py-2">{row.assignee}</td>
                 </tr>
@@ -1021,7 +1058,7 @@ export function TasksPage() {
           <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
             {(['todo', 'in-progress', 'done'] as Task['status'][]).map((st) => (
               <div key={st} className="flex items-center gap-2 rounded border px-2 py-1">
-                <span className="uppercase">{st}</span>
+                <span className="font-medium">{taskStatusLabelTR(st)}</span>
                 <Input
                   type="number"
                   className="h-8 w-20"
@@ -1044,7 +1081,7 @@ export function TasksPage() {
             >
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm uppercase">{st}</CardTitle>
+                  <CardTitle className="text-sm">{taskStatusLabelTR(st)}</CardTitle>
                   <Badge variant={statusCounts[st] > wipLimits[st] ? 'destructive' : 'secondary'}>
                     {statusCounts[st]}/{wipLimits[st]}
                   </Badge>
@@ -1069,10 +1106,10 @@ export function TasksPage() {
                       <div className="flex items-center gap-2">
                         {slaStatus(t) && (
                           <Badge variant={slaStatus(t) === 'overdue' ? 'destructive' : 'secondary'}>
-                            {slaStatus(t) === 'overdue' ? 'Gecikti' : '<24s'}
+                            {taskSlaBucketLabelTR(slaStatus(t)!)}
                           </Badge>
                         )}
-                        <Badge variant="outline">{t.priority}</Badge>
+                        <Badge variant="outline">{taskPriorityLabelTR(t.priority)}</Badge>
                       </div>
                     </div>
                     <p className="text-xs text-muted-foreground">
@@ -1147,7 +1184,7 @@ export function TasksPage() {
                   <div>
                     <p className="font-medium">{row.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      Todo {row.todo} • Devam {row.inProgress} • Tamam {row.done}
+                      Yapılacak {row.todo} · Devam {row.inProgress} · Tamamlandı {row.done}
                     </p>
                   </div>
                   <div className="text-right">
@@ -1170,7 +1207,7 @@ export function TasksPage() {
                   <div>
                     <p className="font-medium">{row.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      Todo {row.todo} • Devam {row.inProgress} • Tamam {row.done}
+                      Yapılacak {row.todo} · Devam {row.inProgress} · Tamamlandı {row.done}
                     </p>
                   </div>
                   <div className="text-right">
@@ -1337,36 +1374,52 @@ export function TasksPage() {
 
 function WorkflowStepsEditor({
   teams,
-  value,
-  onChange,
+  teamIds,
+  targets,
+  defaultTargetQty,
+  onTeamsChange,
+  onTargetsChange,
 }: {
   teams: { id: string; name: string }[]
-  value: string[]
-  onChange: (ids: string[]) => void
+  teamIds: string[]
+  targets: number[]
+  defaultTargetQty: number
+  onTeamsChange: (ids: string[]) => void
+  onTargetsChange: (t: number[]) => void
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
-  const steps = value.length ? value : []
+  const steps = teamIds.length ? teamIds : []
+  const tg = targets.length === steps.length ? targets : steps.map((_, i) => targets[i] ?? defaultTargetQty)
   const handleDragEnd = (e: DragEndEvent) => {
     const { active, over } = e
     if (!over || active.id === over.id) return
     const oldIdx = steps.findIndex((_, i) => `step-${i}` === String(active.id))
     const newIdx = steps.findIndex((_, i) => `step-${i}` === String(over.id))
     if (oldIdx === -1 || newIdx === -1) return
-    const reordered = arrayMove([...steps], oldIdx, newIdx)
-    onChange(reordered)
+    onTeamsChange(arrayMove([...steps], oldIdx, newIdx))
+    onTargetsChange(arrayMove([...tg], oldIdx, newIdx))
   }
   const updateStep = (idx: number, teamId: string) => {
     const next = [...steps]
     next[idx] = teamId
-    onChange(next)
+    onTeamsChange(next)
+  }
+  const updateTarget = (idx: number, n: number) => {
+    const next = [...tg]
+    next[idx] = n
+    onTargetsChange(next)
   }
   const removeStep = (idx: number) => {
-    onChange(steps.filter((_, i) => i !== idx))
+    onTeamsChange(steps.filter((_, i) => i !== idx))
+    onTargetsChange(tg.filter((_, i) => i !== idx))
   }
-  const addStep = () => onChange([...steps, ''])
+  const addStep = () => {
+    onTeamsChange([...steps, ''])
+    onTargetsChange([...tg, defaultTargetQty])
+  }
   return (
     <div className="space-y-2">
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -1376,8 +1429,10 @@ function WorkflowStepsEditor({
               key={`step-${i}`}
               id={`step-${i}`}
               teamId={teamId}
+              targetQty={tg[i] ?? defaultTargetQty}
               teams={teams}
               onTeamChange={(v) => updateStep(i, v)}
+              onTargetChange={(n) => updateTarget(i, n)}
               onRemove={() => removeStep(i)}
             />
           ))}
@@ -1394,14 +1449,18 @@ function WorkflowStepsEditor({
 function SortableWorkflowStep({
   id,
   teamId,
+  targetQty,
   teams,
   onTeamChange,
+  onTargetChange,
   onRemove,
 }: {
   id: string
   teamId: string
+  targetQty: number
   teams: { id: string; name: string }[]
   onTeamChange: (teamId: string) => void
+  onTargetChange: (n: number) => void
   onRemove: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
@@ -1424,7 +1483,7 @@ function SortableWorkflowStep({
         <GripVertical className="h-4 w-4" />
       </span>
       <Select value={teamId || 'none'} onValueChange={(v) => onTeamChange(v === 'none' ? '' : v)}>
-        <SelectTrigger className="flex-1">
+        <SelectTrigger className="flex-1 min-w-[8rem]">
           <SelectValue placeholder="Ekip seç" />
         </SelectTrigger>
         <SelectContent>
@@ -1436,6 +1495,16 @@ function SortableWorkflowStep({
           ))}
         </SelectContent>
       </Select>
+      <div className="flex flex-col gap-0.5">
+        <Label className="text-[10px] text-muted-foreground">Hedef adet</Label>
+        <Input
+          type="number"
+          min={0}
+          className="h-8 w-20"
+          value={targetQty}
+          onChange={(e) => onTargetChange(Math.max(0, Number(e.target.value) || 0))}
+        />
+      </div>
       <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={onRemove} aria-label="Kaldır">
         <Trash2 className="h-4 w-4" />
       </Button>
@@ -1508,6 +1577,8 @@ export function TaskDetailPage() {
   const [handoverTeam, setHandoverTeam] = useState<string>((task as any)?.currentTeam || task?.teamId || 'none')
   const [handoverAssignee, setHandoverAssignee] = useState<string>(task?.assignee || 'none')
   const [handoverNote, setHandoverNote] = useState<string>('')
+  const [prodQty, setProdQty] = useState(1)
+  const [prodDate, setProdDate] = useState(() => new Date().toISOString().slice(0, 10))
   if (!task) {
     return (
       <div className="space-y-2">
@@ -1566,8 +1637,7 @@ export function TaskDetailPage() {
     .filter((i) => (timelineFilter === 'all' ? true : i.type === timelineFilter))
 
   const refreshTask = async () => {
-    const res = await api.get(`/tasks/${task.id}/`)
-    await updateTask(task.id, res.data)
+    await hydrateFromApi()
   }
 
   const handleClaim = async () => {
@@ -1613,11 +1683,20 @@ export function TaskDetailPage() {
     isAssignee &&
     (isTeamLeader || data.settings.role === 'Admin' || data.settings.role === 'Manager')
 
+  const wfState = task.workflowStageState || {}
+  const pendingSectionTeamIds = Object.entries(wfState)
+    .filter(([_, st]) => st?.pending_approval && !st?.stage_done)
+    .map(([k]) => k)
+  const isLeaderOfTeamId = (teamId: string) => {
+    const row = data.teams.find((t) => t.id === teamId)
+    return !!(currentUserId && row?.leaderId && String(row.leaderId) === String(currentUserId))
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
         title={`Görev: ${task.title}`}
-        description={`Durum: ${task.status} • Öncelik: ${task.priority || '-'}`}
+        description={`Durum: ${taskStatusLabelTR(task.status)} • Öncelik: ${taskPriorityLabelTR(task.priority)}`}
       />
       <Card>
         <CardHeader>
@@ -1655,7 +1734,12 @@ export function TaskDetailPage() {
                           try {
                             await api.post(`/tasks/${task.id}/complete-stage/`)
                             await hydrateFromApi()
-                            toast({ title: 'Aşama tamamlandı' })
+                            toast({
+                              title: task.workflowParallel ? 'Onaya gönderildi' : 'Aşama tamamlandı',
+                              description: task.workflowParallel
+                                ? 'Usta başı onayından sonra bölüm kapanır.'
+                                : undefined,
+                            })
                           } catch {
                             await updateTask(task.id, { status: 'done' })
                             await hydrateFromApi()
@@ -1663,7 +1747,7 @@ export function TaskDetailPage() {
                           }
                         }}
                       >
-                        Bitir
+                        {task.workflowParallel ? 'Bölümü bitir (onaya gönder)' : 'Bitir'}
                       </Button>
                     )}
                     {canReleaseToTeam && (
@@ -1701,6 +1785,10 @@ export function TaskDetailPage() {
                       </>
                     )}
                   </>
+                ) : isWorker && task.status !== 'done' ? (
+                  <Button size="sm" onClick={handleClaim}>
+                    Üstlen
+                  </Button>
                 ) : !isWorker ? (
                   <Button size="sm" onClick={handleClaim}>
                     Ben üstleniyorum
@@ -1708,6 +1796,41 @@ export function TaskDetailPage() {
                 ) : null}
               </div>
             </div>
+            {task.workflowParallel &&
+              pendingSectionTeamIds.filter(
+                (tid) =>
+                  isLeaderOfTeamId(tid) || data.settings.role === 'Admin' || data.settings.role === 'Manager'
+              ).length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {pendingSectionTeamIds
+                    .filter(
+                      (tid) =>
+                        isLeaderOfTeamId(tid) || data.settings.role === 'Admin' || data.settings.role === 'Manager'
+                    )
+                    .map((tid) => (
+                      <Button
+                        key={tid}
+                        size="sm"
+                        variant="secondary"
+                        onClick={async () => {
+                          try {
+                            await api.post(`/tasks/${task.id}/approve-section/`, { team: Number(tid) })
+                            await hydrateFromApi()
+                            toast({ title: 'Bölüm onaylandı' })
+                          } catch (e: any) {
+                            toast({
+                              title: 'Hata',
+                              description: e?.response?.data?.detail || 'Onaylanamadı',
+                              variant: 'destructive',
+                            })
+                          }
+                        }}
+                      >
+                        Bölümü onayla: {data.teams.find((t) => t.id === tid)?.name || tid}
+                      </Button>
+                    ))}
+                </div>
+              )}
             {!isWorker && (
               <>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -1774,6 +1897,77 @@ export function TaskDetailPage() {
               </>
             )}
           </div>
+          <div className="rounded-lg border border-primary/25 bg-primary/5 p-4 space-y-3">
+            <div>
+              <p className="text-sm font-semibold">Üretilecek ürün</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {task.mode === 'fixed'
+                  ? 'Sabit model görevi — model, bıçak ve adet bilgisi üretim için geçerlidir.'
+                  : 'Manuel görev — aşağıdaki plan ve ölçüler üretim talimatıdır.'}
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+              <DetailRow label="Görev modu" value={task.mode === 'fixed' ? 'Sabit (model bazlı)' : 'Manuel'} />
+              <DetailRow label="Hedef adet (toplam)" value={String(task.quantity ?? 1)} />
+              <DetailRow label="Model kodu" value={task.modelCode?.trim() ? task.modelCode : '—'} />
+              <DetailRow label="Varyant" value={task.variant?.trim() ? task.variant : '—'} />
+              <DetailRow label="Bıçak derinliği" value={task.modelBladeDepth?.trim() ? task.modelBladeDepth : '—'} />
+              <DetailRow
+                label="Birim süre"
+                value={
+                  task.modelDurationMinutes != null && Number(task.modelDurationMinutes) > 0
+                    ? `${task.modelDurationMinutes} dk`
+                    : '—'
+                }
+              />
+              <DetailRow
+                label="Toplam planlanan süre"
+                value={
+                  task.totalPlannedMinutes != null && Number(task.totalPlannedMinutes) > 0
+                    ? `${task.totalPlannedMinutes} dk`
+                    : '—'
+                }
+              />
+              <DetailRow
+                label="Planlanan süre (saat)"
+                value={task.plannedHours != null && Number(task.plannedHours) > 0 ? `${task.plannedHours} sa` : '—'}
+              />
+              <div className="sm:col-span-2">
+                <DetailRow
+                  label="Ölçüler"
+                  value={(task.modelSizes || []).length > 0 ? (task.modelSizes || []).join(', ') : '—'}
+                />
+              </div>
+              <DetailRow label="Başlangıç" value={task.start ? formatDate(task.start) : '—'} />
+              <DetailRow label="Bitiş" value={task.end ? formatDate(task.end) : '—'} />
+            </div>
+            {(task.workflowTeamIds || []).length > 0 && (
+              <div className="rounded border bg-background/70 p-3 space-y-2">
+                <p className="text-xs font-semibold uppercase text-muted-foreground">İş akışı — bölüm hedefleri</p>
+                <ul className="space-y-1.5 text-sm">
+                  {(task.workflowTeamIds || []).map((tid, idx) => {
+                    const tname = data.teams.find((t) => t.id === tid)?.name || tid
+                    const st = wfState[tid]
+                    const tgt =
+                      task.workflowStageTargets?.[idx] ??
+                      (typeof st?.qty_target === 'number' ? st.qty_target : undefined) ??
+                      task.quantity ??
+                      1
+                    const done = typeof st?.qty_done === 'number' ? st.qty_done : null
+                    return (
+                      <li key={tid} className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
+                        <span className="font-medium">{tname}</span>
+                        <span className="text-muted-foreground text-xs sm:text-sm">
+                          Hedef: <span className="font-medium text-foreground">{tgt}</span> adet
+                          {done != null ? ` • Bu bölümde raporlanan: ${done}` : ''}
+                        </span>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            )}
+          </div>
           {isAdmin && (
             <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
               <DetailRow label="Sahip" value={ownerName} />
@@ -1801,7 +1995,7 @@ export function TaskDetailPage() {
                 <span className="text-xs uppercase text-muted-foreground">SLA</span>
                 {slaStatus(task) ? (
                   <Badge variant={slaStatus(task) === 'overdue' ? 'destructive' : 'secondary'}>
-                    {slaStatus(task) === 'overdue' ? 'Gecikti' : '24s içinde'}
+                    {taskSlaBucketLabelTR(slaStatus(task)!)}
                   </Badge>
                 ) : (
                   <span className="font-medium">—</span>
@@ -1809,53 +2003,34 @@ export function TaskDetailPage() {
               </div>
             </div>
           )}
-          {task.mode === 'fixed' && (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <div className="rounded border p-3">
-                <p className="text-xs uppercase text-muted-foreground mb-1">Model bilgisi</p>
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <Badge variant="secondary">{task.modelCode || 'Model yok'}</Badge>
-                  <Badge variant="outline">{task.variant || 'Varyant yok'}</Badge>
-                  <Badge variant="outline">{task.modelBladeDepth || 'Bıçak —'}</Badge>
-                  <Badge variant="outline">
-                    {task.modelDurationMinutes ? `${task.modelDurationMinutes} dk` : 'Süre —'}
-                  </Badge>
-                  <Badge variant="outline">
-                    {task.totalPlannedMinutes ? `${task.totalPlannedMinutes} dk plan` : 'Plan —'}
-                  </Badge>
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Ölçüler: {(task.modelSizes || []).length > 0 ? (task.modelSizes || []).join(', ') : '—'}
-                </p>
-              </div>
-              <div className="rounded border p-3">
-                <p className="text-xs uppercase text-muted-foreground mb-2">Adet (inline düzenleme)</p>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <Input
-                    type="number"
-                    min={1}
-                    value={qtyEdit}
-                    onChange={(e) => setQtyEdit(Number(e.target.value) || 1)}
-                    className="w-full sm:w-32"
-                  />
-                  <Button
-                    size="sm"
-                    onClick={async () => {
-                      const qty = Math.max(1, Number(qtyEdit) || 1)
-                      const duration = Number(task.modelDurationMinutes || 0)
-                      const total = duration * qty
-                      await updateTask(task.id, {
-                        quantity: qty,
-                        totalPlannedMinutes: total,
-                        plannedHours: Number((total / 60).toFixed(2)),
-                      })
-                      toast({ title: 'Adet güncellendi', description: `${qty} adet` })
-                    }}
-                  >
-                    Kaydet
-                  </Button>
-                  <span className="text-xs text-muted-foreground">Güncel: {task.quantity || 1}</span>
-                </div>
+          {task.mode === 'fixed' && !isWorker && (
+            <div className="rounded border p-3">
+              <p className="text-xs uppercase text-muted-foreground mb-2">Sabit model — toplam adet düzenle</p>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Input
+                  type="number"
+                  min={1}
+                  value={qtyEdit}
+                  onChange={(e) => setQtyEdit(Number(e.target.value) || 1)}
+                  className="w-full sm:w-32"
+                />
+                <Button
+                  size="sm"
+                  onClick={async () => {
+                    const qty = Math.max(1, Number(qtyEdit) || 1)
+                    const duration = Number(task.modelDurationMinutes || 0)
+                    const total = duration * qty
+                    await updateTask(task.id, {
+                      quantity: qty,
+                      totalPlannedMinutes: total,
+                      plannedHours: Number((total / 60).toFixed(2)),
+                    })
+                    toast({ title: 'Adet güncellendi', description: `${qty} adet` })
+                  }}
+                >
+                  Kaydet
+                </Button>
+                <span className="text-xs text-muted-foreground">Güncel: {task.quantity || 1}</span>
               </div>
             </div>
           )}
@@ -2104,6 +2279,90 @@ export function TaskDetailPage() {
                 {!te.ended_at && <Badge variant="secondary">Açık</Badge>}
               </div>
             ))}
+            {(task.workflowTeamIds?.length ?? 0) > 0 && (
+              <div className="rounded border p-3 space-y-1 mt-3">
+                <p className="text-sm font-semibold">Bölüm durumu</p>
+                <ul className="text-xs text-muted-foreground space-y-1">
+                  {(task.workflowTeamIds || []).map((tid) => {
+                    const st = wfState[tid] || {}
+                    const name = data.teams.find((t) => t.id === tid)?.name || tid
+                    return (
+                      <li key={tid}>
+                        <span className="font-medium text-foreground">{name}</span>: hedef {st.qty_target ?? '—'}, raporlanan{' '}
+                        {st.qty_done ?? 0}
+                        {st.stage_done ? ' ✓ tamam' : st.pending_approval ? ' — onay bekliyor' : ''}
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            )}
+            <div className="rounded border p-3 space-y-2 mt-3">
+              <p className="text-sm font-semibold">Günlük üretim (adet)</p>
+              {task.salesOrder && (
+                <p className="text-xs text-muted-foreground">
+                  Sipariş: {data.salesOrders.find((s) => s.id === task.salesOrder)?.number || task.salesOrder}
+                  {(() => {
+                    const so = data.salesOrders.find((s) => s.id === task.salesOrder)
+                    if (!so?.orderQuantity) return null
+                    return (
+                      <span>
+                        {' '}
+                        (sipariş: {so.orderQuantity}, üretilen: {so.quantityProduced ?? 0})
+                      </span>
+                    )
+                  })()}
+                </p>
+              )}
+              <div className="flex flex-wrap gap-2 items-end">
+                <div>
+                  <Label className="text-xs">Adet</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    className="h-8 w-24"
+                    value={prodQty}
+                    onChange={(e) => setProdQty(Number(e.target.value) || 1)}
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Tarih</Label>
+                  <Input type="date" className="h-8 w-40" value={prodDate} onChange={(e) => setProdDate(e.target.value)} />
+                </div>
+                <Button
+                  size="sm"
+                  disabled={task.status === 'done'}
+                  onClick={async () => {
+                    try {
+                      await api.post(`/tasks/${task.id}/log-production/`, {
+                        quantity: prodQty,
+                        entry_date: prodDate,
+                      })
+                      await hydrateFromApi()
+                      toast({ title: 'Üretim kaydedildi' })
+                    } catch (e: any) {
+                      toast({
+                        title: 'Hata',
+                        description: e?.response?.data?.detail || 'Kaydedilemedi',
+                        variant: 'destructive',
+                      })
+                    }
+                  }}
+                >
+                  Üretimi kaydet
+                </Button>
+              </div>
+              {(task.productionEntries || []).length > 0 && (
+                <ul className="text-xs space-y-1 max-h-36 overflow-y-auto text-muted-foreground">
+                  {(task.productionEntries || []).slice(0, 40).map((pe) => (
+                    <li key={pe.id}>
+                      {pe.entryDate} • {pe.quantity} ad • {pe.userName || pe.user || '—'}
+                      {pe.teamName ? ` • ${pe.teamName}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
           {!isWorker && (
             <RbacGuard perm="tasks.edit">
@@ -2111,6 +2370,7 @@ export function TaskDetailPage() {
                 task={task}
                 users={data.users}
                 teams={data.teams}
+                salesOrders={data.salesOrders}
                 uploading={false}
                 setUploading={() => {}}
                 onSubmit={async (values) => {
@@ -2200,24 +2460,32 @@ function TaskModal({
   children,
   users,
   teams,
+  salesOrders,
   onSubmit,
   task,
   uploading,
   setUploading,
 }: {
   children: React.ReactNode
-  users: { id: string; username: string }[]
+  users: UserLite[]
   teams: { id: string; name: string }[]
+  salesOrders?: { id: string; number: string; customerName?: string }[]
   onSubmit: (values: z.infer<typeof taskSchema>) => void
   task?: Task
   uploading: boolean
   setUploading: (v: boolean) => void
 }) {
+  const wfIds = (task?.workflowTeamIds ?? []).filter(Boolean)
+  const q0 = Number(task?.quantity ?? 1)
+  const wfTargets =
+    task?.workflowStageTargets?.length === wfIds.length
+      ? task.workflowStageTargets
+      : wfIds.map(() => q0)
   const form = useForm<z.infer<typeof taskSchema>>({
     resolver: zodResolver(taskSchema) as any,
     defaultValues: {
       title: task?.title ?? '',
-      owner: task?.owner ?? users[0]?.id ?? '',
+      owner: pickDefaultTaskOwner(users, task?.owner),
       assignee: task?.assignee ?? users[0]?.id ?? '',
       teamId: task?.teamId ?? '',
       status: task?.status ?? 'todo',
@@ -2235,7 +2503,10 @@ function TaskModal({
       modelDurationMinutes: (task as any)?.modelDurationMinutes ?? 0,
       totalPlannedMinutes: (task as any)?.totalPlannedMinutes ?? 0,
       modelBladeDepth: (task as any)?.modelBladeDepth ?? '',
-      workflowTeamIds: (task as any)?.workflowTeamIds ?? [],
+      workflowTeamIds: task?.workflowTeamIds ?? [],
+      workflowStageTargets: wfTargets,
+      workflowParallel: task ? task.workflowParallel !== false : true,
+      salesOrderId: task?.salesOrder ? String(task.salesOrder) : '',
     },
   })
 
@@ -2259,6 +2530,13 @@ function TaskModal({
   const watchDuration = form.watch('modelDurationMinutes')
   const watchStart = form.watch('start')
   const watchTotalPlanned = form.watch('totalPlannedMinutes')
+  const watchPlannedHours = form.watch('plannedHours')
+  const minsPerMesaiDay = useMemo(() => {
+    const start = orgSettings?.working_hours_start || '08:00'
+    const end = orgSettings?.working_hours_end || '18:00'
+    const m = getWorkingMinutesPerDay(start, end)
+    return m > 0 ? m : 600
+  }, [orgSettings])
   const currentPreset = useMemo(
     () => MODEL_PRESETS.find((m) => m.code === watchModel) || MODEL_PRESETS[0],
     [watchModel]
@@ -2412,6 +2690,11 @@ function TaskModal({
                 payload.totalPlannedMinutes = Number(total.toFixed(2))
                 payload.plannedHours = Number((total / 60).toFixed(2))
               }
+              const wf = ((payload as any).workflowTeamIds || []).filter((x: string) => x != null && x !== '')
+              let wt = [...((payload as any).workflowStageTargets || []).map((n: number) => Number(n))]
+              const defQty = Number((payload as any).quantity || 1)
+              while (wt.length < wf.length) wt.push(defQty)
+              ;(payload as any).workflowStageTargets = wt.slice(0, wf.length)
               await onSubmit(payload as any)
               if (task?.id) {
                 const buffered = droppedFiles.length > 0 ? droppedFiles : fileInputRef.current?.files ?? null
@@ -2496,6 +2779,11 @@ function TaskModal({
                       {...form.register('totalPlannedMinutes', { valueAsNumber: true })}
                       className="bg-muted"
                     />
+                    {Number(watchTotalPlanned) > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        ≈ {formatNumber(Number(watchTotalPlanned) / minsPerMesaiDay)} mesai günü
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
@@ -2560,6 +2848,11 @@ function TaskModal({
                     {...form.register('totalPlannedMinutes', { valueAsNumber: true })}
                     className={cn(errors.totalPlannedMinutes && 'border-destructive')}
                   />
+                  {Number(watchTotalPlanned) > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      ≈ {formatNumber(Number(watchTotalPlanned) / minsPerMesaiDay)} mesai günü
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="flex-1">
@@ -2652,15 +2945,53 @@ function TaskModal({
           </div>
           </div>
           <div className="space-y-2 rounded-md border p-3">
-            <Label className="text-sm font-medium">Süreç adımları (iş akışı)</Label>
+            <div className="flex flex-wrap items-center gap-4">
+              <Label className="text-sm font-medium">Süreç adımları (iş akışı)</Label>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="workflow-parallel"
+                  checked={form.watch('workflowParallel') !== false}
+                  onCheckedChange={(c) => form.setValue('workflowParallel', Boolean(c))}
+                />
+                <label htmlFor="workflow-parallel" className="text-xs cursor-pointer">
+                  Paralel bölümler (beklemeden başlasın; usta başı onayı ile kapanır)
+                </label>
+              </div>
+            </div>
             <p className="text-xs text-muted-foreground">
-              Sırayla sorumlu ekipleri ekleyin. 1. ekip bitirince 2. ekibe, son ekip bitirince görev tamamlanır.
+              Her adım için ekip ve hedef adet seçin. Paralel modda bölümler aynı anda; sıralı modda önceki bölüm bitince
+              sonrakine geçilir.
             </p>
             <WorkflowStepsEditor
               teams={teams}
-              value={form.watch('workflowTeamIds') || []}
-              onChange={(ids) => form.setValue('workflowTeamIds', ids)}
+              teamIds={form.watch('workflowTeamIds') || []}
+              targets={form.watch('workflowStageTargets') || []}
+              defaultTargetQty={Number(form.watch('quantity') || 1)}
+              onTeamsChange={(ids) => form.setValue('workflowTeamIds', ids)}
+              onTargetsChange={(t) => form.setValue('workflowStageTargets', t)}
             />
+          </div>
+          <div>
+            <Label>Bağlı satış siparişi (üretim düşümü) — isteğe bağlı</Label>
+            <p className="text-xs text-muted-foreground mb-1.5">
+              Boş bırakabilirsiniz; bağlı sipariş yalnızca üretim kaydında stoğa düşüm için kullanılır.
+            </p>
+            <Select
+              value={form.watch('salesOrderId') ? String(form.watch('salesOrderId')) : 'none'}
+              onValueChange={(v) => form.setValue('salesOrderId', v === 'none' ? '' : v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Sipariş seçmeyin veya seçin" />
+              </SelectTrigger>
+              <SelectContent className="max-h-56 overflow-y-auto">
+                <SelectItem value="none">— Bağlı sipariş yok —</SelectItem>
+                {(salesOrders || []).map((so) => (
+                  <SelectItem key={so.id} value={so.id}>
+                    {so.number} {so.customerName ? `• ${so.customerName}` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div>
@@ -2709,8 +3040,32 @@ function TaskModal({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>Planlanan saat</Label>
-              <Input type="number" step="0.1" {...form.register('plannedHours')} className={cn(errors.plannedHours && 'border-destructive')} />
+              <Label>Planlanan gün (mesai)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min={0}
+                value={
+                  Number.isFinite(Number(watchPlannedHours))
+                    ? Number(((Number(watchPlannedHours || 0) * 60) / minsPerMesaiDay).toFixed(3))
+                    : 0
+                }
+                onChange={(e) => {
+                  const raw = e.target.value
+                  if (raw === '' || raw === '-') {
+                    form.setValue('plannedHours', 0)
+                    return
+                  }
+                  const d = parseFloat(raw)
+                  if (Number.isNaN(d) || d < 0) return
+                  form.setValue('plannedHours', Number(((d * minsPerMesaiDay) / 60).toFixed(4)))
+                }}
+                className={cn(errors.plannedHours && 'border-destructive')}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                1 mesai günü = {formatNumber(minsPerMesaiDay / 60)} saat ({orgSettings?.working_hours_start ?? '08:00'}–
+                {orgSettings?.working_hours_end ?? '18:00'}, organizasyon ayarı).
+              </p>
               <FormError message={errors.plannedHours?.message} />
             </div>
             <div>

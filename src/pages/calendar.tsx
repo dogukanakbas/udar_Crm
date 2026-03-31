@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import type { Task } from '@/types'
+import { taskPriorityLabelTR, taskStatusLabelTR } from '@/lib/task-labels'
 
 export function CalendarPage() {
   const { data } = useAppStore()
@@ -121,7 +122,7 @@ export function CalendarPage() {
                           <Link to={`/tasks/${t.id}`} className="font-semibold hover:underline">
                             {t.title}
                           </Link>
-                          <Badge variant="outline">{t.priority}</Badge>
+                          <Badge variant="outline">{taskPriorityLabelTR(t.priority)}</Badge>
                         </div>
                         <p className="text-xs text-muted-foreground">
                           {data.users.find((u) => u.id === t.assignee)?.username || '—'} •{' '}
@@ -129,7 +130,7 @@ export function CalendarPage() {
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Badge variant={t.status === 'done' ? 'secondary' : 'default'}>{t.status}</Badge>
+                        <Badge variant={t.status === 'done' ? 'secondary' : 'default'}>{taskStatusLabelTR(t.status)}</Badge>
                         <Badge variant="outline">{formatDate(t.due || t.start || t.end)}</Badge>
                       </div>
                     </div>

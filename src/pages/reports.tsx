@@ -14,6 +14,7 @@ import { useAppStore } from '@/state/use-app-store'
 import { Badge } from '@/components/ui/badge'
 import { formatDate } from '@/lib/utils'
 import api from '@/lib/api'
+import { taskPriorityLabelTR, taskStatusLabelTR } from '@/lib/task-labels'
 import { DataTable } from '@/components/data-table'
 
 type TaskReportTask = {
@@ -58,6 +59,13 @@ export function ReportsPage() {
   const [reportStatus, setReportStatus] = useState<string>('all')
   const [taskReport, setTaskReport] = useState<TaskReportSummary | null>(null)
   const [taskReportLoading, setTaskReportLoading] = useState(false)
+  const [prodDay, setProdDay] = useState(() => new Date().toISOString().slice(0, 10))
+  const [prodReport, setProdReport] = useState<{
+    date: string
+    total_quantity: number
+    by_team: Record<string, number>
+    entries: { task_title: string; quantity: number; team_name?: string; user_name?: string }[]
+  } | null>(null)
 
   const loadTaskReport = useCallback(async () => {
     if (!canReports) return
@@ -85,6 +93,20 @@ export function ReportsPage() {
   useEffect(() => {
     loadTaskReport()
   }, [loadTaskReport])
+
+  const loadProdReport = useCallback(async () => {
+    if (!canReports) return
+    try {
+      const res = await api.get('/tasks/production-report/', { params: { date: prodDay } })
+      setProdReport(res.data)
+    } catch {
+      setProdReport(null)
+    }
+  }, [canReports, prodDay])
+
+  useEffect(() => {
+    loadProdReport()
+  }, [loadProdReport])
 
   const downloadExport = async (format: 'xlsx' | 'docx') => {
     if (!canReports) return
@@ -191,8 +213,16 @@ export function ReportsPage() {
     () => [
       { accessorKey: 'id', header: 'ID', size: 70 },
       { accessorKey: 'title', header: 'Başlık', size: 220 },
-      { accessorKey: 'status', header: 'Durum' },
-      { accessorKey: 'priority', header: 'Öncelik' },
+      {
+        accessorKey: 'status',
+        header: 'Durum',
+        cell: ({ row }) => taskStatusLabelTR(row.original.status),
+      },
+      {
+        accessorKey: 'priority',
+        header: 'Öncelik',
+        cell: ({ row }) => taskPriorityLabelTR(row.original.priority),
+      },
       { accessorKey: 'team_name', header: 'Ekip' },
       { accessorKey: 'assignee_username', header: 'Atanan' },
       { accessorKey: 'owner_username', header: 'Sahip' },
@@ -235,6 +265,47 @@ export function ReportsPage() {
         title="Raporlar"
         description="Görev performansı: yıl/ay, ekip, çalışan; Excel ve Word dışa aktarma"
       />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Günlük üretim</CardTitle>
+          <CardDescription>Görevlerden girilen tamamlanan adetler (tarih seçip yenileyin)</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap items-end gap-2">
+            <div>
+              <Label>Tarih</Label>
+              <Input type="date" value={prodDay} onChange={(e) => setProdDay(e.target.value)} />
+            </div>
+            <Button variant="outline" size="sm" onClick={() => loadProdReport()}>
+              Yenile
+            </Button>
+          </div>
+          {prodReport && (
+            <>
+              <p className="text-sm">
+                Toplam: <strong>{prodReport.total_quantity}</strong> ad
+              </p>
+              {prodReport.by_team && Object.keys(prodReport.by_team).length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(prodReport.by_team).map(([name, q]) => (
+                    <Badge key={name} variant="secondary">
+                      {name}: {q}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+              <div className="max-h-56 overflow-y-auto text-xs space-y-1 border rounded p-2">
+                {(prodReport.entries || []).map((e, i) => (
+                  <div key={i}>
+                    {prodReport.date} • {e.task_title} • {e.quantity} ad • {e.team_name || '—'} • {e.user_name || '—'}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

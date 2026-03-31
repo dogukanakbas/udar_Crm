@@ -81,6 +81,9 @@ export interface SalesOrder {
   shippingDate: string
   expectedDelivery: string
   items: { sku: string; name: string; qty: number; price: number }[]
+  /** Sipariş adedi — üretim girişleri quantity_produced günceller */
+  orderQuantity?: number
+  quantityProduced?: number
 }
 
 export interface PurchaseOrder {
@@ -154,6 +157,19 @@ export interface Task {
   teamId?: string
   currentTeam?: string
   workflowTeamIds?: string[]  // Sıralı ekip ID listesi: 1. ekip bitirince 2'ye, son ekip bitirince done
+  workflowParallel?: boolean
+  workflowStageTargets?: number[]
+  workflowStageState?: Record<
+    string,
+    {
+      assignee_id?: number | null
+      qty_target?: number
+      qty_done?: number
+      pending_approval?: boolean
+      stage_done?: boolean
+    }
+  >
+  salesOrder?: string
   mode?: 'manual' | 'fixed'
   modelCode?: string
   variant?: string
@@ -177,6 +193,20 @@ export interface Task {
   time_entries?: TaskTimeEntry[]
   history?: TaskHistoryItem[]
   notes?: string
+  productionEntries?: TaskProductionEntry[]
+}
+
+export interface TaskProductionEntry {
+  id: string
+  task: string
+  user?: string
+  userName?: string
+  team?: string
+  teamName?: string
+  entryDate: string
+  quantity: number
+  note?: string
+  createdAt?: string
 }
 
 export interface Team {

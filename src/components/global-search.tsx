@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { useToast } from '@/components/ui/use-toast'
 import api from '@/lib/api'
+import { taskStatusLabelTR } from '@/lib/task-labels'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 type Props = { open: boolean; onOpenChange: (open: boolean) => void }
@@ -224,7 +225,7 @@ const [limit, setLimit] = useState(10)
                   <Search className="mr-2 h-4 w-4" />
                   <span>{t.title}</span>
                   <Badge variant="outline" className="ml-auto">
-                    {t.status}
+                    {taskStatusLabelTR(t.status)}
                   </Badge>
                 </CommandItem>
               ))}

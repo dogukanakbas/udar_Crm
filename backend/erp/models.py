@@ -35,6 +35,8 @@ class SalesOrder(models.Model):
     amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     shipping_date = models.DateField(null=True, blank=True)
     expected_delivery = models.DateField(null=True, blank=True)
+    order_quantity = models.PositiveIntegerField(default=0, help_text='Sipariş adedi (üretim takibi)')
+    quantity_produced = models.PositiveIntegerField(default=0, help_text='Raporlanan tamamlanan adet')
 
     class Meta:
         unique_together = ('organization', 'number')

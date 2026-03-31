@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from '@tanstack/react-router'
 import { RbacGuard } from '@/components/rbac'
+import { taskPriorityLabelTR, taskStatusLabelTR } from '@/lib/task-labels'
 import api from '@/lib/api'
 import { formatDate } from '@/lib/utils'
 import { ArrowLeft, UserMinus } from 'lucide-react'
@@ -147,8 +148,8 @@ export function WorkerDetailPage() {
                     <Link to="/tasks/$taskId" params={{ taskId: String(t.id) }} className="flex-1 min-w-0">
                       <div className="font-medium">{t.title}</div>
                       <div className="flex gap-2 mt-1 text-xs text-muted-foreground">
-                        <span>{t.status}</span>
-                        <span>{t.priority}</span>
+                        <span>{taskStatusLabelTR(t.status)}</span>
+                        <span>{taskPriorityLabelTR(t.priority)}</span>
                         {t.due && <span>Vade: {formatDate(t.due)}</span>}
                       </div>
                     </Link>
@@ -183,7 +184,7 @@ export function WorkerDetailPage() {
                   >
                     <div className="font-medium">{t.title}</div>
                     <div className="flex gap-2 mt-1 text-xs text-muted-foreground">
-                      <span>{t.status}</span>
+                      <span>{taskStatusLabelTR(t.status)}</span>
                       {t.updated_at && <span>Bitiş: {formatDate(t.updated_at)}</span>}
                     </div>
                   </Link>

@@ -58,6 +58,27 @@ class Task(models.Model):
     handover_at = models.DateTimeField(null=True, blank=True)
     handover_history = models.JSONField(default=list, blank=True)
     workflow_team_ids = models.JSONField(default=list, blank=True)  # Sıralı ekip ID listesi: [1,2,3] → 1. ekip bitirince 2'ye, 2 bitirince 3'e, son ekip bitirince done
+    workflow_parallel = models.BooleanField(
+        default=False,
+        help_text='True ise bölümler sıra beklemeden paralel çalışır; usta başı onayı ile kapanır.',
+    )
+    workflow_stage_targets = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='workflow_team_ids ile aynı uzunlukta bölüm bazlı hedef adetler',
+    )
+    workflow_stage_state = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Ekip ID -> {assignee_id, qty_target, qty_done, pending_approval, stage_done}',
+    )
+    sales_order = models.ForeignKey(
+        'erp.SalesOrder',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tasks',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -78,6 +99,8 @@ class TaskModel(models.Model):
     duration_minutes = models.DecimalField(max_digits=8, decimal_places=2, default=4)
     blade_min = models.DecimalField(max_digits=6, decimal_places=2, default=1.5, null=True, blank=True)
     blade_max = models.DecimalField(max_digits=6, decimal_places=2, default=1.5, null=True, blank=True)
+    width_mm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    height_mm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     sizes = models.JSONField(default=list, blank=True)  # ['73x210', '83x210', ...]
     order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
@@ -157,4 +180,22 @@ class TaskTimeEntry(models.Model):
 
     def __str__(self):
         return f"{self.task.title} - {self.user} ({self.started_at})"
+
+
+class TaskProductionEntry(models.Model):
+    """Günlük bölüm / görev bazlı tamamlanan adet girişleri."""
+
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='production_entries')
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    team = models.ForeignKey('accounts.Team', on_delete=models.SET_NULL, null=True, blank=True)
+    entry_date = models.DateField(db_index=True)
+    quantity = models.PositiveIntegerField(default=0)
+    note = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-entry_date', '-created_at']
+
+    def __str__(self):
+        return f"{self.task_id} {self.entry_date} +{self.quantity}"
 

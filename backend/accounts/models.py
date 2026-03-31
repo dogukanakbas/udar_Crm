@@ -66,6 +66,28 @@ class Team(models.Model):
         return self.name
 
 
+class TeamAssociate(models.Model):
+    """
+    Sistem hesabı olmayan saha / ekip çalışanları.
+    Ekiplerde çalışıyor ama giriş yapamaz; yönetim takibi için kayıt tutulur.
+    """
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='team_associates')
+    full_name = models.CharField(max_length=255)
+    phone = models.CharField(max_length=50, blank=True, default='')
+    notes = models.CharField(max_length=500, blank=True, default='')
+    teams = models.ManyToManyField(Team, related_name='associates', blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['full_name', 'id']
+
+    def __str__(self):
+        return f"{self.full_name} ({self.organization_id})"
+
+
 class OrganizationSettings(models.Model):
     """Mesai saat aralığı ve günleri - Worker giriş kısıtlaması için."""
     organization = models.OneToOneField(Organization, on_delete=models.CASCADE, related_name='settings')

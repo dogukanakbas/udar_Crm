@@ -301,7 +301,7 @@ function NotificationMenu() {
         if (dueDate < now) {
           list.push({ id: `over-${t.id}`, title: `Geciken: ${t.title}`, time: 'gecikti' })
         } else if (dueDate - now <= soonMs) {
-          list.push({ id: `soon-${t.id}`, title: `SLA yaklaşıyor: ${t.title}`, time: '24s içinde' })
+          list.push({ id: `soon-${t.id}`, title: `SLA yaklaşıyor: ${t.title}`, time: '24 saat içinde' })
         }
       })
     return list

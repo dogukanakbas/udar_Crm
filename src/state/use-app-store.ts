@@ -329,6 +329,8 @@ export const useAppStore = create<AppState>()(
         amount: Number(so.amount ?? 0),
         shippingDate: so.shipping_date || '',
         expectedDelivery: so.expected_delivery || '',
+        orderQuantity: Number(so.order_quantity ?? 0),
+        quantityProduced: Number(so.quantity_produced ?? 0),
       }))
       const teams: Team[] = (teamsRes.data || []).map((t: any, idx: number) => ({
         id: String(t.id ?? idx),
@@ -352,6 +354,18 @@ export const useAppStore = create<AppState>()(
         teamId: t.team ? String(t.team) : undefined,
         currentTeam: t.current_team ? String(t.current_team) : undefined,
         workflowTeamIds: (t.workflow_team_ids || []).map((id: any) => String(id)),
+        workflowParallel: Boolean(t.workflow_parallel),
+        workflowStageTargets: (t.workflow_stage_targets || []).map((x: any) => Number(x)),
+        workflowStageState: t.workflow_stage_state || {},
+        salesOrder: t.sales_order != null && t.sales_order !== '' ? String(t.sales_order) : undefined,
+        mode: t.mode,
+        modelCode: t.model_code ? String(t.model_code) : undefined,
+        variant: t.variant ? String(t.variant) : undefined,
+        quantity: t.quantity != null ? Number(t.quantity) : undefined,
+        modelDurationMinutes: t.model_duration_minutes != null ? Number(t.model_duration_minutes) : undefined,
+        totalPlannedMinutes: t.total_planned_minutes != null ? Number(t.total_planned_minutes) : undefined,
+        modelBladeDepth: t.model_blade_depth ? String(t.model_blade_depth) : undefined,
+        modelSizes: Array.isArray(t.model_sizes) ? t.model_sizes : [],
         status: t.status,
         priority: t.priority,
         start: t.start,
@@ -403,6 +417,18 @@ export const useAppStore = create<AppState>()(
           text: h.text || '',
           actor: h.actor || '',
           at: h.at || h.created_at || '',
+        })),
+        productionEntries: (t.production_entries || []).map((pe: any) => ({
+          id: String(pe.id),
+          task: String(pe.task),
+          user: pe.user != null ? String(pe.user) : undefined,
+          userName: pe.user_name,
+          team: pe.team != null ? String(pe.team) : undefined,
+          teamName: pe.team_name,
+          entryDate: pe.entry_date || '',
+          quantity: Number(pe.quantity ?? 0),
+          note: pe.note,
+          createdAt: pe.created_at,
         })),
       }))
       set((state) => ({
@@ -660,6 +686,9 @@ export const useAppStore = create<AppState>()(
         workflow_team_ids: ((task as any).workflowTeamIds || [])
           .filter((id: string) => id != null && id !== '')
           .map((id: string) => Number(id)),
+        workflow_parallel: (task as any).workflowParallel === true,
+        workflow_stage_targets: ((task as any).workflowStageTargets || []).map((n: any) => Number(n)),
+        sales_order: (task as any).salesOrderId ? Number((task as any).salesOrderId) : null,
       }
       delete payload.teamId
       delete payload.workflowTeamIds
@@ -667,6 +696,12 @@ export const useAppStore = create<AppState>()(
       delete (payload as any).modelDurationMinutes
       delete (payload as any).totalPlannedMinutes
       delete (payload as any).modelBladeDepth
+      delete (payload as any).workflowParallel
+      delete (payload as any).workflowStageTargets
+      delete (payload as any).salesOrderId
+      delete (payload as any).plannedHours
+      delete (payload as any).plannedCost
+      delete (payload as any).modelSizes
       await api.post('/tasks/', payload)
       await get().hydrateFromApi()
     } catch (err) {
@@ -702,6 +737,19 @@ export const useAppStore = create<AppState>()(
             ? payload.workflowTeamIds.map((id: string) => Number(id))
             : []
           delete payload.workflowTeamIds
+        }
+        if ('workflowParallel' in payload) {
+          payload.workflow_parallel = Boolean((payload as any).workflowParallel)
+          delete (payload as any).workflowParallel
+        }
+        if ('workflowStageTargets' in payload) {
+          payload.workflow_stage_targets = ((payload as any).workflowStageTargets || []).map((n: any) => Number(n))
+          delete (payload as any).workflowStageTargets
+        }
+        if ('salesOrderId' in payload) {
+          const sid = (payload as any).salesOrderId
+          payload.sales_order = sid ? Number(sid) : null
+          delete (payload as any).salesOrderId
         }
         await api.patch(`/tasks/${id}/`, payload)
         await get().hydrateFromApi()

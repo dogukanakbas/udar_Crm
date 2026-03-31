@@ -21,7 +21,7 @@ from rest_framework import routers
 
 from crm.views import QuoteViewSet, PricingRuleViewSet, BusinessPartnerViewSet, LeadViewSet, OpportunityViewSet, ContactViewSet
 from erp.views import ProductViewSet as ERPProductViewSet, CategoryViewSet, InvoiceViewSet, SalesOrderViewSet, PurchaseOrderViewSet, StockMovementViewSet, VehicleViewSet
-from accounts.views import TeamViewSet
+from accounts.views import TeamViewSet, TeamAssociateViewSet
 from core.views import DashboardKPIView, GlobalSearchView, CalendarICSView, SSEView
 from workflow.views import PendingApprovalsView, ApprovalInstanceViewSet, ApprovalActionView
 from audit.views import AuditLogViewSet
@@ -70,6 +70,7 @@ router.register(r'task-models', TaskModelViewSet, basename='task-models')
 router.register(r'automation-rules', AutomationRuleViewSet, basename='automation-rules')
 router.register(r'task-time-entries', TaskTimeEntryViewSet, basename='task-time-entries')
 router.register(r'teams', TeamViewSet, basename='teams')
+router.register(r'team-associates', TeamAssociateViewSet, basename='team-associates')
 
 # NEW: Public APIs (no auth required)
 router.register(r'v1/blog', PublicBlogViewSet, basename='public-blog')
