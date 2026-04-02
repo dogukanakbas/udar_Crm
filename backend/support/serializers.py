@@ -215,6 +215,7 @@ class TaskModelSerializer(serializers.ModelSerializer):
             'blade_max',
             'width_mm',
             'height_mm',
+            'thickness_mm',
             'sizes',
             'order',
             'is_active',
@@ -235,8 +236,8 @@ class TaskModelSerializer(serializers.ModelSerializer):
 class TaskChecklistSerializer(serializers.ModelSerializer):
     class Meta:
         model = TaskChecklist
-        fields = ['id', 'task', 'title', 'done', 'order', 'created_at']
-        read_only_fields = ['created_at']
+        fields = ['id', 'task', 'title', 'done', 'order', 'created_at', 'workflow_team']
+        read_only_fields = ['created_at', 'workflow_team']
 
     def create(self, validated_data):
         # organization paramı Model'de olmadığı için sessizce kaldır

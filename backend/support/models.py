@@ -45,6 +45,8 @@ class Task(models.Model):
     total_planned_minutes = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     model_blade_depth = models.CharField(max_length=50, blank=True, default='')
     model_sizes = models.JSONField(default=list, blank=True)
+    product_color = models.CharField(max_length=100, blank=True, default='')
+    product_color_code = models.CharField(max_length=80, blank=True, default='')
     status = models.CharField(max_length=20, choices=STATUSES, default='todo')
     priority = models.CharField(max_length=20, choices=PRIORITIES, default='medium')
     start = models.DateTimeField(null=True, blank=True)
@@ -101,6 +103,7 @@ class TaskModel(models.Model):
     blade_max = models.DecimalField(max_digits=6, decimal_places=2, default=1.5, null=True, blank=True)
     width_mm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     height_mm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    thickness_mm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     sizes = models.JSONField(default=list, blank=True)  # ['73x210', '83x210', ...]
     order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
@@ -141,10 +144,25 @@ class TaskChecklist(models.Model):
     title = models.CharField(max_length=255)
     done = models.BooleanField(default=False)
     order = models.PositiveIntegerField(default=0)
+    workflow_team = models.ForeignKey(
+        'accounts.Team',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='workflow_checklist_items',
+        help_text='Doluysa madde iş akışı bu ekibin adımına bağlıdır; sıra ve tik workflow ile senkron olur.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['order', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['task', 'workflow_team'],
+                condition=models.Q(workflow_team__isnull=False),
+                name='unique_task_workflow_checklist_team',
+            )
+        ]
 
     def __str__(self):
         return f"{self.task.title} - {self.title}"

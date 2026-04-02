@@ -31,6 +31,19 @@ export const formatDateTime = (value: string | number | Date) =>
     minute: '2-digit',
   }).format(new Date(value))
 
+/** datetime-local input için yerel tarih-saat (UTC ISO kullanmayın). */
+export function toDatetimeLocalValue(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+export function toDatetimeLocalFromISO(iso: string | undefined | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return toDatetimeLocalValue(d)
+}
+
 /** Günlük mesai süresi (dakika). Örn. 08:00–18:00 → 600. */
 export function getWorkingMinutesPerDay(workStart: string, workEnd: string): number {
   const [startH, startM] = workStart.split(':').map(Number)

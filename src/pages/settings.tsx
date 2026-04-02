@@ -76,13 +76,18 @@ export function SettingsPage() {
   const [newPassword, setNewPassword] = useState('')
   const [newPassword2, setNewPassword2] = useState('')
   const [health, setHealth] = useState<{ backend?: string; db?: string; redis?: string }>({})
-  const [taskModels, setTaskModels] = useState<{ id: number; code: string; name: string; image_url?: string; duration_minutes: number; blade_min?: number; blade_max?: number; sizes: string[] }[]>([])
+  const [taskModels, setTaskModels] = useState<
+    { id: number; code: string; name: string; image_url?: string; duration_minutes: number; blade_min?: number; blade_max?: number; thickness_mm?: number; sizes: string[] }[]
+  >([])
   const [newModelCode, setNewModelCode] = useState('')
   const [newModelName, setNewModelName] = useState('')
   const [newModelDuration, setNewModelDuration] = useState(4)
   const [newModelWidth, setNewModelWidth] = useState('')
   const [newModelHeight, setNewModelHeight] = useState('')
   const [newModelSizes, setNewModelSizes] = useState('73x210, 83x210, 93x210')
+  const [newModelBladeMin, setNewModelBladeMin] = useState('1.5')
+  const [newModelBladeMax, setNewModelBladeMax] = useState('1.5')
+  const [newModelThickness, setNewModelThickness] = useState('')
   const [workingHoursStart, setWorkingHoursStart] = useState('08:00')
   const [workingHoursEnd, setWorkingHoursEnd] = useState('18:00')
   const [workingDays, setWorkingDays] = useState<number[]>([0, 1, 2, 3, 4])
@@ -931,6 +936,31 @@ export function SettingsPage() {
                   <Label className="text-xs">Ek ölçüler</Label>
                   <Input value={newModelSizes} onChange={(e) => setNewModelSizes(e.target.value)} placeholder="83x210, 93x210" className="w-40" />
                 </div>
+                <div>
+                  <Label className="text-xs">Bıçak min (mm)</Label>
+                  <Input
+                    value={newModelBladeMin}
+                    onChange={(e) => setNewModelBladeMin(e.target.value)}
+                    className="w-16"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Bıçak max (mm)</Label>
+                  <Input
+                    value={newModelBladeMax}
+                    onChange={(e) => setNewModelBladeMax(e.target.value)}
+                    className="w-16"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Kalınlık (mm)</Label>
+                  <Input
+                    value={newModelThickness}
+                    onChange={(e) => setNewModelThickness(e.target.value)}
+                    placeholder="—"
+                    className="w-16"
+                  />
+                </div>
                 <Button
                   size="sm"
                   onClick={async () => {
@@ -940,15 +970,19 @@ export function SettingsPage() {
                       const fromWh =
                         w != null && h != null && !Number.isNaN(w) && !Number.isNaN(h) ? [`${w}x${h}`] : []
                       const extraSizes = newModelSizes.split(',').map((s) => s.trim()).filter(Boolean)
+                      const bmin = Number(newModelBladeMin)
+                      const bmax = Number(newModelBladeMax)
+                      const thick = newModelThickness.trim() ? Number(newModelThickness) : null
                       await api.post('/task-models/', {
                         code: newModelCode.trim(),
                         name: newModelName.trim(),
                         duration_minutes: newModelDuration,
                         width_mm: w,
                         height_mm: h,
+                        thickness_mm: thick != null && !Number.isNaN(thick) ? thick : null,
                         sizes: [...fromWh, ...extraSizes.filter((s) => !fromWh.includes(s))],
-                        blade_min: 1.5,
-                        blade_max: 1.5,
+                        blade_min: Number.isFinite(bmin) ? bmin : 1.5,
+                        blade_max: Number.isFinite(bmax) ? bmax : 1.5,
                       })
                       await loadTaskModels()
                       setNewModelCode('')
@@ -976,7 +1010,10 @@ export function SettingsPage() {
                     )}
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-sm">{m.code}</p>
-                      <p className="text-xs text-muted-foreground">{m.name || '—'} • {m.duration_minutes} dk</p>
+                      <p className="text-xs text-muted-foreground">
+                        {m.name || '—'} • {m.duration_minutes} dk
+                        {m.thickness_mm != null ? ` • Kalınlık ${m.thickness_mm} mm` : ''}
+                      </p>
                     </div>
                     <div className="flex gap-2">
                       <Input

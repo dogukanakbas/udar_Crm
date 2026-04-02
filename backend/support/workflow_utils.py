@@ -5,6 +5,22 @@ def workflow_team_id_list(task):
     return [int(x) for x in (task.workflow_team_ids or []) if x is not None and str(x).isdigit()]
 
 
+def workflow_stage_production_met(task, team_id):
+    """
+    İş akışı adımında sonraki aşamaya geçmeden önce bu bölümde yeterli üretim raporu var mı?
+    """
+    wf = workflow_team_id_list(task)
+    if not wf or not team_id:
+        return True
+    ensure_workflow_state(task)
+    st = (task.workflow_stage_state or {}).get(str(int(team_id)), {})
+    tgt = int(st.get('qty_target') or 0)
+    done = int(st.get('qty_done') or 0)
+    if tgt <= 0:
+        tgt = int(task.quantity or 1) or 1
+    return done >= tgt
+
+
 def ensure_workflow_state(task):
     """workflow_team_ids ile workflow_stage_state anahtarlarını senkronize eder."""
     ids = workflow_team_id_list(task)

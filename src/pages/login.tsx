@@ -69,7 +69,15 @@ export function LoginPage() {
         </div>
         <div className="space-y-2">
           <label className="text-sm text-slate-600">Şifre</label>
-          <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required />
+          <Input
+            type="text"
+            autoComplete="current-password"
+            name="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Şifre"
+            required
+          />
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
         <Button type="submit" className="w-full" disabled={loading || hydrating}>

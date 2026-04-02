@@ -17,10 +17,19 @@ import { PageHeader } from '@/components/app-shell'
 import { useToast } from '@/components/ui/use-toast'
 import { useAppStore } from '@/state/use-app-store'
 import api from '@/lib/api'
-import { formatDate, formatDateTime, formatNumber, addWorkingMinutes, getWorkingMinutesPerDay, cn } from '@/lib/utils'
+import {
+  formatDate,
+  formatDateTime,
+  formatNumber,
+  addWorkingMinutes,
+  getWorkingMinutesPerDay,
+  cn,
+  toDatetimeLocalValue,
+  toDatetimeLocalFromISO,
+} from '@/lib/utils'
 import { taskPriorityLabelTR, taskSlaBucketLabelTR, taskStatusLabelTR } from '@/lib/task-labels'
-import type { Task, TaskTimeEntry, Team, UserLite } from '@/types'
-import { Calendar, Plus, Paperclip, Download, Trash2, GripVertical } from 'lucide-react'
+import type { Task, TaskChecklistItem, TaskTimeEntry, Team, UserLite } from '@/types'
+import { Calendar, Lock, Plus, Paperclip, Download, Trash2, GripVertical } from 'lucide-react'
 import { RbacGuard } from '@/components/rbac'
 import { useParams } from '@tanstack/react-router'
 import { CardDescription } from '@/components/ui/card'
@@ -203,6 +212,9 @@ const taskSchema = z
       (v) => (v === '' || v === undefined ? 0 : Number(v)),
       z.number().min(0, '>=0 olmalı')
     ),
+    modelSizes: z.array(z.string()).optional(),
+    productColor: z.string().optional(),
+    productColorCode: z.string().optional(),
   })
   .refine((v) => new Date(v.end).getTime() >= new Date(v.start).getTime(), {
     message: 'Bitiş tarihi başlangıçtan önce olamaz',
@@ -213,8 +225,8 @@ const taskSchema = z
     path: ['due'],
   })
   .refine(
-    (v) => v.mode === 'manual' || (v.modelCode && v.variant && v.quantity && v.quantity > 0),
-    { message: 'Model ve varyant seçilmeli', path: ['modelCode'] }
+    (v) => v.mode === 'manual' || (Boolean(v.modelCode?.trim()) && v.quantity && v.quantity > 0),
+    { message: 'Sabit modda model ve adet seçilmeli', path: ['modelCode'] }
   )
 
 function parseBladeMin(v: string | undefined): string {
@@ -229,6 +241,14 @@ function parseBladeMax(v: string | undefined): string {
   if (parts[1]?.trim()) return parts[1].trim()
   const num = v.match(/[\d.]+/)?.[0]
   return num || ''
+}
+
+/** Renk kodu #RGB / #RRGGBB ise önizleme için döner. */
+function cssColorFromProductCode(code: string | undefined | null): string | undefined {
+  if (!code || typeof code !== 'string') return undefined
+  const t = code.trim()
+  if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(t)) return t
+  return undefined
 }
 
 const slaStatus = (task: Task) => {
@@ -1512,12 +1532,25 @@ function SortableWorkflowStep({
   )
 }
 
+function WorkflowChecklistRow({ item }: { item: TaskChecklistItem }) {
+  return (
+    <div className="flex items-center gap-3 rounded border border-dashed border-muted-foreground/30 bg-muted/15 px-3 py-2">
+      <span className="inline-flex shrink-0" title="İş akışı sırası — sürüklenemez">
+        <Lock className="h-4 w-4 text-muted-foreground" aria-hidden />
+      </span>
+      <Checkbox checked={item.done} disabled title="Aşama tamamlanınca otomatik işaretlenir" />
+      <span className={`text-sm flex-1 ${item.done ? 'line-through text-muted-foreground' : ''}`}>{item.title}</span>
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground shrink-0">Akış</span>
+    </div>
+  )
+}
+
 function SortableChecklistItem({
   item,
   onToggle,
   onDelete,
 }: {
-  item: { id: string; title: string; done: boolean }
+  item: TaskChecklistItem
   onToggle: (checked: boolean) => void
   onDelete: () => void
 }) {
@@ -1589,7 +1622,14 @@ export function TaskDetailPage() {
   const ownerName = data.users.find((u) => u.id === task.owner)?.username || task.owner || '—'
   const assigneeName = data.users.find((u) => u.id === task.assignee)?.username || task.assignee || '—'
   const teamName = task.teamId ? data.teams.find((t) => t.id === task.teamId)?.name : '—'
-  const checklist = task.checklist || []
+  const checklist = (task.checklist || []) as TaskChecklistItem[]
+  const workflowChecklistItems = [...checklist]
+    .filter((c) => c.workflowTeamId)
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+  const manualChecklistItems = [...checklist]
+    .filter((c) => !c.workflowTeamId)
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+  const checklistDisplay = [...workflowChecklistItems, ...manualChecklistItems]
   const doneCount = checklist.filter((c) => c.done).length
   const completionPct = checklist.length > 0 ? Math.round((doneCount / checklist.length) * 100) : 0
   const timeEntries: TaskTimeEntry[] = task.time_entries || []
@@ -1692,11 +1732,15 @@ export function TaskDetailPage() {
     return !!(currentUserId && row?.leaderId && String(row.leaderId) === String(currentUserId))
   }
 
+  const colorLabel = [task.productColor?.trim(), task.productColorCode?.trim()].filter(Boolean).join(' · ')
+
   return (
     <div className="space-y-4">
       <PageHeader
         title={`Görev: ${task.title}`}
-        description={`Durum: ${taskStatusLabelTR(task.status)} • Öncelik: ${taskPriorityLabelTR(task.priority)}`}
+        description={`Durum: ${taskStatusLabelTR(task.status)} • Öncelik: ${taskPriorityLabelTR(task.priority)}${
+          colorLabel ? ` • Renk: ${colorLabel}` : ''
+        }`}
       />
       <Card>
         <CardHeader>
@@ -1704,6 +1748,33 @@ export function TaskDetailPage() {
           <CardDescription>Sahip, atanan, tarih ve ekler</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          {(task.productColor?.trim() || task.productColorCode?.trim()) && (
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-primary/25 bg-primary/5 px-3 py-2.5">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
+                Ürün rengi
+              </span>
+              {(() => {
+                const hex = cssColorFromProductCode(task.productColorCode)
+                return hex ? (
+                  <span
+                    className="h-9 w-9 shrink-0 rounded-md border-2 border-border shadow-sm"
+                    style={{ backgroundColor: hex }}
+                    title={task.productColorCode!.trim()}
+                  />
+                ) : null
+              })()}
+              <div className="flex flex-wrap items-center gap-2 min-w-0">
+                {task.productColor?.trim() && (
+                  <Badge variant="secondary">{task.productColor.trim()}</Badge>
+                )}
+                {task.productColorCode?.trim() && (
+                  <Badge variant="outline" className="font-mono text-xs">
+                    {task.productColorCode.trim()}
+                  </Badge>
+                )}
+              </div>
+            </div>
+          )}
           <div className="rounded border p-3 space-y-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -1911,6 +1982,22 @@ export function TaskDetailPage() {
               <DetailRow label="Hedef adet (toplam)" value={String(task.quantity ?? 1)} />
               <DetailRow label="Model kodu" value={task.modelCode?.trim() ? task.modelCode : '—'} />
               <DetailRow label="Varyant" value={task.variant?.trim() ? task.variant : '—'} />
+              <div className="sm:col-span-2 flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 px-3 py-2">
+                {(() => {
+                  const hex = cssColorFromProductCode(task.productColorCode)
+                  return hex ? (
+                    <span
+                      className="h-10 w-10 shrink-0 rounded-md border bg-background shadow-sm"
+                      style={{ backgroundColor: hex }}
+                      title={task.productColorCode!.trim()}
+                    />
+                  ) : null
+                })()}
+                <div className="flex flex-1 flex-col gap-1 min-w-[200px]">
+                  <DetailRow label="Ürün rengi" value={task.productColor?.trim() ? task.productColor : '—'} />
+                  <DetailRow label="Renk kodu" value={task.productColorCode?.trim() ? task.productColorCode : '—'} />
+                </div>
+              </div>
               <DetailRow label="Bıçak derinliği" value={task.modelBladeDepth?.trim() ? task.modelBladeDepth : '—'} />
               <DetailRow
                 label="Birim süre"
@@ -2097,7 +2184,7 @@ export function TaskDetailPage() {
               )}
             </div>
             <div className="space-y-2">
-              {checklist.length === 0 && <p className="text-sm text-muted-foreground">Checklist boş</p>}
+              {checklistDisplay.length === 0 && <p className="text-sm text-muted-foreground">Checklist boş</p>}
               {data.settings.role === 'Admin' ? (
                 <DndContext
                   sensors={dndSensors}
@@ -2105,37 +2192,51 @@ export function TaskDetailPage() {
                   onDragEnd={(e: DragEndEvent) => {
                     const { active, over } = e
                     if (!over || active.id === over.id) return
-                    const ids = checklist.map((c) => String(c.id))
+                    const ids = manualChecklistItems.map((c) => String(c.id))
                     const oldIdx = ids.indexOf(String(active.id))
                     const newIdx = ids.indexOf(String(over.id))
                     if (oldIdx === -1 || newIdx === -1) return
-                    const reordered = arrayMove(ids, oldIdx, newIdx)
-                    reorderChecklistItems(task.id, reordered)
+                    const reorderedManual = arrayMove(ids, oldIdx, newIdx)
+                    const fullOrder = [...workflowChecklistItems.map((c) => String(c.id)), ...reorderedManual]
+                    reorderChecklistItems(task.id, fullOrder)
                     toast({ title: 'Sıra güncellendi' })
                   }}
                 >
-                  <SortableContext items={checklist.map((c) => String(c.id))} strategy={verticalListSortingStrategy}>
-                    {checklist.map((item) => (
-                      <SortableChecklistItem
-                        key={item.id}
-                        item={item}
-                        onToggle={async (checked) => {
-                          await toggleChecklistItem(item.id, Boolean(checked))
-                          toast({ title: 'Checklist güncellendi' })
-                        }}
-                        onDelete={async () => {
-                          await deleteChecklistItem(item.id)
-                          toast({ title: 'Checklist öğesi silindi' })
-                        }}
-                      />
+                  <div className="space-y-2">
+                    {workflowChecklistItems.map((item) => (
+                      <WorkflowChecklistRow key={item.id} item={item} />
                     ))}
-                  </SortableContext>
+                    <SortableContext
+                      items={manualChecklistItems.map((c) => String(c.id))}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      {manualChecklistItems.map((item) => (
+                        <SortableChecklistItem
+                          key={item.id}
+                          item={item}
+                          onToggle={async (checked) => {
+                            await toggleChecklistItem(item.id, Boolean(checked))
+                            toast({ title: 'Checklist güncellendi' })
+                          }}
+                          onDelete={async () => {
+                            await deleteChecklistItem(item.id)
+                            toast({ title: 'Checklist öğesi silindi' })
+                          }}
+                        />
+                      ))}
+                    </SortableContext>
+                  </div>
                 </DndContext>
               ) : (
                 <div className="space-y-2">
-                  {checklist.map((item) => (
+                  {checklistDisplay.map((item) => (
                     <div key={item.id} className="flex items-center gap-3 rounded border px-3 py-2">
                       <span className={`text-sm flex-1 ${item.done ? 'line-through text-muted-foreground' : ''}`}>{item.title}</span>
+                      {item.workflowTeamId && (
+                        <span className="text-[10px] uppercase text-muted-foreground shrink-0" title="İş akışı">
+                          Akış
+                        </span>
+                      )}
                       {item.done && <span className="text-xs text-muted-foreground">✓</span>}
                     </div>
                   ))}
@@ -2490,9 +2591,9 @@ function TaskModal({
       teamId: task?.teamId ?? '',
       status: task?.status ?? 'todo',
       priority: task?.priority ?? 'medium',
-      start: task?.start ?? new Date().toISOString(),
-      end: task?.end ?? new Date(Date.now() + 86400000).toISOString(),
-      due: (task as any)?.due ?? '',
+      start: task?.start ? toDatetimeLocalFromISO(task.start) : toDatetimeLocalValue(new Date()),
+      end: task?.end ? toDatetimeLocalFromISO(task.end) : toDatetimeLocalValue(new Date(Date.now() + 86400000)),
+      due: task?.due ? toDatetimeLocalFromISO(task.due) : '',
       notes: '',
       plannedHours: task?.plannedHours ?? 0,
       plannedCost: task?.plannedCost ?? 0,
@@ -2503,6 +2604,9 @@ function TaskModal({
       modelDurationMinutes: (task as any)?.modelDurationMinutes ?? 0,
       totalPlannedMinutes: (task as any)?.totalPlannedMinutes ?? 0,
       modelBladeDepth: (task as any)?.modelBladeDepth ?? '',
+      modelSizes: task?.modelSizes ?? [],
+      productColor: (task as any)?.productColor ?? '',
+      productColorCode: (task as any)?.productColorCode ?? '',
       workflowTeamIds: task?.workflowTeamIds ?? [],
       workflowStageTargets: wfTargets,
       workflowParallel: task ? task.workflowParallel !== false : true,
@@ -2512,7 +2616,19 @@ function TaskModal({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [droppedFiles, setDroppedFiles] = useState<File[]>([])
-  const [apiTaskModels, setApiTaskModels] = useState<{ code: string; image_url?: string; duration_minutes: number; sizes: string[] }[]>([])
+  const [apiTaskModels, setApiTaskModels] = useState<
+    {
+      code: string
+      image_url?: string
+      duration_minutes: number
+      sizes: string[]
+      blade_min?: number
+      blade_max?: number
+      width_mm?: number
+      height_mm?: number
+      thickness_mm?: number
+    }[]
+  >([])
   const [orgSettings, setOrgSettings] = useState<{ working_hours_start: string; working_hours_end: string; working_days: number[] } | null>(null)
   const errors = form.formState.errors
 
@@ -2541,42 +2657,64 @@ function TaskModal({
     () => MODEL_PRESETS.find((m) => m.code === watchModel) || MODEL_PRESETS[0],
     [watchModel]
   )
+  /** Sabit mod: model/varyant/API değişince süre & bıçak & ölçüleri doldur (kullanıcının süre alanına dokunmaz, yalnızca model/varyant değişince). */
   useEffect(() => {
     if (watchMode !== 'fixed') return
     const apiModel = apiTaskModels.find((m) => m.code === watchModel)
     const preset = MODEL_PRESETS.find((m) => m.code === watchModel) || MODEL_PRESETS[0]
     const variantObj = preset?.variants?.find((v) => v.id === watchVariant)
+    const editingSameAsSaved =
+      Boolean(task?.id) &&
+      String(watchModel || '') === String(task?.modelCode || '') &&
+      String(watchVariant || '') === String(task?.variant || '')
+    const shouldOverwriteTiming = !task?.id || !editingSameAsSaved
+
     if (preset && !watchModel) {
       form.setValue('modelCode', preset.code)
     }
-    if (apiModel) {
-      form.setValue('modelDurationMinutes', Number(apiModel.duration_minutes || 4))
-      form.setValue('modelBladeDepth', '1.5-1.5')
-    } else if (preset) {
-      form.setValue('modelDurationMinutes', preset.baseDuration)
-      const blade = preset.baseBlade || ''
-      const num = blade.match(/[\d.]+/)?.[0]
-      form.setValue('modelBladeDepth', num ? `${num}-${num}` : blade)
+    if (shouldOverwriteTiming) {
+      if (variantObj) {
+        form.setValue('modelDurationMinutes', variantObj.duration)
+        const blade = variantObj.blade || ''
+        const num = blade.match(/[\d.]+/)?.[0]
+        form.setValue('modelBladeDepth', num ? `${num}-${num}` : blade)
+      } else if (apiModel) {
+        form.setValue('modelDurationMinutes', Number(apiModel.duration_minutes ?? 4))
+        const bmin = apiModel.blade_min
+        const bmax = apiModel.blade_max
+        if (bmin != null && bmax != null) {
+          form.setValue('modelBladeDepth', `${bmin}-${bmax}`)
+        } else {
+          form.setValue('modelBladeDepth', '')
+        }
+      } else if (preset) {
+        form.setValue('modelDurationMinutes', preset.baseDuration)
+        const blade = preset.baseBlade || ''
+        const num = blade.match(/[\d.]+/)?.[0]
+        form.setValue('modelBladeDepth', num ? `${num}-${num}` : blade)
+      }
     }
-    if (variantObj) {
-      form.setValue('modelDurationMinutes', variantObj.duration)
-      const blade = variantObj.blade || ''
-      const num = blade.match(/[\d.]+/)?.[0]
-      form.setValue('modelBladeDepth', num ? `${num}-${num}` : blade)
+    if (shouldOverwriteTiming && watchModel) {
+      const sizesSet = new Set<string>()
+      if (apiModel?.width_mm != null && apiModel?.height_mm != null) {
+        sizesSet.add(`${apiModel.width_mm}x${apiModel.height_mm}`)
+      }
+      if (apiModel?.thickness_mm != null) {
+        sizesSet.add(`Kalınlık ${apiModel.thickness_mm} mm`)
+      }
+      ;(apiModel?.sizes || []).forEach((s) => sizesSet.add(String(s)))
+      ;(preset?.sizes || []).forEach((s) => sizesSet.add(String(s)))
+      form.setValue('modelSizes', Array.from(sizesSet))
     }
-    const duration = variantObj?.duration ?? (apiModel?.duration_minutes ?? preset?.baseDuration ?? form.getValues('modelDurationMinutes') ?? 0)
-    const qty = watchQty || 1
-    const total = Number(duration) * Number(qty)
-    form.setValue('totalPlannedMinutes', Number(total.toFixed(2)))
-    form.setValue('plannedHours', Number((total / 60).toFixed(2)))
-  }, [watchMode, watchModel, watchVariant, watchQty, apiTaskModels])
+  }, [watchMode, watchModel, watchVariant, apiTaskModels, task?.id, task?.modelCode, task?.variant])
 
-  // Manuel mod: süre veya adet değişince toplam planlanan süreyi hesapla
+  /** Manuel + sabit: süre veya adet değişince toplam planlanan süreyi güncelle. */
   useEffect(() => {
-    if (watchMode !== 'manual') return
-    const duration = Number(watchDuration || 0)
-    const qty = Number(watchQty || 1)
-    const total = duration * qty
+    if (watchMode !== 'manual' && watchMode !== 'fixed') return
+    const duration = Number(watchDuration)
+    if (!Number.isFinite(duration)) return
+    const qty = Math.max(1, Number(watchQty) || 1)
+    const total = Math.max(0, duration) * qty
     form.setValue('totalPlannedMinutes', Number(total.toFixed(2)))
     form.setValue('plannedHours', Number((total / 60).toFixed(2)))
   }, [watchMode, watchDuration, watchQty])
@@ -2671,14 +2809,27 @@ function TaskModal({
             onSubmit={form.handleSubmit(async (values) => {
             try {
               const payload = { ...values }
+              if (payload.start) {
+                const sd = new Date(payload.start)
+                if (!Number.isNaN(sd.getTime())) payload.start = sd.toISOString()
+              }
+              if (payload.end) {
+                const ed = new Date(payload.end)
+                if (!Number.isNaN(ed.getTime())) payload.end = ed.toISOString()
+              }
+              if (payload.due) {
+                const dd = new Date(payload.due)
+                if (!Number.isNaN(dd.getTime())) payload.due = dd.toISOString()
+              }
+              ;(payload as any).modelSizes = values.modelSizes || []
               if (payload.mode === 'fixed') {
                 const preset = MODEL_PRESETS.find((m) => m.code === payload.modelCode) || MODEL_PRESETS[0]
                 const variantObj = preset?.variants.find((v) => v.id === payload.variant)
-                const duration = variantObj?.duration ?? payload.modelDurationMinutes ?? 0
+                const duration = Number(payload.modelDurationMinutes) || variantObj?.duration || 0
                 const qty = payload.quantity ?? 1
                 const total = Number(duration) * Number(qty)
                 payload.modelDurationMinutes = duration
-                payload.modelBladeDepth = payload.modelBladeDepth || variantObj?.blade || ''
+                payload.modelBladeDepth = payload.modelBladeDepth ?? variantObj?.blade ?? ''
                 payload.totalPlannedMinutes = Number(total.toFixed(2))
                 payload.plannedHours = Number((total / 60).toFixed(2))
                 ;(payload as any).modelSizes = preset?.sizes || []
@@ -2722,6 +2873,16 @@ function TaskModal({
             <Label>Başlık</Label>
             <Input {...form.register('title')} className={cn(errors.title && 'border-destructive')} />
             <FormError message={errors.title?.message} />
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div>
+              <Label>Ürün rengi</Label>
+              <Input {...form.register('productColor')} placeholder="Örn. Antrasit" />
+            </div>
+            <div>
+              <Label>Renk kodu</Label>
+              <Input {...form.register('productColorCode')} placeholder="Örn. RAL 7016" />
+            </div>
           </div>
           <div className="space-y-3 rounded-md border p-3">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -2785,6 +2946,28 @@ function TaskModal({
                       </p>
                     )}
                   </div>
+                  <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <Label>Ölçüler (virgülle, isteğe bağlı)</Label>
+                      <Input
+                        value={(form.watch('modelSizes') || []).join(', ')}
+                        onChange={(e) =>
+                          form.setValue(
+                            'modelSizes',
+                            e.target.value
+                              .split(',')
+                              .map((s) => s.trim())
+                              .filter(Boolean)
+                          )
+                        }
+                        placeholder="Örn. 73x210, 83x210"
+                      />
+                    </div>
+                    <div>
+                      <Label>Bıçak derinliği (isteğe bağlı)</Label>
+                      <Input {...form.register('modelBladeDepth')} placeholder="Örn. 1.5-2.0" />
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -2816,12 +2999,16 @@ function TaskModal({
                   <FormError message={errors.modelCode?.message as any} />
                 </div>
                 <div>
-                  <Label>Varyant</Label>
-                  <Select value={form.watch('variant') || ''} onValueChange={(v) => form.setValue('variant', v)}>
+                  <Label>Varyant (isteğe bağlı)</Label>
+                  <Select
+                    value={form.watch('variant') || 'none'}
+                    onValueChange={(v) => form.setValue('variant', v === 'none' ? '' : v)}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Varyant seç" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="none">— Yok —</SelectItem>
                       {(currentPreset?.variants || []).map((v) => (
                         <SelectItem key={v.id} value={v.id}>
                           {v.label} ({v.duration} dk)
@@ -2845,8 +3032,9 @@ function TaskModal({
                   <Input
                     type="number"
                     step="0.1"
+                    readOnly
                     {...form.register('totalPlannedMinutes', { valueAsNumber: true })}
-                    className={cn(errors.totalPlannedMinutes && 'border-destructive')}
+                    className={cn('bg-muted', errors.totalPlannedMinutes && 'border-destructive')}
                   />
                   {Number(watchTotalPlanned) > 0 && (
                     <p className="text-xs text-muted-foreground">
@@ -2885,8 +3073,22 @@ function TaskModal({
                     />
                   </div>
                 </div>
-                <div className="text-xs text-muted-foreground">
-                  Ölçüler: {(currentPreset?.sizes || []).join(', ')}
+                <div>
+                  <Label className="text-xs">Ölçüler (otomatik + düzenlenebilir)</Label>
+                  <Input
+                    value={(form.watch('modelSizes') || []).join(', ')}
+                    onChange={(e) =>
+                      form.setValue(
+                        'modelSizes',
+                        e.target.value
+                          .split(',')
+                          .map((s) => s.trim())
+                          .filter(Boolean)
+                      )
+                    }
+                    placeholder="73x210, 83x210"
+                    className="text-sm"
+                  />
                 </div>
               </div>
             )}

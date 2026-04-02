@@ -178,6 +178,8 @@ export interface Task {
   totalPlannedMinutes?: number
   modelBladeDepth?: string
   modelSizes?: string[]
+  productColor?: string
+  productColorCode?: string
   start?: string
   end?: string
   priority?: 'low' | 'medium' | 'high'
@@ -263,6 +265,8 @@ export interface TaskChecklistItem {
   done: boolean
   order?: number
   createdAt?: string
+  /** Doluysa madde iş akışı ekip adımına bağlıdır; tik ve sıra sunucudan senkron olur. */
+  workflowTeamId?: string
 }
 
 export interface AutomationRule {

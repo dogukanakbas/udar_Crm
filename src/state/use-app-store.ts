@@ -366,6 +366,18 @@ export const useAppStore = create<AppState>()(
         totalPlannedMinutes: t.total_planned_minutes != null ? Number(t.total_planned_minutes) : undefined,
         modelBladeDepth: t.model_blade_depth ? String(t.model_blade_depth) : undefined,
         modelSizes: Array.isArray(t.model_sizes) ? t.model_sizes : [],
+        productColor:
+          t.product_color != null && String(t.product_color).trim() !== ''
+            ? String(t.product_color).trim()
+            : t.productColor != null && String(t.productColor).trim() !== ''
+              ? String(t.productColor).trim()
+              : undefined,
+        productColorCode:
+          t.product_color_code != null && String(t.product_color_code).trim() !== ''
+            ? String(t.product_color_code).trim()
+            : t.productColorCode != null && String(t.productColorCode).trim() !== ''
+              ? String(t.productColorCode).trim()
+              : undefined,
         status: t.status,
         priority: t.priority,
         start: t.start,
@@ -401,6 +413,10 @@ export const useAppStore = create<AppState>()(
           done: Boolean(ck.done),
           order: ck.order,
           createdAt: ck.created_at,
+          workflowTeamId:
+            ck.workflow_team != null && ck.workflow_team !== undefined
+              ? String(ck.workflow_team)
+              : undefined,
         })),
         time_entries: (t.time_entries || []).map((te: any) => ({
           id: String(te.id),
@@ -683,6 +699,8 @@ export const useAppStore = create<AppState>()(
         total_planned_minutes: (task as any).totalPlannedMinutes ?? 0,
         model_blade_depth: (task as any).modelBladeDepth || '',
         model_sizes: (task as any).modelSizes || [],
+        product_color: ((task as any).productColor || '').trim(),
+        product_color_code: ((task as any).productColorCode || '').trim(),
         workflow_team_ids: ((task as any).workflowTeamIds || [])
           .filter((id: string) => id != null && id !== '')
           .map((id: string) => Number(id)),
@@ -702,6 +720,8 @@ export const useAppStore = create<AppState>()(
       delete (payload as any).plannedHours
       delete (payload as any).plannedCost
       delete (payload as any).modelSizes
+      delete (payload as any).productColor
+      delete (payload as any).productColorCode
       await api.post('/tasks/', payload)
       await get().hydrateFromApi()
     } catch (err) {
@@ -732,6 +752,14 @@ export const useAppStore = create<AppState>()(
         if ('totalPlannedMinutes' in payload) payload.total_planned_minutes = (payload as any).totalPlannedMinutes
         if ('modelBladeDepth' in payload) payload.model_blade_depth = (payload as any).modelBladeDepth
         if ('modelSizes' in payload) payload.model_sizes = (payload as any).modelSizes
+        if ('productColor' in payload) {
+          payload.product_color = String((payload as any).productColor ?? '')
+          delete (payload as any).productColor
+        }
+        if ('productColorCode' in payload) {
+          payload.product_color_code = String((payload as any).productColorCode ?? '')
+          delete (payload as any).productColorCode
+        }
         if ('workflowTeamIds' in payload) {
           payload.workflow_team_ids = Array.isArray(payload.workflowTeamIds)
             ? payload.workflowTeamIds.map((id: string) => Number(id))

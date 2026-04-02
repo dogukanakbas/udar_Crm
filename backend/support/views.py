@@ -2,7 +2,7 @@ from rest_framework import viewsets, permissions, filters
 from rest_framework.decorators import action
 from core.events import push_event
 from rest_framework.exceptions import PermissionDenied
-from django.db.models import Q, Exists, OuterRef
+from django.db.models import Q, Exists, OuterRef, Max
 import re
 import os
 import uuid
@@ -29,7 +29,8 @@ from rest_framework.response import Response
 from django.utils import timezone
 from datetime import datetime as dt_datetime
 
-from .workflow_utils import ensure_workflow_state, workflow_team_id_list, parallel_queue_visible
+from .workflow_utils import ensure_workflow_state, workflow_team_id_list, parallel_queue_visible, workflow_stage_production_met
+from .checklist_sync import sync_workflow_checklist
 
 
 def assign_task_to_team_leader(task, team):
@@ -169,8 +170,10 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 st[str(ct)]['assignee_id'] = instance.assignee_id
                 instance.workflow_stage_state = st
                 instance.save(update_fields=['workflow_stage_state'])
-        # Sabit görevler için fabrika checklist ekle
-        if getattr(instance, 'mode', 'manual') == 'fixed':
+        # İş akışı varsa checklist ekip adımlarına göre; yoksa sabit modda fabrika checklist
+        if workflow_team_id_list(instance):
+            sync_workflow_checklist(instance)
+        elif getattr(instance, 'mode', 'manual') == 'fixed':
             TaskChecklist.objects.bulk_create(
                 [
                     TaskChecklist(task=instance, title=title, order=idx)
@@ -214,6 +217,8 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             for f in restricted_fields:
                 serializer.validated_data.pop(f, None)
         instance = serializer.save()
+        if workflow_team_id_list(instance):
+            sync_workflow_checklist(instance)
         # Ekip değişti ve atanmış kişi gönderilmediyse usta başına yönlendir
         if (
             'assignee' not in serializer.validated_data
@@ -522,6 +527,22 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         if task.assignee_id != request.user.id:
             raise PermissionDenied("Sadece size atanan görevi bitirebilirsiniz")
 
+        from_team_pre = task.current_team or task.team
+        wf_ids_pre = workflow_team_id_list(task)
+        if wf_ids_pre and from_team_pre and not getattr(task, 'workflow_parallel', False):
+            ensure_workflow_state(task)
+            if not workflow_stage_production_met(task, from_team_pre.id):
+                st0 = (task.workflow_stage_state or {}).get(str(from_team_pre.id), {})
+                return Response(
+                    {
+                        'detail': (
+                            f"Bu bölüm hedefi {st0.get('qty_target', 0)} adet. Önce «Üretimi kaydet» ile "
+                            f"raporlanan adeti girin (şu an: {st0.get('qty_done', 0)})."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         if getattr(task, 'workflow_parallel', False) and workflow_team_id_list(task):
             wf = workflow_team_id_list(task)
             user_teams = set(request.user.teams.values_list('id', flat=True))
@@ -542,6 +563,16 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             st = dict(state[str(active_tid)])
             if st.get('pending_approval'):
                 raise PermissionDenied("Bu bölüm zaten onay bekliyor")
+            if not workflow_stage_production_met(task, active_tid):
+                return Response(
+                    {
+                        'detail': (
+                            f"Bu bölüm hedefi {st.get('qty_target', 0)} adet. Önce üretim kaydı girin "
+                            f"(şu an raporlanan: {st.get('qty_done', 0)})."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             st['pending_approval'] = True
             state[str(active_tid)] = st
             task.workflow_stage_state = state
@@ -560,6 +591,16 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         # Workflow sırası: Görevde tanımlı workflow_team_ids varsa onu kullan, yoksa FACTORY_CHECKLIST
         workflow_ids = getattr(task, 'workflow_team_ids', None) or []
         workflow_ids = [int(x) for x in workflow_ids if x is not None and str(x).isdigit()]
+
+        if workflow_ids and from_team and int(from_team.id) in workflow_ids:
+            ensure_workflow_state(task)
+            state_done = dict(task.workflow_stage_state or {})
+            key_done = str(int(from_team.id))
+            st_done = dict(state_done.get(key_done, {}))
+            st_done['stage_done'] = True
+            state_done[key_done] = st_done
+            task.workflow_stage_state = state_done
+            task.save(update_fields=['workflow_stage_state', 'updated_at'])
 
         if workflow_ids:
             # Görevde tanımlı sıra: [1, 2, 3] → 1. ekip bitirince 2'ye, son ekip bitirince done
@@ -666,6 +707,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 "by": getattr(request.user, "email", None),
             })
 
+        sync_workflow_checklist(task)
         return Response(TaskSerializer(task, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='approve-section')
@@ -728,6 +770,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                     "by": getattr(request.user, "email", None),
                 }
             )
+        sync_workflow_checklist(task)
         return Response(TaskSerializer(task, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='log-production')
@@ -1478,10 +1521,37 @@ class TaskChecklistViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         # OrgScopedMixin filter(organization=org) yapılamıyor; doğrudan task üzerinden filtrele
         org = getattr(self.request.user, 'organization', None)
-        qs = TaskChecklist.objects.select_related('task')
+        qs = TaskChecklist.objects.select_related('task', 'workflow_team')
         if org:
             qs = qs.filter(task__organization=org)
         return qs
+
+    def perform_create(self, serializer):
+        validated = serializer.validated_data
+        task = validated['task']
+        extra = {}
+        if validated.get('workflow_team') is None:
+            req_data = getattr(self.request, 'data', {}) or {}
+            if 'order' not in req_data:
+                m = TaskChecklist.objects.filter(task=task).aggregate(m=Max('order'))['m']
+                extra['order'] = (m + 1) if m is not None else 0
+        serializer.save(**extra)
+
+    def perform_update(self, serializer):
+        inst = serializer.instance
+        if inst.workflow_team_id:
+            vd = serializer.validated_data
+            vd.pop('done', None)
+        serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.workflow_team_id:
+            return Response(
+                {'detail': 'İş akışına bağlı checklist maddesi silinemez; sıra görev akışından gelir.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=False, methods=['post'], url_path='reorder')
     def reorder(self, request):
