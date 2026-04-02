@@ -21,6 +21,46 @@ def workflow_stage_production_met(task, team_id):
     return done >= tgt
 
 
+def apply_product_line_to_task(task, index=None):
+    """
+    product_lines içindeki sıradaki kalem alanlarını görev kök alanlarına yazar
+    (üretimde görünen 'aktif' ürün). index verilmezse active_product_index kullanılır.
+    """
+    lines = list(task.product_lines or [])
+    if not lines:
+        return
+    idx = int(index if index is not None else getattr(task, 'active_product_index', 0) or 0)
+    if idx < 0 or idx >= len(lines):
+        return
+    line = lines[idx] or {}
+    mode = line.get('mode') or 'manual'
+    task.mode = mode if mode in ('manual', 'fixed') else 'manual'
+    task.model_code = str(line.get('model_code') or '')
+    task.variant = str(line.get('variant') or '')
+    try:
+        task.quantity = max(1, int(line.get('quantity') or 1))
+    except (TypeError, ValueError):
+        task.quantity = 1
+    md = line.get('model_duration_minutes')
+    try:
+        task.model_duration_minutes = md if md is not None else 0
+    except (TypeError, ValueError):
+        task.model_duration_minutes = 0
+    tpm = line.get('total_planned_minutes')
+    try:
+        task.total_planned_minutes = tpm if tpm is not None else 0
+    except (TypeError, ValueError):
+        task.total_planned_minutes = 0
+    task.model_blade_depth = str(line.get('model_blade_depth') or '')
+    task.model_sizes = list(line.get('model_sizes') or [])
+    task.product_color = str(line.get('product_color') or '')
+    task.product_color_code = str(line.get('product_color_code') or '')
+    try:
+        task.planned_hours = round(float(task.total_planned_minutes or 0) / 60, 2)
+    except (TypeError, ValueError):
+        pass
+
+
 def ensure_workflow_state(task):
     """workflow_team_ids ile workflow_stage_state anahtarlarını senkronize eder."""
     ids = workflow_team_id_list(task)

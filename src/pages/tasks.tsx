@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect, useRef } from 'react'
 import type { JSX } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useForm } from 'react-hook-form'
+import { useFieldArray, useForm, useWatch } from 'react-hook-form'
 import { z } from 'zod'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -29,7 +29,10 @@ import {
 } from '@/lib/utils'
 import { taskPriorityLabelTR, taskSlaBucketLabelTR, taskStatusLabelTR } from '@/lib/task-labels'
 import type { Task, TaskChecklistItem, TaskTimeEntry, Team, UserLite } from '@/types'
-import { Calendar, Lock, Plus, Paperclip, Download, Trash2, GripVertical } from 'lucide-react'
+import { taskProductLineSchema } from '@/lib/task-product-schema'
+import { initialProductLinesForForm, emptyProductLineRow } from '@/lib/task-product-lines-helpers'
+import { TaskProductLineFields } from '@/components/task-product-line-fields'
+import { Calendar, ChevronDown, Lock, Plus, Paperclip, Download, Trash2, GripVertical } from 'lucide-react'
 import { RbacGuard } from '@/components/rbac'
 import { useParams } from '@tanstack/react-router'
 import { CardDescription } from '@/components/ui/card'
@@ -187,19 +190,8 @@ const taskSchema = z
     end: z.string(),
     due: z.string().optional(),
     notes: z.string().max(2000, 'Not çok uzun').optional(),
-    mode: z.enum(['manual', 'fixed']).default('manual'),
-    modelCode: z.string().optional(),
-    variant: z.string().optional(),
-    quantity: z.preprocess((v) => (v === '' || v === undefined ? 1 : Number(v)), z.number().min(1, 'Adet >=1 olmalı')),
-    modelDurationMinutes: z.preprocess(
-      (v) => (v === '' || v === undefined ? 0 : Number(v)),
-      z.number().min(0, '>=0 olmalı')
-    ),
-    totalPlannedMinutes: z.preprocess(
-      (v) => (v === '' || v === undefined ? 0 : Number(v)),
-      z.number().min(0, '>=0 olmalı')
-    ),
-    modelBladeDepth: z.string().optional(),
+    productLines: z.array(taskProductLineSchema).min(1, 'En az bir ürün kalemi ekleyin'),
+    activeProductIndex: z.number().int().min(0).optional(),
     workflowTeamIds: z.array(z.string()).optional(),
     workflowStageTargets: z.array(z.number()).optional(),
     workflowParallel: z.boolean().optional(),
@@ -212,9 +204,6 @@ const taskSchema = z
       (v) => (v === '' || v === undefined ? 0 : Number(v)),
       z.number().min(0, '>=0 olmalı')
     ),
-    modelSizes: z.array(z.string()).optional(),
-    productColor: z.string().optional(),
-    productColorCode: z.string().optional(),
   })
   .refine((v) => new Date(v.end).getTime() >= new Date(v.start).getTime(), {
     message: 'Bitiş tarihi başlangıçtan önce olamaz',
@@ -224,24 +213,17 @@ const taskSchema = z
     message: 'Vade tarihi başlangıçtan önce olamaz',
     path: ['due'],
   })
-  .refine(
-    (v) => v.mode === 'manual' || (Boolean(v.modelCode?.trim()) && v.quantity && v.quantity > 0),
-    { message: 'Sabit modda model ve adet seçilmeli', path: ['modelCode'] }
-  )
-
-function parseBladeMin(v: string | undefined): string {
-  if (!v) return ''
-  const parts = v.split('-')
-  if (parts[0]?.trim()) return parts[0].trim()
-  return v.match(/[\d.]+/)?.[0] || ''
-}
-function parseBladeMax(v: string | undefined): string {
-  if (!v) return ''
-  const parts = v.split('-')
-  if (parts[1]?.trim()) return parts[1].trim()
-  const num = v.match(/[\d.]+/)?.[0]
-  return num || ''
-}
+  .superRefine((data, ctx) => {
+    data.productLines.forEach((line, i) => {
+      if (line.mode === 'fixed' && (!line.modelCode?.trim() || !line.quantity)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Sabit modda model ve adet seçilmeli',
+          path: ['productLines', i, 'modelCode'],
+        })
+      }
+    })
+  })
 
 /** Renk kodu #RGB / #RRGGBB ise önizleme için döner. */
 function cssColorFromProductCode(code: string | undefined | null): string | undefined {
@@ -797,9 +779,26 @@ export function TasksPage() {
                   salesOrders={data.salesOrders}
                   uploading={uploading}
                   setUploading={setUploading}
-                  onSubmit={(values) => {
-                    createTask(values as any)
-                    toast({ title: 'Görev oluşturuldu' })
+                  onSubmit={async (values) => {
+                    try {
+                      await createTask(values as any)
+                      toast({ title: 'Görev oluşturuldu' })
+                    } catch (err: any) {
+                      const d = err?.response?.data
+                      const msg =
+                        (typeof d === 'object' && d && !Array.isArray(d)
+                          ? Object.entries(d)
+                              .map(([k, v]) => `${k}: ${Array.isArray(v) ? (v as string[])[0] : v}`)
+                              .join('; ')
+                          : null) ||
+                        d?.detail ||
+                        err?.message
+                      toast({
+                        title: 'Görev oluşturulamadı',
+                        description: msg || 'Kayıt başarısız veya sunucu hatası',
+                        variant: 'destructive',
+                      })
+                    }
                   }}
                 >
                   <Button size="sm">
@@ -1970,64 +1969,147 @@ export function TaskDetailPage() {
           </div>
           <div className="rounded-lg border border-primary/25 bg-primary/5 p-4 space-y-3">
             <div>
-              <p className="text-sm font-semibold">Üretilecek ürün</p>
+              <p className="text-sm font-semibold">
+                {task.productLines && task.productLines.length > 1 ? 'Üretilecek ürün kalemleri' : 'Üretilecek ürün'}
+              </p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {task.mode === 'fixed'
-                  ? 'Sabit model görevi — model, bıçak ve adet bilgisi üretim için geçerlidir.'
-                  : 'Manuel görev — aşağıdaki plan ve ölçüler üretim talimatıdır.'}
+                {task.productLines && task.productLines.length > 1
+                  ? 'Tüm kalemler ekiplerce görünür. Sıralı akışta şu an işlenen kalem vurgulanır; bir kalem tüm bölümlerden geçince sıradaki kaleme geçilir.'
+                  : task.mode === 'fixed'
+                    ? 'Sabit model görevi — model, bıçak ve adet bilgisi üretim için geçerlidir.'
+                    : 'Manuel görev — aşağıdaki plan ve ölçüler üretim talimatıdır.'}
               </p>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
-              <DetailRow label="Görev modu" value={task.mode === 'fixed' ? 'Sabit (model bazlı)' : 'Manuel'} />
-              <DetailRow label="Hedef adet (toplam)" value={String(task.quantity ?? 1)} />
-              <DetailRow label="Model kodu" value={task.modelCode?.trim() ? task.modelCode : '—'} />
-              <DetailRow label="Varyant" value={task.variant?.trim() ? task.variant : '—'} />
-              <div className="sm:col-span-2 flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 px-3 py-2">
-                {(() => {
-                  const hex = cssColorFromProductCode(task.productColorCode)
-                  return hex ? (
-                    <span
-                      className="h-10 w-10 shrink-0 rounded-md border bg-background shadow-sm"
-                      style={{ backgroundColor: hex }}
-                      title={task.productColorCode!.trim()}
-                    />
-                  ) : null
-                })()}
-                <div className="flex flex-1 flex-col gap-1 min-w-[200px]">
-                  <DetailRow label="Ürün rengi" value={task.productColor?.trim() ? task.productColor : '—'} />
-                  <DetailRow label="Renk kodu" value={task.productColorCode?.trim() ? task.productColorCode : '—'} />
+            {task.productLines && task.productLines.length > 0 ? (
+              <div className="space-y-2">
+                {task.productLines.map((line, lidx) => {
+                  const active = (task.activeProductIndex ?? 0) === lidx
+                  const hex = cssColorFromProductCode(line.productColorCode)
+                  return (
+                    <div
+                      key={lidx}
+                      className={cn(
+                        'rounded-md border bg-background/80 p-3 text-sm space-y-2',
+                        active && task.productLines && task.productLines.length > 1 && 'ring-2 ring-primary/40'
+                      )}
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold">Ürün {lidx + 1}</span>
+                        {line.mode === 'fixed' ? (
+                          <Badge variant="secondary">Sabit</Badge>
+                        ) : (
+                          <Badge variant="outline">Manuel</Badge>
+                        )}
+                        {active && task.productLines && task.productLines.length > 1 ? (
+                          <Badge>Şu an bu kalem</Badge>
+                        ) : null}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
+                        <DetailRow label="Model" value={line.modelCode?.trim() ? line.modelCode : '—'} />
+                        <DetailRow label="Adet" value={String(line.quantity ?? '—')} />
+                        <DetailRow label="Varyant" value={line.variant?.trim() ? line.variant : '—'} />
+                        <div className="sm:col-span-2 flex flex-wrap items-center gap-3 rounded border bg-muted/30 px-2 py-1.5">
+                          {hex ? (
+                            <span
+                              className="h-8 w-8 shrink-0 rounded border bg-background shadow-sm"
+                              style={{ backgroundColor: hex }}
+                              title={line.productColorCode!.trim()}
+                            />
+                          ) : null}
+                          <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                            <DetailRow label="Renk" value={line.productColor?.trim() ? line.productColor : '—'} />
+                            <DetailRow label="Renk kodu" value={line.productColorCode?.trim() ? line.productColorCode : '—'} />
+                          </div>
+                        </div>
+                        <DetailRow label="Bıçak" value={line.modelBladeDepth?.trim() ? line.modelBladeDepth : '—'} />
+                        <DetailRow
+                          label="Birim süre"
+                          value={
+                            line.modelDurationMinutes != null && Number(line.modelDurationMinutes) > 0
+                              ? `${line.modelDurationMinutes} dk`
+                              : '—'
+                          }
+                        />
+                        <DetailRow
+                          label="Satır plan (dk)"
+                          value={
+                            line.totalPlannedMinutes != null && Number(line.totalPlannedMinutes) > 0
+                              ? `${line.totalPlannedMinutes} dk`
+                              : '—'
+                          }
+                        />
+                        <div className="sm:col-span-2">
+                          <DetailRow
+                            label="Ölçüler"
+                            value={(line.modelSizes || []).length > 0 ? (line.modelSizes || []).join(', ') : '—'}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm pt-1 border-t border-primary/10">
+                  <DetailRow
+                    label="Görev planı (saat, tahmini)"
+                    value={task.plannedHours != null && Number(task.plannedHours) > 0 ? `${task.plannedHours} sa` : '—'}
+                  />
+                  <DetailRow label="Başlangıç" value={task.start ? formatDate(task.start) : '—'} />
+                  <DetailRow label="Bitiş" value={task.end ? formatDate(task.end) : '—'} />
                 </div>
               </div>
-              <DetailRow label="Bıçak derinliği" value={task.modelBladeDepth?.trim() ? task.modelBladeDepth : '—'} />
-              <DetailRow
-                label="Birim süre"
-                value={
-                  task.modelDurationMinutes != null && Number(task.modelDurationMinutes) > 0
-                    ? `${task.modelDurationMinutes} dk`
-                    : '—'
-                }
-              />
-              <DetailRow
-                label="Toplam planlanan süre"
-                value={
-                  task.totalPlannedMinutes != null && Number(task.totalPlannedMinutes) > 0
-                    ? `${task.totalPlannedMinutes} dk`
-                    : '—'
-                }
-              />
-              <DetailRow
-                label="Planlanan süre (saat)"
-                value={task.plannedHours != null && Number(task.plannedHours) > 0 ? `${task.plannedHours} sa` : '—'}
-              />
-              <div className="sm:col-span-2">
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                <DetailRow label="Görev modu" value={task.mode === 'fixed' ? 'Sabit (model bazlı)' : 'Manuel'} />
+                <DetailRow label="Hedef adet (toplam)" value={String(task.quantity ?? 1)} />
+                <DetailRow label="Model kodu" value={task.modelCode?.trim() ? task.modelCode : '—'} />
+                <DetailRow label="Varyant" value={task.variant?.trim() ? task.variant : '—'} />
+                <div className="sm:col-span-2 flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 px-3 py-2">
+                  {(() => {
+                    const hex = cssColorFromProductCode(task.productColorCode)
+                    return hex ? (
+                      <span
+                        className="h-10 w-10 shrink-0 rounded-md border bg-background shadow-sm"
+                        style={{ backgroundColor: hex }}
+                        title={task.productColorCode!.trim()}
+                      />
+                    ) : null
+                  })()}
+                  <div className="flex flex-1 flex-col gap-1 min-w-[200px]">
+                    <DetailRow label="Ürün rengi" value={task.productColor?.trim() ? task.productColor : '—'} />
+                    <DetailRow label="Renk kodu" value={task.productColorCode?.trim() ? task.productColorCode : '—'} />
+                  </div>
+                </div>
+                <DetailRow label="Bıçak derinliği" value={task.modelBladeDepth?.trim() ? task.modelBladeDepth : '—'} />
                 <DetailRow
-                  label="Ölçüler"
-                  value={(task.modelSizes || []).length > 0 ? (task.modelSizes || []).join(', ') : '—'}
+                  label="Birim süre"
+                  value={
+                    task.modelDurationMinutes != null && Number(task.modelDurationMinutes) > 0
+                      ? `${task.modelDurationMinutes} dk`
+                      : '—'
+                  }
                 />
+                <DetailRow
+                  label="Toplam planlanan süre"
+                  value={
+                    task.totalPlannedMinutes != null && Number(task.totalPlannedMinutes) > 0
+                      ? `${task.totalPlannedMinutes} dk`
+                      : '—'
+                  }
+                />
+                <DetailRow
+                  label="Planlanan süre (saat)"
+                  value={task.plannedHours != null && Number(task.plannedHours) > 0 ? `${task.plannedHours} sa` : '—'}
+                />
+                <div className="sm:col-span-2">
+                  <DetailRow
+                    label="Ölçüler"
+                    value={(task.modelSizes || []).length > 0 ? (task.modelSizes || []).join(', ') : '—'}
+                  />
+                </div>
+                <DetailRow label="Başlangıç" value={task.start ? formatDate(task.start) : '—'} />
+                <DetailRow label="Bitiş" value={task.end ? formatDate(task.end) : '—'} />
               </div>
-              <DetailRow label="Başlangıç" value={task.start ? formatDate(task.start) : '—'} />
-              <DetailRow label="Bitiş" value={task.end ? formatDate(task.end) : '—'} />
-            </div>
+            )}
             {(task.workflowTeamIds || []).length > 0 && (
               <div className="rounded border bg-background/70 p-3 space-y-2">
                 <p className="text-xs font-semibold uppercase text-muted-foreground">İş akışı — bölüm hedefleri</p>
@@ -2557,6 +2639,20 @@ function DetailRow({ label, value }: { label: string; value?: string }) {
   )
 }
 
+/** Ürün kalemlerinden toplam planlanan dakika (her satırda toplam dk yoksa süre×adet). */
+function sumProductLinesPlannedMinutes(
+  lines: { totalPlannedMinutes?: number; modelDurationMinutes?: number; quantity?: number }[] | undefined | null
+): number {
+  if (!lines?.length) return 0
+  return lines.reduce((acc, line: any) => {
+    const tpm = Number(line?.totalPlannedMinutes)
+    const d = Number(line?.modelDurationMinutes) || 0
+    const q = Math.max(1, Number(line?.quantity) || 1)
+    if (Number.isFinite(tpm) && tpm > 0) return acc + tpm
+    return acc + d * q
+  }, 0)
+}
+
 function TaskModal({
   children,
   users,
@@ -2571,17 +2667,23 @@ function TaskModal({
   users: UserLite[]
   teams: { id: string; name: string }[]
   salesOrders?: { id: string; number: string; customerName?: string }[]
-  onSubmit: (values: z.infer<typeof taskSchema>) => void
+  onSubmit: (values: z.infer<typeof taskSchema>) => void | Promise<void>
   task?: Task
   uploading: boolean
   setUploading: (v: boolean) => void
 }) {
+  const initialLines = initialProductLinesForForm(task)
   const wfIds = (task?.workflowTeamIds ?? []).filter(Boolean)
-  const q0 = Number(task?.quantity ?? 1)
+  const activeIdxInit = Math.min(
+    Math.max(0, task?.activeProductIndex ?? 0),
+    Math.max(0, initialLines.length - 1)
+  )
+  const q0 = Number(initialLines[activeIdxInit]?.quantity ?? task?.quantity ?? 1)
   const wfTargets =
     task?.workflowStageTargets?.length === wfIds.length
       ? task.workflowStageTargets
       : wfIds.map(() => q0)
+  const initialPlannedMinutesSum = sumProductLinesPlannedMinutes(initialLines)
   const form = useForm<z.infer<typeof taskSchema>>({
     resolver: zodResolver(taskSchema) as any,
     defaultValues: {
@@ -2595,24 +2697,22 @@ function TaskModal({
       end: task?.end ? toDatetimeLocalFromISO(task.end) : toDatetimeLocalValue(new Date(Date.now() + 86400000)),
       due: task?.due ? toDatetimeLocalFromISO(task.due) : '',
       notes: '',
-      plannedHours: task?.plannedHours ?? 0,
+      plannedHours:
+        initialPlannedMinutesSum > 0
+          ? Number((initialPlannedMinutesSum / 60).toFixed(2))
+          : task?.plannedHours ?? 0,
       plannedCost: task?.plannedCost ?? 0,
-      mode: (task as any)?.mode ?? 'manual',
-      modelCode: (task as any)?.modelCode ?? '',
-      variant: (task as any)?.variant ?? '',
-      quantity: (task as any)?.quantity ?? 1,
-      modelDurationMinutes: (task as any)?.modelDurationMinutes ?? 0,
-      totalPlannedMinutes: (task as any)?.totalPlannedMinutes ?? 0,
-      modelBladeDepth: (task as any)?.modelBladeDepth ?? '',
-      modelSizes: task?.modelSizes ?? [],
-      productColor: (task as any)?.productColor ?? '',
-      productColorCode: (task as any)?.productColorCode ?? '',
+      productLines: initialLines,
+      activeProductIndex: task?.activeProductIndex ?? 0,
       workflowTeamIds: task?.workflowTeamIds ?? [],
       workflowStageTargets: wfTargets,
       workflowParallel: task ? task.workflowParallel !== false : true,
       salesOrderId: task?.salesOrder ? String(task.salesOrder) : '',
     },
   })
+
+  const { fields, append, remove } = useFieldArray({ control: form.control, name: 'productLines' })
+  const [lineOpen, setLineOpen] = useState<Record<string, boolean>>({})
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [droppedFiles, setDroppedFiles] = useState<File[]>([])
@@ -2639,102 +2739,56 @@ function TaskModal({
     api.get('/auth/organization-settings/').then((r) => setOrgSettings(r.data)).catch(() => setOrgSettings(null))
   }, [])
   const { toast } = useToast()
-  const watchMode = form.watch('mode')
-  const watchModel = form.watch('modelCode')
-  const watchVariant = form.watch('variant')
-  const watchQty = form.watch('quantity')
-  const watchDuration = form.watch('modelDurationMinutes')
-  const watchStart = form.watch('start')
-  const watchTotalPlanned = form.watch('totalPlannedMinutes')
-  const watchPlannedHours = form.watch('plannedHours')
+  const watchLines =
+    useWatch({ control: form.control, name: 'productLines', defaultValue: initialLines }) ?? initialLines
+  const watchStart = useWatch({ control: form.control, name: 'start' })
+  const activeProductIndexForm = useWatch({ control: form.control, name: 'activeProductIndex' }) ?? 0
+  const workflowDefaultTargetQty = useMemo(() => {
+    const lines = watchLines || []
+    if (!lines.length) return 1
+    const ai = Math.min(Math.max(0, activeProductIndexForm as number), lines.length - 1)
+    return Number(lines[ai]?.quantity || 1)
+  }, [watchLines, activeProductIndexForm])
+  const totalMinutesSum = useMemo(() => sumProductLinesPlannedMinutes(watchLines), [watchLines])
   const minsPerMesaiDay = useMemo(() => {
     const start = orgSettings?.working_hours_start || '08:00'
     const end = orgSettings?.working_hours_end || '18:00'
     const m = getWorkingMinutesPerDay(start, end)
     return m > 0 ? m : 600
   }, [orgSettings])
-  const currentPreset = useMemo(
-    () => MODEL_PRESETS.find((m) => m.code === watchModel) || MODEL_PRESETS[0],
-    [watchModel]
-  )
-  /** Sabit mod: model/varyant/API değişince süre & bıçak & ölçüleri doldur (kullanıcının süre alanına dokunmaz, yalnızca model/varyant değişince). */
-  useEffect(() => {
-    if (watchMode !== 'fixed') return
-    const apiModel = apiTaskModels.find((m) => m.code === watchModel)
-    const preset = MODEL_PRESETS.find((m) => m.code === watchModel) || MODEL_PRESETS[0]
-    const variantObj = preset?.variants?.find((v) => v.id === watchVariant)
-    const editingSameAsSaved =
-      Boolean(task?.id) &&
-      String(watchModel || '') === String(task?.modelCode || '') &&
-      String(watchVariant || '') === String(task?.variant || '')
-    const shouldOverwriteTiming = !task?.id || !editingSameAsSaved
 
-    if (preset && !watchModel) {
-      form.setValue('modelCode', preset.code)
-    }
-    if (shouldOverwriteTiming) {
-      if (variantObj) {
-        form.setValue('modelDurationMinutes', variantObj.duration)
-        const blade = variantObj.blade || ''
-        const num = blade.match(/[\d.]+/)?.[0]
-        form.setValue('modelBladeDepth', num ? `${num}-${num}` : blade)
-      } else if (apiModel) {
-        form.setValue('modelDurationMinutes', Number(apiModel.duration_minutes ?? 4))
-        const bmin = apiModel.blade_min
-        const bmax = apiModel.blade_max
-        if (bmin != null && bmax != null) {
-          form.setValue('modelBladeDepth', `${bmin}-${bmax}`)
-        } else {
-          form.setValue('modelBladeDepth', '')
-        }
-      } else if (preset) {
-        form.setValue('modelDurationMinutes', preset.baseDuration)
-        const blade = preset.baseBlade || ''
-        const num = blade.match(/[\d.]+/)?.[0]
-        form.setValue('modelBladeDepth', num ? `${num}-${num}` : blade)
-      }
-    }
-    if (shouldOverwriteTiming && watchModel) {
-      const sizesSet = new Set<string>()
-      if (apiModel?.width_mm != null && apiModel?.height_mm != null) {
-        sizesSet.add(`${apiModel.width_mm}x${apiModel.height_mm}`)
-      }
-      if (apiModel?.thickness_mm != null) {
-        sizesSet.add(`Kalınlık ${apiModel.thickness_mm} mm`)
-      }
-      ;(apiModel?.sizes || []).forEach((s) => sizesSet.add(String(s)))
-      ;(preset?.sizes || []).forEach((s) => sizesSet.add(String(s)))
-      form.setValue('modelSizes', Array.from(sizesSet))
-    }
-  }, [watchMode, watchModel, watchVariant, apiTaskModels, task?.id, task?.modelCode, task?.variant])
-
-  /** Manuel + sabit: süre veya adet değişince toplam planlanan süreyi güncelle. */
   useEffect(() => {
-    if (watchMode !== 'manual' && watchMode !== 'fixed') return
-    const duration = Number(watchDuration)
-    if (!Number.isFinite(duration)) return
-    const qty = Math.max(1, Number(watchQty) || 1)
-    const total = Math.max(0, duration) * qty
-    form.setValue('totalPlannedMinutes', Number(total.toFixed(2)))
-    form.setValue('plannedHours', Number((total / 60).toFixed(2)))
-  }, [watchMode, watchDuration, watchQty])
+    form.setValue('plannedHours', Number((totalMinutesSum / 60).toFixed(2)))
+  }, [totalMinutesSum, form])
 
-  // Başlangıç tarihi değişince, toplam planlanan süre varsa bitiş tarihini mesai gün/saatlerine göre hesapla
   useEffect(() => {
-    if (!watchStart || !watchTotalPlanned || Number(watchTotalPlanned) <= 0) return
-    const mins = Number(watchTotalPlanned)
+    const n = fields.length
+    if (n < 1) return
+    const ai = form.getValues('activeProductIndex') ?? 0
+    if (ai > n - 1) form.setValue('activeProductIndex', Math.max(0, n - 1))
+  }, [fields.length, form])
+
+  useEffect(() => {
+    if (!watchStart || !totalMinutesSum || totalMinutesSum <= 0) return
     const start = String(watchStart)
     const endStr = orgSettings
       ? addWorkingMinutes(
           start,
-          mins,
+          totalMinutesSum,
           orgSettings.working_hours_start || '08:00',
           orgSettings.working_hours_end || '18:00',
           orgSettings.working_days?.length ? orgSettings.working_days : [0, 1, 2, 3, 4]
         )
-      : new Date(new Date(start).getTime() + mins * 60 * 1000).toISOString().slice(0, 16)
+      : new Date(new Date(start).getTime() + totalMinutesSum * 60 * 1000).toISOString().slice(0, 16)
     form.setValue('end', endStr)
-  }, [watchStart, watchTotalPlanned, orgSettings])
+  }, [watchStart, totalMinutesSum, orgSettings, form])
+
+  const toggleLineOpen = (index: number) => {
+    setLineOpen((prev) => {
+      const cur = prev[String(index)] !== false
+      return { ...prev, [String(index)]: !cur }
+    })
+  }
 
   const uploadAttachments = async (taskId: string, files: File[] | FileList | null) => {
     if (!files || (files as FileList).length === 0) return
@@ -2821,29 +2875,40 @@ function TaskModal({
                 const dd = new Date(payload.due)
                 if (!Number.isNaN(dd.getTime())) payload.due = dd.toISOString()
               }
-              ;(payload as any).modelSizes = values.modelSizes || []
-              if (payload.mode === 'fixed') {
-                const preset = MODEL_PRESETS.find((m) => m.code === payload.modelCode) || MODEL_PRESETS[0]
-                const variantObj = preset?.variants.find((v) => v.id === payload.variant)
-                const duration = Number(payload.modelDurationMinutes) || variantObj?.duration || 0
-                const qty = payload.quantity ?? 1
-                const total = Number(duration) * Number(qty)
-                payload.modelDurationMinutes = duration
-                payload.modelBladeDepth = payload.modelBladeDepth ?? variantObj?.blade ?? ''
-                payload.totalPlannedMinutes = Number(total.toFixed(2))
-                payload.plannedHours = Number((total / 60).toFixed(2))
-                ;(payload as any).modelSizes = preset?.sizes || []
-                payload.modelCode = payload.modelCode || preset?.code || ''
-              } else if (payload.mode === 'manual') {
-                const duration = Number(payload.modelDurationMinutes || 0)
-                const qty = Number(payload.quantity ?? 1)
-                const total = duration * qty
-                payload.totalPlannedMinutes = Number(total.toFixed(2))
-                payload.plannedHours = Number((total / 60).toFixed(2))
-              }
+              const normalizedLines = (values.productLines || []).map((line) => {
+                let row = { ...line }
+                if (row.mode === 'fixed') {
+                  const preset = MODEL_PRESETS.find((m) => m.code === row.modelCode) || MODEL_PRESETS[0]
+                  const variantObj = preset?.variants.find((v) => v.id === row.variant)
+                  const duration = Number(row.modelDurationMinutes) || variantObj?.duration || 0
+                  const qty = row.quantity ?? 1
+                  const total = Number(duration) * Number(qty)
+                  row = {
+                    ...row,
+                    modelDurationMinutes: duration,
+                    modelBladeDepth: row.modelBladeDepth ?? variantObj?.blade ?? '',
+                    totalPlannedMinutes: Number(total.toFixed(2)),
+                    modelSizes: preset?.sizes?.length ? [...(preset.sizes || [])] : row.modelSizes,
+                    modelCode: row.modelCode || preset?.code || '',
+                  }
+                } else {
+                  const duration = Number(row.modelDurationMinutes || 0)
+                  const qty = Number(row.quantity ?? 1)
+                  row.totalPlannedMinutes = Number((duration * qty).toFixed(2))
+                }
+                return row
+              })
+              const sumMin = normalizedLines.reduce((s, r) => s + Number(r.totalPlannedMinutes || 0), 0)
+              ;(payload as any).productLines = normalizedLines
+              ;(payload as any).plannedHours = Number((sumMin / 60).toFixed(2))
+              ;(payload as any).activeProductIndex = task?.activeProductIndex ?? 0
               const wf = ((payload as any).workflowTeamIds || []).filter((x: string) => x != null && x !== '')
               let wt = [...((payload as any).workflowStageTargets || []).map((n: number) => Number(n))]
-              const defQty = Number((payload as any).quantity || 1)
+              const ai = Math.min(
+                Math.max(0, (payload as any).activeProductIndex ?? 0),
+                Math.max(0, normalizedLines.length - 1)
+              )
+              const defQty = Number(normalizedLines[ai]?.quantity ?? 1)
               while (wt.length < wf.length) wt.push(defQty)
               ;(payload as any).workflowStageTargets = wt.slice(0, wf.length)
               await onSubmit(payload as any)
@@ -2874,224 +2939,97 @@ function TaskModal({
             <Input {...form.register('title')} className={cn(errors.title && 'border-destructive')} />
             <FormError message={errors.title?.message} />
           </div>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div>
-              <Label>Ürün rengi</Label>
-              <Input {...form.register('productColor')} placeholder="Örn. Antrasit" />
-            </div>
-            <div>
-              <Label>Renk kodu</Label>
-              <Input {...form.register('productColorCode')} placeholder="Örn. RAL 7016" />
-            </div>
-          </div>
           <div className="space-y-3 rounded-md border p-3">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <Label>Görev modu</Label>
-                <Select value={form.watch('mode')} onValueChange={(v) => form.setValue('mode', v as any)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="manual">Manuel</SelectItem>
-                    <SelectItem value="fixed">Sabit (model bazlı)</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label className="text-base">Ürün kalemleri</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Her kalem için model, adet, süre ve renk ayrı girilir. Sıralı iş akışında tamamlanan üretimden sonra
+                  sıradaki kalem otomatik devreye girer.
+                </p>
               </div>
-              {form.watch('mode') === 'fixed' && (
-                <div>
-                  <Label>Adet</Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    {...form.register('quantity', { valueAsNumber: true })}
-                    className={cn(errors.quantity && 'border-destructive')}
-                  />
-                  <FormError message={errors.quantity?.message as any} />
-                </div>
-              )}
-              {form.watch('mode') === 'manual' && (
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-3 col-span-2">
-                  <div>
-                    <Label>Adet</Label>
-                    <Input
-                      type="number"
-                      min={1}
-                      {...form.register('quantity', { valueAsNumber: true })}
-                      className={cn(errors.quantity && 'border-destructive')}
-                    />
-                  </div>
-                  <div>
-                    <Label>Model süresi (dk)</Label>
-                    <Input
-                      type="number"
-                      step="0.1"
-                      min={0}
-                      {...form.register('modelDurationMinutes', { valueAsNumber: true })}
-                      className={cn(errors.modelDurationMinutes && 'border-destructive')}
-                    />
-                  </div>
-                  <div>
-                    <Label>Toplam planlanan (dk)</Label>
-                    <Input
-                      type="number"
-                      step="0.1"
-                      readOnly
-                      {...form.register('totalPlannedMinutes', { valueAsNumber: true })}
-                      className="bg-muted"
-                    />
-                    {Number(watchTotalPlanned) > 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        ≈ {formatNumber(Number(watchTotalPlanned) / minsPerMesaiDay)} mesai günü
-                      </p>
-                    )}
-                  </div>
-                  <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <Label>Ölçüler (virgülle, isteğe bağlı)</Label>
-                      <Input
-                        value={(form.watch('modelSizes') || []).join(', ')}
-                        onChange={(e) =>
-                          form.setValue(
-                            'modelSizes',
-                            e.target.value
-                              .split(',')
-                              .map((s) => s.trim())
-                              .filter(Boolean)
-                          )
-                        }
-                        placeholder="Örn. 73x210, 83x210"
-                      />
-                    </div>
-                    <div>
-                      <Label>Bıçak derinliği (isteğe bağlı)</Label>
-                      <Input {...form.register('modelBladeDepth')} placeholder="Örn. 1.5-2.0" />
-                    </div>
-                  </div>
-                </div>
-              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={() => {
+                  append(emptyProductLineRow())
+                  setLineOpen((prev) => ({ ...prev, [String(fields.length)]: true }))
+                }}
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Ürün ekle
+              </Button>
             </div>
-            {form.watch('mode') === 'fixed' && (
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <div>
-                  <Label>Model</Label>
-                  <div className="flex gap-2 items-start">
-                    <Select value={form.watch('modelCode') || MODEL_PRESETS[0].code} onValueChange={(v) => form.setValue('modelCode', v)}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-64 overflow-y-auto">
-                        {(apiTaskModels.length > 0 ? apiTaskModels.map((m) => ({ code: m.code })) : MODEL_PRESETS).map((m) => (
-                          <SelectItem key={m.code} value={m.code}>
-                            {m.code}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {apiTaskModels.find((m) => m.code === form.watch('modelCode'))?.image_url && (
-                      <img
-                        src={apiTaskModels.find((m) => m.code === form.watch('modelCode'))!.image_url}
-                        alt={form.watch('modelCode')}
-                        className="h-16 w-16 object-cover rounded border"
-                      />
-                    )}
-                  </div>
-                  <FormError message={errors.modelCode?.message as any} />
-                </div>
-                <div>
-                  <Label>Varyant (isteğe bağlı)</Label>
-                  <Select
-                    value={form.watch('variant') || 'none'}
-                    onValueChange={(v) => form.setValue('variant', v === 'none' ? '' : v)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Varyant seç" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">— Yok —</SelectItem>
-                      {(currentPreset?.variants || []).map((v) => (
-                        <SelectItem key={v.id} value={v.id}>
-                          {v.label} ({v.duration} dk)
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormError message={errors.variant?.message as any} />
-                </div>
-                <div>
-                  <Label>Model süresi (dk)</Label>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    {...form.register('modelDurationMinutes', { valueAsNumber: true })}
-                    className={cn(errors.modelDurationMinutes && 'border-destructive')}
-                  />
-                </div>
-                <div>
-                  <Label>Toplam planlanan (dk)</Label>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    readOnly
-                    {...form.register('totalPlannedMinutes', { valueAsNumber: true })}
-                    className={cn('bg-muted', errors.totalPlannedMinutes && 'border-destructive')}
-                  />
-                  {Number(watchTotalPlanned) > 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      ≈ {formatNumber(Number(watchTotalPlanned) / minsPerMesaiDay)} mesai günü
-                    </p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex-1">
-                    <Label>Bıçak derinliği (min-mm)</Label>
-                    <Input
-                      type="number"
-                      step="0.1"
-                      placeholder="1"
-                      value={parseBladeMin(form.watch('modelBladeDepth'))}
-                      onChange={(e) => {
-                        const min = e.target.value
-                        const max = parseBladeMax(form.watch('modelBladeDepth'))
-                        form.setValue('modelBladeDepth', max ? `${min}-${max}` : min)
-                      }}
-                    />
-                  </div>
-                  <span className="pt-6">–</span>
-                  <div className="flex-1">
-                    <Label>Bıçak derinliği (max-mm)</Label>
-                    <Input
-                      type="number"
-                      step="0.1"
-                      placeholder="3"
-                      value={parseBladeMax(form.watch('modelBladeDepth'))}
-                      onChange={(e) => {
-                        const max = e.target.value
-                        const min = parseBladeMin(form.watch('modelBladeDepth'))
-                        form.setValue('modelBladeDepth', min ? `${min}-${max}` : max)
-                      }}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-xs">Ölçüler (otomatik + düzenlenebilir)</Label>
-                  <Input
-                    value={(form.watch('modelSizes') || []).join(', ')}
-                    onChange={(e) =>
-                      form.setValue(
-                        'modelSizes',
-                        e.target.value
-                          .split(',')
-                          .map((s) => s.trim())
-                          .filter(Boolean)
-                      )
-                    }
-                    placeholder="73x210, 83x210"
-                    className="text-sm"
-                  />
-                </div>
-              </div>
+            <FormError message={(errors.productLines as any)?.message} />
+            {totalMinutesSum > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Tüm kalemler toplamı: <span className="font-medium text-foreground">{formatNumber(totalMinutesSum)} dk</span>
+                {' · '}
+                ≈ {formatNumber(totalMinutesSum / minsPerMesaiDay)} mesai günü
+              </p>
             )}
+            <div className="space-y-2">
+              {fields.map((field, index) => {
+                const line = watchLines?.[index]
+                const open = lineOpen[String(index)] !== false
+                const isActive =
+                  task?.id &&
+                  (task.activeProductIndex ?? 0) === index &&
+                  (task.productLines?.length ?? 0) > 1
+                const summaryMode = line?.mode === 'fixed' ? 'Sabit' : 'Manuel'
+                const summaryModel = line?.modelCode?.trim() || '—'
+                const summaryQty = line?.quantity ?? '—'
+                return (
+                  <div key={field.id} className="rounded-lg border bg-card overflow-hidden">
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left hover:bg-muted/40 transition-colors"
+                      onClick={() => toggleLineOpen(index)}
+                    >
+                      <ChevronDown
+                        className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')}
+                      />
+                      <span className="font-medium text-sm">Ürün {index + 1}</span>
+                      <Badge variant="secondary" className="text-[10px] font-normal">
+                        {summaryMode}
+                      </Badge>
+                      <span className="text-sm text-muted-foreground truncate flex-1 min-w-0">
+                        {summaryModel} · adet {summaryQty}
+                      </span>
+                      {isActive ? (
+                        <Badge className="shrink-0 text-[10px]">Şu an üretimde</Badge>
+                      ) : null}
+                    </button>
+                    {open ? (
+                      <div className="border-t px-3 py-3 space-y-3">
+                        <TaskProductLineFields
+                          form={form}
+                          index={index}
+                          task={task}
+                          apiTaskModels={apiTaskModels}
+                          orgSettings={orgSettings}
+                          modelPresets={MODEL_PRESETS}
+                        />
+                        {fields.length > 1 ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => remove(index)}
+                          >
+                            <Trash2 className="h-4 w-4 mr-1" />
+                            Bu kalemi sil
+                          </Button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div>
@@ -3168,7 +3106,7 @@ function TaskModal({
               teams={teams}
               teamIds={form.watch('workflowTeamIds') || []}
               targets={form.watch('workflowStageTargets') || []}
-              defaultTargetQty={Number(form.watch('quantity') || 1)}
+              defaultTargetQty={workflowDefaultTargetQty}
               onTeamsChange={(ids) => form.setValue('workflowTeamIds', ids)}
               onTargetsChange={(t) => form.setValue('workflowStageTargets', t)}
             />
@@ -3240,33 +3178,30 @@ function TaskModal({
               <FormError message={errors.due?.message} />
             </div>
           </div>
+          {totalMinutesSum > 0 ? (
+            <p className="text-xs text-muted-foreground -mt-1">
+              Bitiş, başlangıç tarihi ve tüm ürün kalemlerinin toplam üretim yükü (
+              <span className="font-medium text-foreground">{formatNumber(totalMinutesSum)} dk</span>, yaklaşık{' '}
+              <span className="font-medium text-foreground">{formatNumber(totalMinutesSum / minsPerMesaiDay)}</span> mesai
+              günü) üzerinden mesai saatleri ve çalışma günleriyle hesaplanarak güncellenir.
+            </p>
+          ) : null}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Planlanan gün (mesai)</Label>
               <Input
                 type="number"
-                step="0.01"
+                readOnly
+                tabIndex={-1}
+                step="0.001"
                 min={0}
-                value={
-                  Number.isFinite(Number(watchPlannedHours))
-                    ? Number(((Number(watchPlannedHours || 0) * 60) / minsPerMesaiDay).toFixed(3))
-                    : 0
-                }
-                onChange={(e) => {
-                  const raw = e.target.value
-                  if (raw === '' || raw === '-') {
-                    form.setValue('plannedHours', 0)
-                    return
-                  }
-                  const d = parseFloat(raw)
-                  if (Number.isNaN(d) || d < 0) return
-                  form.setValue('plannedHours', Number(((d * minsPerMesaiDay) / 60).toFixed(4)))
-                }}
-                className={cn(errors.plannedHours && 'border-destructive')}
+                className={cn('bg-muted', errors.plannedHours && 'border-destructive')}
+                value={totalMinutesSum > 0 ? Number((totalMinutesSum / minsPerMesaiDay).toFixed(3)) : 0}
               />
               <p className="text-xs text-muted-foreground mt-1">
-                1 mesai günü = {formatNumber(minsPerMesaiDay / 60)} saat ({orgSettings?.working_hours_start ?? '08:00'}–
-                {orgSettings?.working_hours_end ?? '18:00'}, organizasyon ayarı).
+                Ürün kalemlerindeki süre ve adetlere göre otomatik hesaplanır. 1 mesai günü ={' '}
+                {formatNumber(minsPerMesaiDay / 60)} saat ({orgSettings?.working_hours_start ?? '08:00'}–
+                {orgSettings?.working_hours_end ?? '18:00'}).
               </p>
               <FormError message={errors.plannedHours?.message} />
             </div>

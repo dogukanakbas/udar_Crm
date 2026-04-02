@@ -22,6 +22,7 @@ import type {
   SalesOrder,
 } from '@/types'
 import { startSse as startSseClient } from '@/lib/sse'
+import { mapApiProductLineToTask, taskProductLinesToApiPayload } from '@/lib/task-product-lines-helpers'
 
 type AppState = {
   data: MockDbSnapshot
@@ -181,40 +182,24 @@ export const useAppStore = create<AppState>()(
         data: { ...state.data, settings: { ...state.data.settings, role: (userRole as Role) || 'Worker' } },
       }))
 
-      // Role bazlı istek listesi; worker için sadece görev/ekip/kullanıcı
-      // Worker için sadece gerekli endpointler (403 almamak için daraltılmış)
-      const requests =
-        (userRole || 'Worker') === 'Worker'
-          ? {
-              salesOrdersRes: Promise.resolve({ data: [] }),
-              productsRes: Promise.resolve({ data: [] }),
-              quotesRes: Promise.resolve({ data: [] }),
-              partnersRes: Promise.resolve({ data: [] }),
-              contactsRes: Promise.resolve({ data: [] }),
-              leadsRes: Promise.resolve({ data: [] }),
-              oppRes: Promise.resolve({ data: [] }),
-              ticketsRes: Promise.resolve({ data: [] }),
-              vehiclesRes: Promise.resolve({ data: [] }),
-              teamsRes: api.get('/teams/'),
-              usersRes: api.get('/auth/users/'),
-              tasksRes: api.get('/tasks/'),
-            }
-          : {
-              productsRes: api.get('/products/'),
-              quotesRes: api.get('/quotes/'),
-              partnersRes: api.get('/partners/'),
-              contactsRes: api.get('/contacts/'),
-              leadsRes: api.get('/leads/'),
-              oppRes: api.get('/opportunities/'),
-              ticketsRes: api.get('/tickets/'),
-              vehiclesRes: api.get('/vehicles/'),
-              salesOrdersRes: api.get('/sales-orders/'),
-              teamsRes: api.get('/teams/'),
-              usersRes: api.get('/auth/users/'),
-              tasksRes: api.get('/tasks/'),
-            }
-
-      const settled = await Promise.allSettled(Object.values(requests))
+      // Worker: gereksiz endpointlere gitme (403). Sıra ASLA değişmemeli — aşağıdaki dizi,
+      // products → … → salesOrders → teams → users → tasks eşlemesiyle aynı olmalı.
+      const isWorkerRole = (userRole || 'Worker') === 'Worker'
+      const emptyList = Promise.resolve({ data: [] })
+      const settled = await Promise.allSettled([
+        isWorkerRole ? emptyList : api.get('/products/'),
+        isWorkerRole ? emptyList : api.get('/quotes/'),
+        isWorkerRole ? emptyList : api.get('/partners/'),
+        isWorkerRole ? emptyList : api.get('/contacts/'),
+        isWorkerRole ? emptyList : api.get('/leads/'),
+        isWorkerRole ? emptyList : api.get('/opportunities/'),
+        isWorkerRole ? emptyList : api.get('/tickets/'),
+        isWorkerRole ? emptyList : api.get('/vehicles/'),
+        isWorkerRole ? emptyList : api.get('/sales-orders/'),
+        api.get('/teams/'),
+        api.get('/auth/users/'),
+        api.get('/tasks/'),
+      ])
       const [
         productsRes,
         quotesRes,
@@ -377,6 +362,15 @@ export const useAppStore = create<AppState>()(
             ? String(t.product_color_code).trim()
             : t.productColorCode != null && String(t.productColorCode).trim() !== ''
               ? String(t.productColorCode).trim()
+              : undefined,
+        productLines: Array.isArray(t.product_lines)
+          ? t.product_lines.map((ln: any) => mapApiProductLineToTask(ln))
+          : undefined,
+        activeProductIndex:
+          t.active_product_index != null && t.active_product_index !== ''
+            ? Number(t.active_product_index)
+            : t.activeProductIndex != null
+              ? Number(t.activeProductIndex)
               : undefined,
         status: t.status,
         priority: t.priority,
@@ -684,44 +678,58 @@ export const useAppStore = create<AppState>()(
     })(),
   createTask: async (task) => {
     try {
-      const payload: any = {
-        ...task,
-        owner: task.owner ? Number(task.owner) : null,
-        assignee: task.assignee ? Number(task.assignee) : null,
-        team: task.teamId ? Number(task.teamId) : null,
-        planned_hours: (task as any).plannedHours,
-        planned_cost: (task as any).plannedCost,
-        mode: (task as any).mode || 'manual',
-        model_code: (task as any).modelCode || '',
-        variant: (task as any).variant || '',
-        quantity: (task as any).quantity ?? 1,
-        model_duration_minutes: (task as any).modelDurationMinutes ?? 0,
-        total_planned_minutes: (task as any).totalPlannedMinutes ?? 0,
-        model_blade_depth: (task as any).modelBladeDepth || '',
-        model_sizes: (task as any).modelSizes || [],
-        product_color: ((task as any).productColor || '').trim(),
-        product_color_code: ((task as any).productColorCode || '').trim(),
-        workflow_team_ids: ((task as any).workflowTeamIds || [])
-          .filter((id: string) => id != null && id !== '')
-          .map((id: string) => Number(id)),
-        workflow_parallel: (task as any).workflowParallel === true,
-        workflow_stage_targets: ((task as any).workflowStageTargets || []).map((n: any) => Number(n)),
-        sales_order: (task as any).salesOrderId ? Number((task as any).salesOrderId) : null,
+      const t = task as any
+      const lines = t.productLines as any[] | undefined
+      const activeIdx = Number(t.activeProductIndex ?? 0)
+      const activeLine = lines?.length ? lines[Math.min(Math.max(0, activeIdx), lines.length - 1)] : null
+
+      const dateOrNull = (v: unknown): string | null =>
+        v != null && typeof v === 'string' && String(v).trim() !== '' ? String(v) : null
+
+      const wfIds = (t.workflowTeamIds || [])
+        .filter((id: string) => id != null && id !== '')
+        .map((id: string) => Number(id))
+        .filter((n: number) => !Number.isNaN(n))
+      const wfTargets = (t.workflowStageTargets || []).map((n: any) => Number(n)).filter((n: number) => !Number.isNaN(n))
+
+      const q = Number(activeLine?.quantity ?? t.quantity ?? 1)
+      const qty = Number.isFinite(q) && q >= 1 ? Math.floor(q) : 1
+      const mdur = Number(activeLine?.modelDurationMinutes ?? t.modelDurationMinutes ?? 0)
+      const tpm = Number(activeLine?.totalPlannedMinutes ?? t.totalPlannedMinutes ?? 0)
+      const ph = Number(t.plannedHours ?? 0)
+      const pc = Number(t.plannedCost ?? 0)
+
+      const payload: Record<string, unknown> = {
+        title: t.title,
+        owner: t.owner ? Number(t.owner) : null,
+        assignee: t.assignee ? Number(t.assignee) : null,
+        team: t.teamId ? Number(t.teamId) : null,
+        status: t.status ?? 'todo',
+        priority: t.priority ?? 'medium',
+        start: dateOrNull(t.start),
+        end: dateOrNull(t.end),
+        due: dateOrNull(t.due),
+        planned_hours: Number.isFinite(ph) ? ph : 0,
+        planned_cost: Number.isFinite(pc) ? pc : 0,
+        mode: (activeLine?.mode as string) || t.mode || 'manual',
+        model_code: (activeLine?.modelCode as string) || t.modelCode || '',
+        variant: (activeLine?.variant as string) || t.variant || '',
+        quantity: qty,
+        model_duration_minutes: Number.isFinite(mdur) && mdur >= 0 ? mdur : 0,
+        total_planned_minutes: Number.isFinite(tpm) && tpm >= 0 ? tpm : 0,
+        model_blade_depth: (activeLine?.modelBladeDepth as string) || t.modelBladeDepth || '',
+        model_sizes: activeLine?.modelSizes || t.modelSizes || [],
+        product_color: String(activeLine?.productColor ?? t.productColor ?? '').trim(),
+        product_color_code: String(activeLine?.productColorCode ?? t.productColorCode ?? '').trim(),
+        workflow_team_ids: wfIds,
+        workflow_parallel: t.workflowParallel === true,
+        workflow_stage_targets: wfTargets,
+        sales_order: t.salesOrderId ? Number(t.salesOrderId) : null,
       }
-      delete payload.teamId
-      delete payload.workflowTeamIds
-      delete (payload as any).modelCode
-      delete (payload as any).modelDurationMinutes
-      delete (payload as any).totalPlannedMinutes
-      delete (payload as any).modelBladeDepth
-      delete (payload as any).workflowParallel
-      delete (payload as any).workflowStageTargets
-      delete (payload as any).salesOrderId
-      delete (payload as any).plannedHours
-      delete (payload as any).plannedCost
-      delete (payload as any).modelSizes
-      delete (payload as any).productColor
-      delete (payload as any).productColorCode
+      if (lines && lines.length > 0) {
+        payload.product_lines = taskProductLinesToApiPayload(lines as any)
+        payload.active_product_index = Math.min(Math.max(0, activeIdx), lines.length - 1)
+      }
       await api.post('/tasks/', payload)
       await get().hydrateFromApi()
     } catch (err) {
@@ -778,6 +786,15 @@ export const useAppStore = create<AppState>()(
           const sid = (payload as any).salesOrderId
           payload.sales_order = sid ? Number(sid) : null
           delete (payload as any).salesOrderId
+        }
+        if ('productLines' in payload && Array.isArray((payload as any).productLines)) {
+          const pl = (payload as any).productLines as any[]
+          payload.product_lines = taskProductLinesToApiPayload(pl)
+          delete (payload as any).productLines
+        }
+        if ('activeProductIndex' in payload) {
+          payload.active_product_index = Number((payload as any).activeProductIndex ?? 0)
+          delete (payload as any).activeProductIndex
         }
         await api.patch(`/tasks/${id}/`, payload)
         await get().hydrateFromApi()

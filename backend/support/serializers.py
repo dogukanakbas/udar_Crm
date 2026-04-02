@@ -10,7 +10,7 @@ from .models import (
     TaskModel,
     TaskProductionEntry,
 )
-from .workflow_utils import workflow_team_id_list, ensure_workflow_state
+from .workflow_utils import apply_product_line_to_task, ensure_workflow_state, workflow_team_id_list
 from .models_automation import AutomationRule
 
 
@@ -172,18 +172,56 @@ class TaskSerializer(serializers.ModelSerializer):
                 )
         return super().validate(attrs)
 
-    def create(self, validated_data):
-        instance = super().create(validated_data)
+    def _sync_product_lines_and_workflow(self, instance):
+        """Aktif kalemi kök alanlara yazar; birden fazla kalem varsa planned_hours tüm kalemlerin toplamına göre ayarlanır."""
+        update_fields = []
+        if list(instance.product_lines or []):
+            apply_product_line_to_task(instance, int(instance.active_product_index or 0))
+            lines = list(instance.product_lines or [])
+            if len(lines) > 1:
+                sum_min = 0.0
+                for ln in lines:
+                    try:
+                        tpm = (ln or {}).get('total_planned_minutes')
+                        if tpm is not None and str(tpm).strip() != '':
+                            sum_min += float(tpm)
+                        else:
+                            q = int((ln or {}).get('quantity') or 1)
+                            d = float((ln or {}).get('model_duration_minutes') or 0)
+                            sum_min += d * max(1, q)
+                    except (TypeError, ValueError):
+                        pass
+                if sum_min > 0:
+                    instance.planned_hours = round(sum_min / 60, 2)
+            update_fields.extend(
+                [
+                    'mode',
+                    'model_code',
+                    'variant',
+                    'quantity',
+                    'model_duration_minutes',
+                    'total_planned_minutes',
+                    'model_blade_depth',
+                    'model_sizes',
+                    'product_color',
+                    'product_color_code',
+                    'planned_hours',
+                ]
+            )
         if workflow_team_id_list(instance):
             ensure_workflow_state(instance)
-            instance.save(update_fields=['workflow_stage_state'])
+            update_fields.append('workflow_stage_state')
+        if update_fields:
+            instance.save(update_fields=list(dict.fromkeys(update_fields + ['updated_at'])))
+
+    def create(self, validated_data):
+        instance = super().create(validated_data)
+        self._sync_product_lines_and_workflow(instance)
         return instance
 
     def update(self, instance, validated_data):
         instance = super().update(instance, validated_data)
-        if workflow_team_id_list(instance):
-            ensure_workflow_state(instance)
-            instance.save(update_fields=['workflow_stage_state'])
+        self._sync_product_lines_and_workflow(instance)
         return instance
 
 

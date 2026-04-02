@@ -29,7 +29,13 @@ from rest_framework.response import Response
 from django.utils import timezone
 from datetime import datetime as dt_datetime
 
-from .workflow_utils import ensure_workflow_state, workflow_team_id_list, parallel_queue_visible, workflow_stage_production_met
+from .workflow_utils import (
+    apply_product_line_to_task,
+    ensure_workflow_state,
+    workflow_team_id_list,
+    parallel_queue_visible,
+    workflow_stage_production_met,
+)
 from .checklist_sync import sync_workflow_checklist
 
 
@@ -687,25 +693,111 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 "by": getattr(request.user, "email", None),
             })
         else:
-            # Son aşama - görev tamamen tamamlandı
-            task.status = 'done'
-            task.assignee = None
-            task.save(update_fields=['status', 'assignee', 'updated_at'])
-            TaskComment.objects.create(
-                task=task,
-                author=request.user,
-                type='activity',
-                text=f"✅ {request.user.username} görevi tamamen tamamladı",
-            )
-            push_event({
-                "type": "task.status",
-                "task_id": task.id,
-                "organization": task.organization_id,
-                "title": task.title,
-                "status": "done",
-                "assignee_id": None,
-                "by": getattr(request.user, "email", None),
-            })
+            # Son aşama — çoklu ürün + sıralı akış: sıradaki ürün kalemi için iş akışını baştan başlat
+            lines = list(getattr(task, 'product_lines', None) or [])
+            active = int(getattr(task, 'active_product_index', 0) or 0)
+            if (
+                len(lines) > 1
+                and active < len(lines) - 1
+                and not getattr(task, 'workflow_parallel', False)
+            ):
+                task.active_product_index = active + 1
+                apply_product_line_to_task(task, task.active_product_index)
+                task.workflow_stage_state = {}
+                wf_ids = workflow_team_id_list(task)
+                if wf_ids:
+                    _q = int(task.quantity or 1)
+                    task.workflow_stage_targets = [_q] * len(wf_ids)
+                ensure_workflow_state(task)
+                first_team = Team.objects.filter(id=wf_ids[0], organization=org).first() if wf_ids else None
+                task.status = 'in-progress'
+                if first_team:
+                    task.current_team = first_team
+                    task.team = first_team
+                    assign_task_to_team_leader(task, first_team)
+                history.append(
+                    {
+                        'from_team': from_team.id if from_team else None,
+                        'from_team_name': from_team.name if from_team else None,
+                        'to_team': first_team.id if first_team else None,
+                        'to_team_name': first_team.name if first_team else None,
+                        'by': request.user.username,
+                        'note': f"Ürün {active + 1}/{len(lines)} tamamlandı — ürün {active + 2} üretimine geçildi",
+                        'type': 'next-product',
+                        'at': timezone.now().isoformat(),
+                    }
+                )
+                task.handover_history = history
+                task.handover_reason = 'Çoklu ürün: sıradaki kalem'
+                task.handover_at = timezone.now()
+                task.save(
+                    update_fields=[
+                        'active_product_index',
+                        'mode',
+                        'model_code',
+                        'variant',
+                        'quantity',
+                        'model_duration_minutes',
+                        'total_planned_minutes',
+                        'model_blade_depth',
+                        'model_sizes',
+                        'product_color',
+                        'product_color_code',
+                        'planned_hours',
+                        'workflow_stage_targets',
+                        'workflow_stage_state',
+                        'status',
+                        'current_team',
+                        'team',
+                        'assignee',
+                        'handover_history',
+                        'handover_reason',
+                        'handover_at',
+                        'updated_at',
+                    ]
+                )
+                TaskComment.objects.create(
+                    task=task,
+                    author=request.user,
+                    type='activity',
+                    text=(
+                        f"✅ {request.user.username} ürün {active + 1} akışını tamamladı — "
+                        f"ürün {active + 2} için {first_team.name if first_team else 'ekip'} devam ediyor"
+                    ),
+                )
+                if first_team:
+                    push_event(
+                        {
+                            'type': 'task.handover',
+                            'task_id': task.id,
+                            'organization': task.organization_id,
+                            'title': task.title,
+                            'assignee_id': task.assignee_id,
+                            'to_team': first_team.id,
+                            'by': getattr(request.user, 'email', None),
+                        }
+                    )
+            else:
+                task.status = 'done'
+                task.assignee = None
+                task.save(update_fields=['status', 'assignee', 'updated_at'])
+                TaskComment.objects.create(
+                    task=task,
+                    author=request.user,
+                    type='activity',
+                    text=f"✅ {request.user.username} görevi tamamen tamamladı",
+                )
+                push_event(
+                    {
+                        'type': 'task.status',
+                        'task_id': task.id,
+                        'organization': task.organization_id,
+                        'title': task.title,
+                        'status': 'done',
+                        'assignee_id': None,
+                        'by': getattr(request.user, 'email', None),
+                    }
+                )
 
         sync_workflow_checklist(task)
         return Response(TaskSerializer(task, context={'request': request}).data)

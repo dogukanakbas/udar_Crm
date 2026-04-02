@@ -147,6 +147,20 @@ export interface Ticket {
   thread: TicketMessage[]
 }
 
+/** Tek görev içindeki bir ürün kalemi (çoklu ürün üretimi). */
+export interface TaskProductLine {
+  mode?: 'manual' | 'fixed'
+  modelCode?: string
+  variant?: string
+  quantity?: number
+  modelDurationMinutes?: number
+  totalPlannedMinutes?: number
+  modelBladeDepth?: string
+  modelSizes?: string[]
+  productColor?: string
+  productColorCode?: string
+}
+
 export interface Task {
   id: string
   title: string
@@ -196,6 +210,9 @@ export interface Task {
   history?: TaskHistoryItem[]
   notes?: string
   productionEntries?: TaskProductionEntry[]
+  /** Birden fazla ürün; aktif olanın alanları modelCode / quantity vb. ile senkron tutulur. */
+  productLines?: TaskProductLine[]
+  activeProductIndex?: number
 }
 
 export interface TaskProductionEntry {

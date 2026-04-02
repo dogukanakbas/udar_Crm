@@ -5,6 +5,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from core.renderers import EventStreamRenderer
 from django.db import models
 from django.http import JsonResponse, HttpResponse, StreamingHttpResponse
+from django.utils import timezone
 
 from crm.models import Quote, BusinessPartner, Opportunity
 from erp.models import Product, Invoice
@@ -33,7 +34,8 @@ class DashboardKPIView(APIView):
         opportunities = Opportunity.objects.filter(organization=org)
         tickets = Ticket.objects.filter(organization=org)
         tasks = Task.objects.filter(organization=org)
-        today = models.functions.TruncDate(models.functions.Now())
+        # __date lookup için gerçek tarih kullan (TruncDate(Now) rhs bazı DB/sürümlerde hata üretebiliyor)
+        today_d = timezone.localdate()
         meetings = [
             {
                 "id": t.id,
@@ -41,7 +43,7 @@ class DashboardKPIView(APIView):
                 "time": t.start.strftime("%H:%M") if t.start else "",
                 "owner": t.owner.username if t.owner else "",
             }
-            for t in tasks.filter(start__date=today)[:5]
+            for t in tasks.filter(start__date=today_d)[:5]
         ]
         data = {
             "quote_count": quotes.count(),
@@ -58,7 +60,7 @@ class DashboardKPIView(APIView):
             "pending_approvals": quotes.filter(status='Under Review').count(),
             "today_tasks": [
                 {"id": t.id, "title": t.title, "due": t.due, "owner": t.owner.username if t.owner else ""}
-                for t in tasks.filter(due__date=today)
+                for t in tasks.filter(due__date=today_d)
             ],
             "overdue_invoices": list(invoices.filter(status='Overdue').values_list('number', flat=True)[:5]),
             "low_stock": list(products.filter(stock__lt=models.F('reorder_point')).values_list('sku', flat=True)[:5]),

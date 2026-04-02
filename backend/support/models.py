@@ -81,6 +81,15 @@ class Task(models.Model):
         blank=True,
         related_name='tasks',
     )
+    product_lines = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='Her eleman: model_code, variant, quantity, renk, süre vb. — çoklu ürün kalemleri',
+    )
+    active_product_index = models.PositiveIntegerField(
+        default=0,
+        help_text='Şu an iş akışına yansıtılan ürün satırı (0 tabanlı)',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
