@@ -15,6 +15,7 @@ import api from '@/lib/api'
 import { useToast } from '@/components/ui/use-toast'
 import type { Task } from '@/types'
 import { taskStatusLabelTR } from '@/lib/task-labels'
+import { taskVisibleToWorkerTeamMember, workerMayClaimTask } from '@/lib/task-worker-visibility'
 
 function mapTaskFromApi(t: any): Task {
   return {
@@ -30,6 +31,8 @@ function mapTaskFromApi(t: any): Task {
     end: t.end,
     due: t.due,
     workflowTeamIds: (t.workflow_team_ids || []).map((id: any) => String(id)),
+    workflowParallel: Boolean(t.workflow_parallel),
+    workflowStageState: t.workflow_stage_state || {},
   }
 }
 
@@ -40,10 +43,15 @@ export function DashboardPage() {
   const hydrateFromApi = useAppStore((s) => s.hydrateFromApi)
   const isWorker = data.settings.role === 'Worker'
   const currentUserId = typeof window !== 'undefined' ? localStorage.getItem('current-user-id') : null
-  const myTasks = (data.tasks || []).filter(
-    (t) => String(t.assignee) === String(currentUserId) && t.status !== 'done'
-  )
+  const myTasks = (data.tasks || []).filter((t) => {
+    if (t.status === 'done') return false
+    if (!currentUserId) return false
+    if (String(t.assignee) === String(currentUserId)) return true
+    if (!isWorker) return false
+    return taskVisibleToWorkerTeamMember(t, currentUserId, data.teams)
+  })
   const [teamQueueTasks, setTeamQueueTasks] = useState<Task[]>([])
+  const [claimingTaskId, setClaimingTaskId] = useState<string | null>(null)
   const [pendingApprovals, setPendingApprovals] = useState<
     { id: string; quote_id: string; quote_number: string; role: string; status: string }[]
   >([])
@@ -166,7 +174,10 @@ export function DashboardPage() {
           <Card>
             <CardHeader>
               <CardTitle>Ekibimdeki bekleyen görevler</CardTitle>
-              <CardDescription>Önceki ekipten sizin ekibinize devredilen görevler. Üstlenmek için &quot;Al&quot; tıklayın.</CardDescription>
+              <CardDescription>
+                Bu kutucukta yalnızca üstlenmeye uygun görevler listelenir; «Al» yalnızca ilgili ekip usta başılarına
+                gösterilir. Çift tıklamayın — işlem bitene kadar bekleyin.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
@@ -181,22 +192,43 @@ export function DashboardPage() {
                         {data.teams.find((t) => t.id === task.currentTeam)?.name || 'Ekip'} sırasında
                       </Badge>
                     </Link>
-                    <Button
-                      size="sm"
-                      variant="default"
-                      onClick={async () => {
-                        try {
-                          await api.post(`/tasks/${task.id}/claim/`)
-                          await hydrateFromApi()
-                          fetchTeamQueue()
-                        } catch (e: any) {
-                          const msg = e?.response?.data?.detail || 'Üstlenilemedi'
-                          toast({ title: 'Hata', description: msg, variant: 'destructive' })
-                        }
-                      }}
-                    >
-                      Al
-                    </Button>
+                    {workerMayClaimTask(task, currentUserId, data.teams, data.settings.role) ? (
+                      <Button
+                        size="sm"
+                        variant="default"
+                        disabled={claimingTaskId !== null}
+                        onClick={async () => {
+                          if (claimingTaskId) {
+                            toast({
+                              title: 'Bekleyin',
+                              description: 'Devam eden bir üstlenme işlemi var.',
+                              variant: 'destructive',
+                            })
+                            return
+                          }
+                          setClaimingTaskId(task.id)
+                          try {
+                            await api.post(`/tasks/${task.id}/claim/`)
+                            await hydrateFromApi()
+                            fetchTeamQueue()
+                            toast({ title: 'Görev üstlenildi' })
+                          } catch (e: any) {
+                            const msg = e?.response?.data?.detail || 'Üstlenilemedi'
+                            toast({ title: 'Üstlenilemedi', description: String(msg), variant: 'destructive' })
+                          } finally {
+                            setClaimingTaskId(null)
+                          }
+                        }}
+                      >
+                        {claimingTaskId === task.id ? '…' : 'Al'}
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="outline" asChild>
+                        <Link to="/tasks/$taskId" params={{ taskId: task.id }}>
+                          Detay
+                        </Link>
+                      </Button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -206,11 +238,14 @@ export function DashboardPage() {
         <Card>
           <CardHeader>
             <CardTitle>Bana atanan görevler</CardTitle>
-            <CardDescription>Tıklayarak görev detayına gidebilirsiniz</CardDescription>
+            <CardDescription>
+              Doğrudan atananlar ve ekibinizdeki iş akışı görevleri. Atanmamış görevi yalnızca ekip usta başısı (veya
+              yönetici) «Üstlen» ile alır; ardından üretim ve onay adımları.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {myTasks.length === 0 ? (
-              <p className="text-muted-foreground">Size atanmış görev yok</p>
+              <p className="text-muted-foreground">Size atanmış veya ekibinizde bekleyen görev yok</p>
             ) : (
               <div className="space-y-2">
                 {myTasks.map((task) => (
@@ -223,33 +258,160 @@ export function DashboardPage() {
                       <Badge variant="outline" className="mt-1">{taskStatusLabelTR(task.status)}</Badge>
                     </Link>
                     <div className="flex gap-1 shrink-0">
-                      {task.status === 'todo' && (
-                        <Button
-                          size="sm"
-                          onClick={async () => {
-                            await updateTask(task.id, { status: 'in-progress' })
-                          }}
-                        >
-                          Başlat
-                        </Button>
-                      )}
-                      {task.status === 'in-progress' && (
-                        <Button
-                          size="sm"
-                          variant="default"
-                          onClick={async () => {
-                            try {
-                              await api.post(`/tasks/${task.id}/complete-stage/`)
-                              await hydrateFromApi()
-                            } catch {
-                              await updateTask(task.id, { status: 'done' })
-                              await hydrateFromApi()
+                      {task.status === 'todo' &&
+                        (() => {
+                          if (!task.assignee) {
+                            if (
+                              !workerMayClaimTask(task, currentUserId, data.teams, data.settings.role)
+                            ) {
+                              return null
                             }
-                          }}
-                        >
-                          Bitir
-                        </Button>
-                      )}
+                            return (
+                              <Button
+                                size="sm"
+                                disabled={claimingTaskId !== null}
+                                onClick={async () => {
+                                  if (claimingTaskId) return
+                                  setClaimingTaskId(task.id)
+                                  try {
+                                    await api.post(`/tasks/${task.id}/claim/`)
+                                    await hydrateFromApi()
+                                    fetchTeamQueue()
+                                    toast({ title: 'Görev üstlenildi' })
+                                  } catch (e: any) {
+                                    const msg = e?.response?.data?.detail || 'Üstlenilemedi'
+                                    toast({ title: 'Üstlenilemedi', description: String(msg), variant: 'destructive' })
+                                  } finally {
+                                    setClaimingTaskId(null)
+                                  }
+                                }}
+                              >
+                                {claimingTaskId === task.id ? '…' : 'Üstlen'}
+                              </Button>
+                            )
+                          }
+                          if (String(task.assignee) === String(currentUserId)) {
+                            return (
+                              <Button
+                                size="sm"
+                                onClick={async () => {
+                                  await updateTask(task.id, { status: 'in-progress' })
+                                  await hydrateFromApi()
+                                }}
+                              >
+                                Başlat
+                              </Button>
+                            )
+                          }
+                          return null
+                        })()}
+                      {task.status === 'in-progress' &&
+                        (() => {
+                          const hasWf = (task.workflowTeamIds?.length ?? 0) > 0
+                          const seqFlow = hasWf && !task.workflowParallel
+                          const curRow = task.currentTeam ? data.teams.find((t) => t.id === task.currentTeam) : undefined
+                          const inTeam = !!(
+                            currentUserId &&
+                            (curRow?.memberIds?.includes(String(currentUserId)) ||
+                              (curRow?.leaderId && String(curRow.leaderId) === String(currentUserId)))
+                          )
+                          const st = task.currentTeam ? task.workflowStageState?.[task.currentTeam] : undefined
+                          const canSeqSubmit =
+                            seqFlow &&
+                            !!task.assignee &&
+                            !!task.currentTeam &&
+                            inTeam &&
+                            !st?.stage_done &&
+                            !st?.pending_approval
+                          const isMine = String(task.assignee) === String(currentUserId)
+                          const showComplete =
+                            (task.workflowParallel && isMine) ||
+                            canSeqSubmit ||
+                            (!hasWf && isMine)
+                          if (!showComplete) return null
+                          return (
+                            <Button
+                              size="sm"
+                              variant="default"
+                              onClick={async () => {
+                                try {
+                                  let body: Record<string, string> | undefined
+                                  if (canSeqSubmit && task.currentTeam && st) {
+                                    const tgt = Number(st.qty_target ?? 0) || Number(task.quantity ?? 1) || 1
+                                    const done = Number(st.qty_done ?? 0)
+                                    if (done < tgt) {
+                                      const r = window.prompt(
+                                        'Üretim hedefinin altındasınız. Eksiklik gerekçesini yazın (zorunlu):',
+                                        ''
+                                      )
+                                      if (!r?.trim()) {
+                                        toast({
+                                          title: 'Gerekçe gerekli',
+                                          description: 'Detaylı form için görev sayfasını kullanabilirsiniz.',
+                                          variant: 'destructive',
+                                        })
+                                        return
+                                      }
+                                      body = { production_shortfall_reason: r.trim() }
+                                    }
+                                  }
+                                  if (task.workflowParallel && isMine && hasWf) {
+                                    const uid = currentUserId ? Number(currentUserId) : NaN
+                                    for (const tid of task.workflowTeamIds || []) {
+                                      const ws = task.workflowStageState?.[tid]
+                                      if (
+                                        ws?.assignee_id != null &&
+                                        Number(ws.assignee_id) === uid &&
+                                        !ws.stage_done &&
+                                        !ws.pending_approval
+                                      ) {
+                                        const tgt =
+                                          Number(ws.qty_target ?? 0) || Number(task.quantity ?? 1) || 1
+                                        const done = Number(ws.qty_done ?? 0)
+                                        if (done < tgt) {
+                                          const r = window.prompt(
+                                            'Üretim hedefinin altındasınız. Eksiklik gerekçesini yazın (zorunlu):',
+                                            ''
+                                          )
+                                          if (!r?.trim()) {
+                                            toast({
+                                              title: 'Gerekçe gerekli',
+                                              description: 'Detaylı form için görev sayfasını kullanın.',
+                                              variant: 'destructive',
+                                            })
+                                            return
+                                          }
+                                          body = { production_shortfall_reason: r.trim() }
+                                        }
+                                        break
+                                      }
+                                    }
+                                  }
+                                  await api.post(`/tasks/${task.id}/complete-stage/`, body ?? {})
+                                  await hydrateFromApi()
+                                  toast({
+                                    title:
+                                      task.workflowParallel || canSeqSubmit
+                                        ? 'Onaya gönderildi'
+                                        : 'Aşama tamamlandı',
+                                    description:
+                                      task.workflowParallel || canSeqSubmit
+                                        ? 'Usta başı onayından sonra işlem devam eder.'
+                                        : undefined,
+                                  })
+                                } catch (e: any) {
+                                  toast({
+                                    title: 'İşlem yapılamadı',
+                                    description: e?.response?.data?.detail || String(e?.message || e),
+                                    variant: 'destructive',
+                                  })
+                                }
+                              }}
+                            >
+                              {task.workflowParallel || canSeqSubmit ? 'Bölümü bitir (onaya gönder)' : 'Bitir'}
+                            </Button>
+                          )
+                        })()}
                     </div>
                   </div>
                 ))}

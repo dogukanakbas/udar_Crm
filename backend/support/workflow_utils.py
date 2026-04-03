@@ -1,5 +1,7 @@
 """Paralel iş akışı: bölüm durumu ve sipariş üretim takibi yardımcıları."""
 
+SHORTFALL_REASON_MAX_LEN = 2000
+
 
 def workflow_team_id_list(task):
     return [int(x) for x in (task.workflow_team_ids or []) if x is not None and str(x).isdigit()]
@@ -17,8 +19,44 @@ def workflow_stage_production_met(task, team_id):
     tgt = int(st.get('qty_target') or 0)
     done = int(st.get('qty_done') or 0)
     if tgt <= 0:
-        tgt = int(task.quantity or 1) or 1
+        tgt = default_workflow_qty_target(task)
     return done >= tgt
+
+
+def resolve_production_gate(task, team_id, request_data):
+    """
+    Onaya göndermeden önce: hedef tamamsa veya istekte gerekçe varsa izin.
+    Dönüş: (hata_yanıtı, saklanacak_gerekçe)
+    - hata_yanıtı: None veya rest_framework.response.Response (400)
+    - saklanacak_gerekçe: None (hedef tamam) veya kısaltılmış gerekçe metni
+    """
+    from rest_framework.response import Response
+    from rest_framework import status
+
+    if workflow_stage_production_met(task, team_id):
+        return None, None
+    reason = (
+        (request_data or {}).get('production_shortfall_reason')
+        or (request_data or {}).get('shortfall_reason')
+        or ''
+    ).strip()
+    if not reason:
+        ensure_workflow_state(task)
+        st = (task.workflow_stage_state or {}).get(str(int(team_id)), {})
+        return (
+            Response(
+                {
+                    'detail': (
+                        f"Hedef {st.get('qty_target', 0)} adet, kayıtlı üretim {st.get('qty_done', 0)}. "
+                        "Hedefin altında tamamlamak için «Üretim eksikliği gerekçesi» alanını doldurun "
+                        "(production_shortfall_reason)."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            ),
+            None,
+        )
+    return None, reason[:SHORTFALL_REASON_MAX_LEN]
 
 
 def apply_product_line_to_task(task, index=None):
@@ -61,12 +99,30 @@ def apply_product_line_to_task(task, index=None):
         pass
 
 
+def default_workflow_qty_target(task):
+    """İş akışı adım hedefi: çoklu ürün varsa tüm satırların adet toplamı; yoksa görev adedi."""
+    lines = list(getattr(task, 'product_lines', None) or [])
+    if lines:
+        total = 0
+        for ln in lines:
+            try:
+                total += max(0, int((ln or {}).get('quantity') or 0))
+            except (TypeError, ValueError):
+                continue
+        if total > 0:
+            return total
+    try:
+        return max(1, int(task.quantity or 0) or 1)
+    except (TypeError, ValueError):
+        return 1
+
+
 def ensure_workflow_state(task):
     """workflow_team_ids ile workflow_stage_state anahtarlarını senkronize eder."""
     ids = workflow_team_id_list(task)
     targets = list(task.workflow_stage_targets or [])
     state = dict(task.workflow_stage_state or {})
-    default_qty = int(task.quantity or 0) or 1
+    default_qty = default_workflow_qty_target(task)
     for i, tid in enumerate(ids):
         key = str(tid)
         raw_t = targets[i] if i < len(targets) else None
@@ -100,7 +156,9 @@ def ensure_workflow_state(task):
 
 
 def parallel_queue_visible(task, user, user_team_ids):
-    """Paralel akışta bu kullanıcı görevi ekip kuyruğunda görmeli mi?"""
+    """Paralel akışta bu kullanıcı görevi ekip kuyruğunda görmeli mi? (Yalnızca bölüm usta başıları.)"""
+    from accounts.models import Team
+
     if not getattr(task, 'workflow_parallel', False) or task.status == 'done':
         return False
     ids = workflow_team_id_list(task)
@@ -110,9 +168,19 @@ def parallel_queue_visible(task, user, user_team_ids):
     state = task.workflow_stage_state or {}
     uid = user.id
     user_set = set(user_team_ids)
+    role = getattr(user, 'role', '')
+    staff = role in ('Admin', 'Manager')
+    org_id = task.organization_id
     for tid in ids:
-        if tid not in user_set:
+        if not staff and tid not in user_set:
             continue
+        team = Team.objects.filter(id=tid, organization_id=org_id).first()
+        if not team:
+            continue
+        if not staff:
+            lid = getattr(team, 'leader_id', None)
+            if not lid or uid != lid:
+                continue
         st = state.get(str(tid), {})
         if st.get('stage_done'):
             continue

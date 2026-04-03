@@ -13,6 +13,7 @@ import { QuotesPage, QuoteDetailPage } from '@/pages/quotes'
 import { CalendarPage } from '@/pages/calendar'
 import { WorkerTrackingPage } from '@/pages/worker-tracking'
 import { WorkerDetailPage } from '@/pages/worker-detail'
+import { ChangePasswordPage } from '@/pages/change-password'
 import { LoginPage } from '@/pages/login'
 import { ActivatePage } from '@/pages/activate'
 import AccessLogsPage from '@/pages/access-logs'
@@ -189,6 +190,12 @@ const settingsRoute = new Route({
   component: SettingsPage,
 })
 
+const changePasswordRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/change-password',
+  component: ChangePasswordPage,
+})
+
 const accessLogsRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/access-logs',
@@ -221,6 +228,7 @@ const routeTree = rootRoute.addChildren([
   workerDetailRoute,
   reportsRoute,
   settingsRoute,
+  changePasswordRoute,
   accessLogsRoute,
 ])
 

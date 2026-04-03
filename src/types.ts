@@ -181,6 +181,8 @@ export interface Task {
       qty_done?: number
       pending_approval?: boolean
       stage_done?: boolean
+      /** Hedefin altında onaya gönderilirken yazılan gerekçe (API: production_shortfall_reason) */
+      production_shortfall_reason?: string
     }
   >
   salesOrder?: string

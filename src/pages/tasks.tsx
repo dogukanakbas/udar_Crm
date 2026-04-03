@@ -28,7 +28,7 @@ import {
   toDatetimeLocalFromISO,
 } from '@/lib/utils'
 import { taskPriorityLabelTR, taskSlaBucketLabelTR, taskStatusLabelTR } from '@/lib/task-labels'
-import type { Task, TaskChecklistItem, TaskTimeEntry, Team, UserLite } from '@/types'
+import type { Task, TaskChecklistItem, TaskTimeEntry, UserLite } from '@/types'
 import { taskProductLineSchema } from '@/lib/task-product-schema'
 import { initialProductLinesForForm, emptyProductLineRow } from '@/lib/task-product-lines-helpers'
 import { TaskProductLineFields } from '@/components/task-product-line-fields'
@@ -51,18 +51,7 @@ import {
 } from '@dnd-kit/core'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-
-function taskVisibleToWorkerTeamMember(t: Task, workerUserId: string | null, teams: Team[]): boolean {
-  if (!workerUserId) return false
-  const myTeams = teams.filter((tm) => tm.memberIds?.some((m) => String(m) === String(workerUserId)))
-  if (myTeams.length === 0) return false
-  const ct = String(t.currentTeam || t.teamId || '')
-  if (!ct) return false
-  const teamRow = myTeams.find((tm) => tm.id === ct)
-  if (!teamRow) return false
-  if (!t.assignee || String(t.assignee).trim() === '') return true
-  return !!teamRow.memberIds?.some((m) => String(m) === String(t.assignee))
-}
+import { taskVisibleToWorkerTeamMember, workerMayClaimTask } from '@/lib/task-worker-visibility'
 
 /** Varsayılan görev sahibi: Ömer Faruk (ad / kullanıcı adı eşleşmesi). */
 function pickDefaultTaskOwner(users: UserLite[], explicitOwner?: string): string {
@@ -1609,8 +1598,14 @@ export function TaskDetailPage() {
   const [handoverTeam, setHandoverTeam] = useState<string>((task as any)?.currentTeam || task?.teamId || 'none')
   const [handoverAssignee, setHandoverAssignee] = useState<string>(task?.assignee || 'none')
   const [handoverNote, setHandoverNote] = useState<string>('')
-  const [prodQty, setProdQty] = useState(1)
+  const [prodQty, setProdQty] = useState('1')
   const [prodDate, setProdDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [claimBusy, setClaimBusy] = useState(false)
+  const [productionShortfallNote, setProductionShortfallNote] = useState('')
+  useEffect(() => {
+    setProdQty('1')
+    setProdDate(new Date().toISOString().slice(0, 10))
+  }, [taskId])
   if (!task) {
     return (
       <div className="space-y-2">
@@ -1680,9 +1675,25 @@ export function TaskDetailPage() {
   }
 
   const handleClaim = async () => {
-    await api.post(`/tasks/${task.id}/claim/`)
-    await refreshTask()
-    toast({ title: 'Görev üstlenildi' })
+    if (claimBusy) {
+      toast({ title: 'İşlem sürüyor', description: 'Lütfen bekleyin.', variant: 'destructive' })
+      return
+    }
+    setClaimBusy(true)
+    try {
+      await api.post(`/tasks/${task.id}/claim/`)
+      await refreshTask()
+      toast({ title: 'Görev üstlenildi' })
+    } catch (e: any) {
+      const msg = e?.response?.data?.detail
+      toast({
+        title: 'Üstlenilemedi',
+        description: typeof msg === 'string' ? msg : 'Görev başka bir çalışana atanmış veya havuzda değil.',
+        variant: 'destructive',
+      })
+    } finally {
+      setClaimBusy(false)
+    }
   }
 
   const handleHandover = async () => {
@@ -1712,15 +1723,25 @@ export function TaskDetailPage() {
   const isAssignee = currentUserId && String(task.assignee) === String(currentUserId)
   const isWorker = data.settings.role === 'Worker'
   const isAdmin = data.settings.role === 'Admin'
-  const currentTeamRow = data.teams.find((t) => t.id === (task as any)?.currentTeam)
-  const isTeamLeader =
-    !!currentUserId &&
-    !!currentTeamRow?.leaderId &&
-    String(currentTeamRow.leaderId) === String(currentUserId)
-  const canReleaseToTeam =
-    task.status !== 'done' &&
-    isAssignee &&
-    (isTeamLeader || data.settings.role === 'Admin' || data.settings.role === 'Manager')
+  const hasWfTeams = (task.workflowTeamIds?.length ?? 0) > 0
+  const sequentialFlow = hasWfTeams && !task.workflowParallel
+  const curTeamRowForSeq = task.currentTeam ? data.teams.find((t) => t.id === task.currentTeam) : undefined
+  const inCurrentWorkflowTeam = !!(
+    currentUserId &&
+    (curTeamRowForSeq?.memberIds?.includes(String(currentUserId)) ||
+      (curTeamRowForSeq?.leaderId && String(curTeamRowForSeq.leaderId) === String(currentUserId)))
+  )
+  const curStageSt = task.currentTeam ? task.workflowStageState?.[task.currentTeam] : undefined
+  const mayClaimTask =
+    task.status !== 'done' && workerMayClaimTask(task, currentUserId, data.teams, data.settings.role)
+  const canSubmitSequentialApproval =
+    sequentialFlow &&
+    task.status === 'in-progress' &&
+    !!task.currentTeam &&
+    !!task.assignee &&
+    inCurrentWorkflowTeam &&
+    !curStageSt?.stage_done &&
+    !curStageSt?.pending_approval
 
   const wfState = task.workflowStageState || {}
   const pendingSectionTeamIds = Object.entries(wfState)
@@ -1730,6 +1751,31 @@ export function TaskDetailPage() {
     const row = data.teams.find((t) => t.id === teamId)
     return !!(currentUserId && row?.leaderId && String(row.leaderId) === String(currentUserId))
   }
+
+  const wfStateForGate = task.workflowStageState || {}
+  const needsShortfallNoteForComplete = (() => {
+    if (task.status !== 'in-progress' || !hasWfTeams) return false
+    if (canSubmitSequentialApproval && task.currentTeam) {
+      const st = wfStateForGate[task.currentTeam] || {}
+      const tgt = Number(st.qty_target ?? 0) || Number(task.quantity ?? 1) || 1
+      const done = Number(st.qty_done ?? 0)
+      return done < tgt
+    }
+    if (task.workflowParallel && isAssignee) {
+      const uid = currentUserId ? Number(currentUserId) : NaN
+      for (const tid of task.workflowTeamIds || []) {
+        const st = wfStateForGate[tid] || {}
+        if (st.assignee_id != null && Number(st.assignee_id) === uid && !st.stage_done && !st.pending_approval) {
+          const tgt = Number(st.qty_target ?? 0) || Number(task.quantity ?? 1) || 1
+          const done = Number(st.qty_done ?? 0)
+          return done < tgt
+        }
+      }
+    }
+    return false
+  })()
+
+  const sequentialProdLocked = sequentialFlow && !!task.currentTeam && !task.assignee
 
   const colorLabel = [task.productColor?.trim(), task.productColorCode?.trim()].filter(Boolean).join(' · ')
 
@@ -1780,12 +1826,18 @@ export function TaskDetailPage() {
                 <p className="text-sm font-semibold">{isWorker ? 'Görev' : 'Görev üstlenme / devir'}</p>
                 <p className="text-xs text-muted-foreground">
                   Aktif takım: {data.teams.find((t) => t.id === (task as any)?.currentTeam)?.name || teamName || '—'}
+                  {sequentialProdLocked && (
+                    <span className="block text-amber-700 dark:text-amber-400 mt-1">
+                      Sıralı akış: Bu aşamada önce usta başı görevi «Üstlen» ile kabul etmeli; ardından üretim ve onaya gönderme
+                      açılır.
+                    </span>
+                  )}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                {isAssignee && task.status !== 'done' ? (
+                {(isAssignee || canSubmitSequentialApproval) && task.status !== 'done' ? (
                   <>
-                    {task.status === 'todo' && (
+                    {isAssignee && task.status === 'todo' && (
                       <Button
                         size="sm"
                         onClick={async () => {
@@ -1796,54 +1848,68 @@ export function TaskDetailPage() {
                         Başlat
                       </Button>
                     )}
-                    {task.status === 'in-progress' && (
-                      <Button
-                        size="sm"
-                        variant="default"
-                        onClick={async () => {
-                          try {
-                            await api.post(`/tasks/${task.id}/complete-stage/`)
-                            await hydrateFromApi()
-                            toast({
-                              title: task.workflowParallel ? 'Onaya gönderildi' : 'Aşama tamamlandı',
-                              description: task.workflowParallel
-                                ? 'Usta başı onayından sonra bölüm kapanır.'
-                                : undefined,
-                            })
-                          } catch {
-                            await updateTask(task.id, { status: 'done' })
-                            await hydrateFromApi()
-                            toast({ title: 'Görev tamamlandı' })
-                          }
-                        }}
-                      >
-                        {task.workflowParallel ? 'Bölümü bitir (onaya gönder)' : 'Bitir'}
-                      </Button>
-                    )}
-                    {canReleaseToTeam && (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={async () => {
-                          try {
-                            await api.post(`/tasks/${task.id}/release-to-team/`)
-                            await hydrateFromApi()
-                            toast({
-                              title: 'Ekibe açıldı',
-                              description: 'Üyeler görevi üstlenebilir.',
-                            })
-                          } catch (e: any) {
-                            toast({
-                              title: 'Hata',
-                              description: e?.response?.data?.detail || 'İşlem başarısız',
-                              variant: 'destructive',
-                            })
-                          }
-                        }}
-                      >
-                        Ekibe aç
-                      </Button>
-                    )}
+                    {task.status === 'in-progress' &&
+                      ((task.workflowParallel && isAssignee) ||
+                        canSubmitSequentialApproval ||
+                        (!hasWfTeams && isAssignee)) && (
+                        <div className="flex flex-col gap-2 w-full sm:w-auto">
+                          {needsShortfallNoteForComplete && (
+                            <div className="w-full max-w-md space-y-1">
+                              <Label className="text-xs text-amber-700 dark:text-amber-400">
+                                Üretim hedefinin altındasınız — onaya göndermek için gerekçe zorunlu
+                              </Label>
+                              <Textarea
+                                value={productionShortfallNote}
+                                onChange={(e) => setProductionShortfallNote(e.target.value)}
+                                placeholder="Örn: malzeme gecikmesi, revizyon, fire…"
+                                className="min-h-[72px] text-sm"
+                              />
+                            </div>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="default"
+                            onClick={async () => {
+                              if (needsShortfallNoteForComplete && !productionShortfallNote.trim()) {
+                                toast({
+                                  title: 'Gerekçe gerekli',
+                                  description: 'Hedef adedin altında tamamlıyorsanız üretim eksikliği gerekçesini yazın.',
+                                  variant: 'destructive',
+                                })
+                                return
+                              }
+                              try {
+                                const body =
+                                  needsShortfallNoteForComplete && productionShortfallNote.trim()
+                                    ? { production_shortfall_reason: productionShortfallNote.trim() }
+                                    : {}
+                                await api.post(`/tasks/${task.id}/complete-stage/`, body)
+                                setProductionShortfallNote('')
+                                await hydrateFromApi()
+                                const toApproval = task.workflowParallel || canSubmitSequentialApproval
+                                toast({
+                                  title: toApproval ? 'Onaya gönderildi' : 'Aşama tamamlandı',
+                                  description: toApproval
+                                    ? sequentialFlow
+                                      ? 'Usta başı «Bölümü onayla» ile sıradaki ekibe geçilir.'
+                                      : 'Usta başı onayından sonra bölüm kapanır.'
+                                    : undefined,
+                                })
+                              } catch (e: any) {
+                                toast({
+                                  title: 'İşlem yapılamadı',
+                                  description: e?.response?.data?.detail || String(e?.message || e),
+                                  variant: 'destructive',
+                                })
+                              }
+                            }}
+                          >
+                            {task.workflowParallel || canSubmitSequentialApproval
+                              ? 'Bölümü bitir (onaya gönder)'
+                              : 'Bitir'}
+                          </Button>
+                        </div>
+                      )}
                     {!isWorker && (
                       <>
                         <Button size="sm" variant="outline" onClick={handleHandover}>
@@ -1855,18 +1921,18 @@ export function TaskDetailPage() {
                       </>
                     )}
                   </>
-                ) : isWorker && task.status !== 'done' ? (
-                  <Button size="sm" onClick={handleClaim}>
-                    Üstlen
+                ) : isWorker && mayClaimTask ? (
+                  <Button size="sm" onClick={handleClaim} disabled={claimBusy}>
+                    {claimBusy ? '…' : 'Üstlen'}
                   </Button>
-                ) : !isWorker ? (
-                  <Button size="sm" onClick={handleClaim}>
-                    Ben üstleniyorum
+                ) : !isWorker && mayClaimTask ? (
+                  <Button size="sm" onClick={handleClaim} disabled={claimBusy}>
+                    {claimBusy ? '…' : 'Ben üstleniyorum'}
                   </Button>
                 ) : null}
               </div>
             </div>
-            {task.workflowParallel &&
+            {(task.workflowParallel || sequentialFlow) &&
               pendingSectionTeamIds.filter(
                 (tid) =>
                   isLeaderOfTeamId(tid) || data.settings.role === 'Admin' || data.settings.role === 'Manager'
@@ -2474,6 +2540,11 @@ export function TaskDetailPage() {
                         <span className="font-medium text-foreground">{name}</span>: hedef {st.qty_target ?? '—'}, raporlanan{' '}
                         {st.qty_done ?? 0}
                         {st.stage_done ? ' ✓ tamam' : st.pending_approval ? ' — onay bekliyor' : ''}
+                        {st.production_shortfall_reason ? (
+                          <span className="block mt-0.5 text-amber-700 dark:text-amber-400">
+                            Eksik üretim gerekçesi: {st.production_shortfall_reason}
+                          </span>
+                        ) : null}
                       </li>
                     )
                   })}
@@ -2501,11 +2572,16 @@ export function TaskDetailPage() {
                 <div>
                   <Label className="text-xs">Adet</Label>
                   <Input
-                    type="number"
-                    min={1}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="off"
                     className="h-8 w-24"
                     value={prodQty}
-                    onChange={(e) => setProdQty(Number(e.target.value) || 1)}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      if (v === '' || /^\d+$/.test(v)) setProdQty(v)
+                    }}
                   />
                 </div>
                 <div>
@@ -2514,14 +2590,30 @@ export function TaskDetailPage() {
                 </div>
                 <Button
                   size="sm"
-                  disabled={task.status === 'done'}
+                  disabled={task.status === 'done' || sequentialProdLocked}
+                  title={
+                    sequentialProdLocked
+                      ? 'Önce usta başı görevi üstlenmeli'
+                      : undefined
+                  }
                   onClick={async () => {
+                    const raw = prodQty.trim()
+                    if (!raw || !/^\d+$/.test(raw)) {
+                      toast({
+                        title: 'Adet gerekli',
+                        description: '1 veya daha büyük bir tam sayı girin.',
+                        variant: 'destructive',
+                      })
+                      return
+                    }
+                    const quantity = Math.max(1, parseInt(raw, 10))
                     try {
                       await api.post(`/tasks/${task.id}/log-production/`, {
-                        quantity: prodQty,
+                        quantity,
                         entry_date: prodDate,
                       })
                       await hydrateFromApi()
+                      setProdQty('1')
                       toast({ title: 'Üretim kaydedildi' })
                     } catch (e: any) {
                       toast({
@@ -2706,7 +2798,7 @@ function TaskModal({
       activeProductIndex: task?.activeProductIndex ?? 0,
       workflowTeamIds: task?.workflowTeamIds ?? [],
       workflowStageTargets: wfTargets,
-      workflowParallel: task ? task.workflowParallel !== false : true,
+      workflowParallel: task ? task.workflowParallel === true : false,
       salesOrderId: task?.salesOrder ? String(task.salesOrder) : '',
     },
   })
@@ -2742,13 +2834,12 @@ function TaskModal({
   const watchLines =
     useWatch({ control: form.control, name: 'productLines', defaultValue: initialLines }) ?? initialLines
   const watchStart = useWatch({ control: form.control, name: 'start' })
-  const activeProductIndexForm = useWatch({ control: form.control, name: 'activeProductIndex' }) ?? 0
   const workflowDefaultTargetQty = useMemo(() => {
     const lines = watchLines || []
     if (!lines.length) return 1
-    const ai = Math.min(Math.max(0, activeProductIndexForm as number), lines.length - 1)
-    return Number(lines[ai]?.quantity || 1)
-  }, [watchLines, activeProductIndexForm])
+    const sum = lines.reduce((s, l) => s + Math.max(0, Number((l as { quantity?: unknown })?.quantity) || 0), 0)
+    return sum > 0 ? sum : 1
+  }, [watchLines])
   const totalMinutesSum = useMemo(() => sumProductLinesPlannedMinutes(watchLines), [watchLines])
   const minsPerMesaiDay = useMemo(() => {
     const start = orgSettings?.working_hours_start || '08:00'
@@ -3090,7 +3181,7 @@ function TaskModal({
               <div className="flex items-center gap-2">
                 <Checkbox
                   id="workflow-parallel"
-                  checked={form.watch('workflowParallel') !== false}
+                  checked={form.watch('workflowParallel') === true}
                   onCheckedChange={(c) => form.setValue('workflowParallel', Boolean(c))}
                 />
                 <label htmlFor="workflow-parallel" className="text-xs cursor-pointer">
