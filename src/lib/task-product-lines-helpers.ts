@@ -1,6 +1,12 @@
 import type { Task, TaskProductLine } from '@/types'
 import type { TaskProductLineFormValues } from '@/lib/task-product-schema'
 
+/** Ürün satırlarındaki adetlerin toplamı (çoklu kalem sipariş adeti). */
+export function sumProductLineQuantities(lines: { quantity?: unknown }[] | undefined | null): number {
+  if (!lines?.length) return 0
+  return lines.reduce((s, line) => s + Math.max(0, Number(line?.quantity) || 0), 0)
+}
+
 export function emptyProductLineRow(): TaskProductLineFormValues {
   return {
     mode: 'manual',

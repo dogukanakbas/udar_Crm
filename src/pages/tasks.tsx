@@ -30,7 +30,7 @@ import {
 import { taskPriorityLabelTR, taskSlaBucketLabelTR, taskStatusLabelTR } from '@/lib/task-labels'
 import type { Task, TaskChecklistItem, TaskTimeEntry, UserLite } from '@/types'
 import { taskProductLineSchema } from '@/lib/task-product-schema'
-import { initialProductLinesForForm, emptyProductLineRow } from '@/lib/task-product-lines-helpers'
+import { initialProductLinesForForm, emptyProductLineRow, sumProductLineQuantities } from '@/lib/task-product-lines-helpers'
 import { TaskProductLineFields } from '@/components/task-product-line-fields'
 import { Calendar, ChevronDown, Lock, Plus, Paperclip, Download, Trash2, GripVertical } from 'lucide-react'
 import { RbacGuard } from '@/components/rbac'
@@ -1616,6 +1616,8 @@ export function TaskDetailPage() {
   const ownerName = data.users.find((u) => u.id === task.owner)?.username || task.owner || '—'
   const assigneeName = data.users.find((u) => u.id === task.assignee)?.username || task.assignee || '—'
   const teamName = task.teamId ? data.teams.find((t) => t.id === task.teamId)?.name : '—'
+  const productLineQtyTotal = sumProductLineQuantities(task.productLines)
+  const workflowQtyFallback = productLineQtyTotal > 0 ? productLineQtyTotal : Number(task.quantity ?? 1) || 1
   const checklist = (task.checklist || []) as TaskChecklistItem[]
   const workflowChecklistItems = [...checklist]
     .filter((c) => c.workflowTeamId)
@@ -1757,7 +1759,7 @@ export function TaskDetailPage() {
     if (task.status !== 'in-progress' || !hasWfTeams) return false
     if (canSubmitSequentialApproval && task.currentTeam) {
       const st = wfStateForGate[task.currentTeam] || {}
-      const tgt = Number(st.qty_target ?? 0) || Number(task.quantity ?? 1) || 1
+      const tgt = Number(st.qty_target ?? 0) || workflowQtyFallback || 1
       const done = Number(st.qty_done ?? 0)
       return done < tgt
     }
@@ -1766,7 +1768,7 @@ export function TaskDetailPage() {
       for (const tid of task.workflowTeamIds || []) {
         const st = wfStateForGate[tid] || {}
         if (st.assignee_id != null && Number(st.assignee_id) === uid && !st.stage_done && !st.pending_approval) {
-          const tgt = Number(st.qty_target ?? 0) || Number(task.quantity ?? 1) || 1
+          const tgt = Number(st.qty_target ?? 0) || workflowQtyFallback || 1
           const done = Number(st.qty_done ?? 0)
           return done < tgt
         }
@@ -2045,6 +2047,13 @@ export function TaskDetailPage() {
                     ? 'Sabit model görevi — model, bıçak ve adet bilgisi üretim için geçerlidir.'
                     : 'Manuel görev — aşağıdaki plan ve ölçüler üretim talimatıdır.'}
               </p>
+              {task.productLines && task.productLines.length > 1 && productLineQtyTotal > 0 ? (
+                <p className="text-sm mt-2">
+                  <span className="text-muted-foreground">Toplam sipariş adeti (kalemler toplamı): </span>
+                  <span className="font-semibold tabular-nums text-foreground">{formatNumber(productLineQtyTotal)}</span>
+                  <span className="text-muted-foreground"> adet</span>
+                </p>
+              ) : null}
             </div>
             {task.productLines && task.productLines.length > 0 ? (
               <div className="space-y-2">
@@ -2120,6 +2129,16 @@ export function TaskDetailPage() {
                   )
                 })}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm pt-1 border-t border-primary/10">
+                  {task.productLines.length > 1 ? (
+                    <DetailRow
+                      label="Toplam sipariş adeti"
+                      value={
+                        productLineQtyTotal > 0
+                          ? `${formatNumber(productLineQtyTotal)} adet (satır toplamı)`
+                          : '—'
+                      }
+                    />
+                  ) : null}
                   <DetailRow
                     label="Görev planı (saat, tahmini)"
                     value={task.plannedHours != null && Number(task.plannedHours) > 0 ? `${task.plannedHours} sa` : '—'}
@@ -2196,7 +2215,7 @@ export function TaskDetailPage() {
                     const tgt =
                       task.workflowStageTargets?.[idx] ??
                       (typeof st?.qty_target === 'number' ? st.qty_target : undefined) ??
-                      task.quantity ??
+                      workflowQtyFallback ??
                       1
                     const done = typeof st?.qty_done === 'number' ? st.qty_done : null
                     return (
@@ -2563,6 +2582,12 @@ export function TaskDetailPage() {
             )}
             <div className="rounded border p-3 space-y-2 mt-3">
               <p className="text-sm font-semibold">Günlük üretim (adet)</p>
+              {task.productLines && task.productLines.length > 1 && productLineQtyTotal > 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Görev <span className="font-medium text-foreground">toplam sipariş adeti</span> (kalemler toplamı):{' '}
+                  <span className="font-medium tabular-nums text-foreground">{formatNumber(productLineQtyTotal)}</span> adet
+                </p>
+              ) : null}
               {task.salesOrder && (
                 <p className="text-xs text-muted-foreground">
                   Sipariş: {data.salesOrders.find((s) => s.id === task.salesOrder)?.number || task.salesOrder}
@@ -3058,6 +3083,12 @@ function TaskModal({
               </Button>
             </div>
             <FormError message={(errors.productLines as any)?.message} />
+            {fields.length > 1 && (
+              <p className="text-xs text-muted-foreground">
+                Toplam sipariş adeti (kalemler toplamı):{' '}
+                <span className="font-medium tabular-nums text-foreground">{formatNumber(workflowDefaultTargetQty)}</span> adet
+              </p>
+            )}
             {totalMinutesSum > 0 && (
               <p className="text-xs text-muted-foreground">
                 Tüm kalemler toplamı: <span className="font-medium text-foreground">{formatNumber(totalMinutesSum)} dk</span>
