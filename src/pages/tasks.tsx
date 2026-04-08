@@ -179,7 +179,6 @@ const taskSchema = z
     end: z.string(),
     due: z.string().optional(),
     notes: z.string().max(2000, 'Not çok uzun').optional(),
-    briefIntro: z.string().max(600, 'Tanıtım en fazla 600 karakter').optional(),
     productLines: z.array(taskProductLineSchema).min(1, 'En az bir ürün kalemi ekleyin'),
     activeProductIndex: z.number().int().min(0).optional(),
     workflowTeamIds: z.array(z.string()).optional(),
@@ -2046,11 +2045,6 @@ export function TaskDetailPage() {
                     ? 'Sabit model görevi — model, bıçak ve adet bilgisi üretim için geçerlidir.'
                     : 'Manuel görev — aşağıdaki plan ve ölçüler üretim talimatıdır.'}
               </p>
-              {task.briefIntro?.trim() ? (
-                <p className="text-sm text-muted-foreground border-l-2 border-primary/35 pl-2 mt-2 leading-snug">
-                  {task.briefIntro.trim()}
-                </p>
-              ) : null}
             </div>
             {task.productLines && task.productLines.length > 0 ? (
               <div className="space-y-2">
@@ -2076,6 +2070,11 @@ export function TaskDetailPage() {
                           <Badge>Şu an bu kalem</Badge>
                         ) : null}
                       </div>
+                      {line.briefIntro?.trim() ? (
+                        <p className="text-sm text-muted-foreground border-l-2 border-primary/35 pl-2 leading-snug">
+                          {line.briefIntro.trim()}
+                        </p>
+                      ) : null}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
                         <DetailRow label="Model" value={line.modelCode?.trim() ? line.modelCode : '—'} />
                         <DetailRow label="Adet" value={String(line.quantity ?? '—')} />
@@ -2132,9 +2131,9 @@ export function TaskDetailPage() {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
                 <DetailRow label="Görev modu" value={task.mode === 'fixed' ? 'Sabit (model bazlı)' : 'Manuel'} />
-                {task.briefIntro?.trim() ? (
+                {task.productLines?.[0]?.briefIntro?.trim() ? (
                   <p className="sm:col-span-2 text-sm text-muted-foreground border-l-2 border-primary/35 pl-2 -mt-1 mb-0.5 leading-snug">
-                    {task.briefIntro.trim()}
+                    {task.productLines[0].briefIntro!.trim()}
                   </p>
                 ) : null}
                 <DetailRow label="Hedef adet (toplam)" value={String(task.quantity ?? 1)} />
@@ -2791,7 +2790,6 @@ function TaskModal({
     resolver: zodResolver(taskSchema) as any,
     defaultValues: {
       title: task?.title ?? '',
-      briefIntro: task?.briefIntro ?? '',
       owner: pickDefaultTaskOwner(users, task?.owner),
       assignee: task?.assignee ?? users[0]?.id ?? '',
       teamId: task?.teamId ?? '',
@@ -3035,16 +3033,6 @@ function TaskModal({
             <Label>Başlık</Label>
             <Input {...form.register('title')} className={cn(errors.title && 'border-destructive')} />
             <FormError message={errors.title?.message} />
-          </div>
-          <div>
-            <Label>Minimal görev tanıtımı</Label>
-            <Textarea
-              {...form.register('briefIntro')}
-              placeholder="Üretime kısa özet (isteğe bağlı, ayrıntı sayfasında görünür)"
-              rows={2}
-              className={cn('resize-y min-h-[60px]', errors.briefIntro && 'border-destructive')}
-            />
-            <FormError message={(errors as any).briefIntro?.message} />
           </div>
           <div className="space-y-3 rounded-md border p-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

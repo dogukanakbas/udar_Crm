@@ -335,10 +335,6 @@ export const useAppStore = create<AppState>()(
       const tasks: Task[] = (tasksRes.data || []).map((t: any, idx: number) => ({
         id: String(t.id ?? idx),
         title: t.title,
-        briefIntro:
-          t.brief_intro != null && String(t.brief_intro).trim() !== ''
-            ? String(t.brief_intro).trim()
-            : undefined,
         owner: String(t.owner ?? ''),
         assignee: t.assignee ? String(t.assignee) : '',
         teamId: t.team ? String(t.team) : undefined,
@@ -730,7 +726,6 @@ export const useAppStore = create<AppState>()(
         workflow_parallel: t.workflowParallel === true,
         workflow_stage_targets: wfTargets,
         sales_order: t.salesOrderId ? Number(t.salesOrderId) : null,
-        brief_intro: String((t as any).briefIntro ?? '').trim().slice(0, 600),
       }
       if (lines && lines.length > 0) {
         payload.product_lines = taskProductLinesToApiPayload(lines as any)
@@ -801,10 +796,6 @@ export const useAppStore = create<AppState>()(
         if ('activeProductIndex' in payload) {
           payload.active_product_index = Number((payload as any).activeProductIndex ?? 0)
           delete (payload as any).activeProductIndex
-        }
-        if ('briefIntro' in payload) {
-          payload.brief_intro = String((payload as any).briefIntro ?? '').trim().slice(0, 600)
-          delete (payload as any).briefIntro
         }
         await api.patch(`/tasks/${id}/`, payload)
         await get().hydrateFromApi()

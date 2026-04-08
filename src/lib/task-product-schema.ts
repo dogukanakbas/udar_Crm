@@ -17,6 +17,7 @@ export const taskProductLineSchema = z.object({
   modelSizes: z.array(z.string()).optional(),
   productColor: z.string().optional(),
   productColorCode: z.string().optional(),
+  briefIntro: z.string().max(600, 'Tanıtım en fazla 600 karakter').optional(),
 })
 
 export type TaskProductLineFormValues = z.infer<typeof taskProductLineSchema>

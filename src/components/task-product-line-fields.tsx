@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react'
 import type { UseFormReturn, FieldErrors } from 'react-hook-form'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn, formatNumber, getWorkingMinutesPerDay } from '@/lib/utils'
 import type { Task } from '@/types'
@@ -171,6 +172,16 @@ export function TaskProductLineFields({
             <FormError message={lineErr?.quantity?.message as string | undefined} />
           </div>
         )}
+      </div>
+      <div>
+        <Label className="text-xs text-muted-foreground">Minimal görev tanıtımı (bu ürün için)</Label>
+        <Textarea
+          {...form.register(`${p}.briefIntro`)}
+          placeholder="Bu kalem için üretime kısa özet (isteğe bağlı)"
+          rows={2}
+          className={cn('mt-1 min-h-[56px] text-sm resize-y', lineErr?.briefIntro && 'border-destructive')}
+        />
+        <FormError message={lineErr?.briefIntro?.message as string | undefined} />
       </div>
       {watchMode === 'manual' && (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">

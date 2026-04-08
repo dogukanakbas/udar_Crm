@@ -159,13 +159,13 @@ export interface TaskProductLine {
   modelSizes?: string[]
   productColor?: string
   productColorCode?: string
+  /** Ürün kalemi için kısa tanıtım (ayrıntı kartında) */
+  briefIntro?: string
 }
 
 export interface Task {
   id: string
   title: string
-  /** Kısa görev tanıtımı — ayrıntı sayfası ürün kartında */
-  briefIntro?: string
   due?: string
   owner: string
   status: 'todo' | 'in-progress' | 'done'

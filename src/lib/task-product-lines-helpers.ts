@@ -13,6 +13,7 @@ export function emptyProductLineRow(): TaskProductLineFormValues {
     modelSizes: [],
     productColor: '',
     productColorCode: '',
+    briefIntro: '',
   }
 }
 
@@ -54,6 +55,12 @@ export function mapApiProductLineToTask(ln: any): TaskProductLine {
         : ln?.productColorCode != null && String(ln.productColorCode).trim() !== ''
           ? String(ln.productColorCode).trim()
           : undefined,
+    briefIntro:
+      ln?.brief_intro != null && String(ln.brief_intro).trim() !== ''
+        ? String(ln.brief_intro).trim()
+        : ln?.briefIntro != null && String(ln.briefIntro).trim() !== ''
+          ? String(ln.briefIntro).trim()
+          : undefined,
   }
 }
 
@@ -69,6 +76,7 @@ export function taskProductLinesToApiPayload(lines: TaskProductLineFormValues[])
     model_sizes: line.modelSizes ?? [],
     product_color: line.productColor ?? '',
     product_color_code: line.productColorCode ?? '',
+    brief_intro: String(line.briefIntro ?? '').trim().slice(0, 600),
   }))
 }
 
@@ -85,6 +93,7 @@ export function initialProductLinesForForm(task?: Task): TaskProductLineFormValu
       modelSizes: p.modelSizes ?? [],
       productColor: p.productColor ?? '',
       productColorCode: p.productColorCode ?? '',
+      briefIntro: p.briefIntro ?? '',
     }))
   }
   return [
@@ -99,6 +108,7 @@ export function initialProductLinesForForm(task?: Task): TaskProductLineFormValu
       modelSizes: task?.modelSizes ?? [],
       productColor: task?.productColor ?? '',
       productColorCode: task?.productColorCode ?? '',
+      briefIntro: '',
     },
   ]
 }
