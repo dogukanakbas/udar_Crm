@@ -25,6 +25,8 @@ import { Link } from '@tanstack/react-router'
 import { RbacGuard } from '@/components/rbac'
 import api from '@/lib/api'
 import { CardDescription } from '@/components/ui/card'
+import { TemplateQuoteWizardTrigger } from '@/components/quote-template-wizard'
+import { downloadQuoteAsXlsx } from '@/lib/quote-export-xlsx'
 
 const QUOTE_STATUS_TR: Record<string, string> = {
   Draft: 'Taslak',
@@ -121,6 +123,9 @@ export function QuotesPage() {
         description="Liste, filtre, toplu aksiyonlar"
         actions={
           <div className="flex gap-2">
+            <RbacGuard perm="quotes.edit">
+              <TemplateQuoteWizardTrigger companies={companies} />
+            </RbacGuard>
             <RbacGuard perm="quotes.edit">
               <QuoteWizardTrigger companies={companies} products={products} owners={owners} />
             </RbacGuard>
@@ -407,6 +412,18 @@ export function QuoteDetailPage() {
                 <Send className="mr-2 h-4 w-4" /> Gönder
               </Button>
             </RbacGuard>
+            <RbacGuard perm="quotes.view">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  downloadQuoteAsXlsx(quote, company?.name ?? '')
+                  toast({ title: 'Excel indirildi', description: `${quote.number}.xlsx` })
+                }}
+              >
+                <Download className="mr-2 h-4 w-4" /> Excel (.xlsx)
+              </Button>
+            </RbacGuard>
             <RbacGuard perm="quotes.edit">
               <Button size="sm" variant="outline" onClick={() => approve('Manager')}>
                 <Shield className="mr-2 h-4 w-4" /> Onay iste
@@ -443,6 +460,13 @@ export function QuoteDetailPage() {
               <p>Geçerlilik: {formatDate(quote.validUntil)}</p>
               <p>Ödeme: {quote.terms.payment}</p>
               <p>Teslim: {quote.terms.delivery}</p>
+              <p>KDV oranı: %{quote.vatRate ?? 20}</p>
+              {quote.terms.notes?.trim() ? (
+                <div className="mt-2 rounded-md border bg-muted/30 p-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-1">Notlar (şablon / şartlar)</p>
+                  <pre className="text-xs whitespace-pre-wrap font-sans">{quote.terms.notes}</pre>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         </TabsContent>

@@ -1,6 +1,88 @@
 """Paralel iş akışı: bölüm durumu ve sipariş üretim takibi yardımcıları."""
 
+import re
+
 SHORTFALL_REASON_MAX_LEN = 2000
+
+
+def format_shortfall_reason_for_storage(qty_done: int, reason: str) -> str:
+    """Gerekçe metninin başına raporlanan adet eklenir (çift öneklenmez)."""
+    reason = (reason or '').strip()
+    if not reason:
+        return ''
+    if re.match(r'^\d+ ad — ', reason):
+        return reason[:SHORTFALL_REASON_MAX_LEN]
+    try:
+        n = int(qty_done)
+    except (TypeError, ValueError):
+        n = 0
+    prefix = f'{max(0, n)} ad — '
+    return (prefix + reason)[:SHORTFALL_REASON_MAX_LEN]
+
+
+def apply_effective_production_quantity_to_task(task, effective: int):
+    """Kısa düşme sonrası kök adet ve aktif ürün satırı planını gerçek üretimle hizalar."""
+    try:
+        eff = int(effective)
+    except (TypeError, ValueError):
+        return
+    if eff < 1:
+        return
+    task.quantity = eff
+    lines = list(getattr(task, 'product_lines', None) or [])
+    if not lines:
+        return
+    ai = int(getattr(task, 'active_product_index', 0) or 0)
+    if not (0 <= ai < len(lines)):
+        return
+    nl = dict(lines[ai] or {})
+    nl['quantity'] = eff
+    try:
+        md = float(nl.get('model_duration_minutes') or 0)
+        nl['total_planned_minutes'] = round(md * eff, 2)
+    except (TypeError, ValueError):
+        pass
+    lines[ai] = nl
+    task.product_lines = lines
+    try:
+        tpm = float(nl.get('total_planned_minutes') or 0)
+        task.total_planned_minutes = tpm
+        task.planned_hours = round(tpm / 60, 2)
+    except (TypeError, ValueError):
+        pass
+
+
+def cascade_downstream_targets_after_shortfall(task, completed_stage_index: int, effective: int):
+    """
+    Sıralı akışta bir bölüm hedefin altında onaylandıysa, sonraki bölümlerin hedef adedini
+    gerçek üretilen miktara indirir (workflow_stage_targets + state senkronu).
+    """
+    wf = workflow_team_id_list(task)
+    if not wf or completed_stage_index < 0 or completed_stage_index >= len(wf) - 1:
+        return
+    try:
+        eff = int(effective)
+    except (TypeError, ValueError):
+        return
+    if eff < 1:
+        return
+    default_qty = default_workflow_qty_target(task)
+    raw_targets = list(task.workflow_stage_targets or [])
+    targets = []
+    for i in range(len(wf)):
+        raw_t = raw_targets[i] if i < len(raw_targets) else None
+        try:
+            tval = int(raw_t) if raw_t is not None and str(raw_t).strip() != '' else default_qty
+        except (TypeError, ValueError):
+            tval = default_qty
+        if tval < 0:
+            tval = 0
+        targets.append(tval)
+    for j in range(completed_stage_index + 1, len(wf)):
+        targets[j] = eff
+    task.workflow_stage_targets = targets
+    apply_effective_production_quantity_to_task(task, eff)
+    ensure_workflow_state(task)
 
 
 def workflow_team_id_list(task):

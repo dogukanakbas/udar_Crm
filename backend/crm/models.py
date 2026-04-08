@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models
 from organizations.models import Organization
 from accounts.models import User
@@ -102,6 +104,7 @@ class Quote(models.Model):
     payment_terms = models.CharField(max_length=255, blank=True)
     delivery_terms = models.CharField(max_length=255, blank=True)
     notes = models.TextField(blank=True)
+    vat_rate = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("20"))
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

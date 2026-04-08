@@ -164,6 +164,8 @@ export interface TaskProductLine {
 export interface Task {
   id: string
   title: string
+  /** Kısa görev tanıtımı — ayrıntı sayfası ürün kartında */
+  briefIntro?: string
   due?: string
   owner: string
   status: 'todo' | 'in-progress' | 'done'
@@ -352,6 +354,8 @@ export interface Quote {
   discountTotal: number
   taxTotal: number
   currency: string
+  /** KDV oranı % (örn. 20, 10). Backend: vat_rate */
+  vatRate?: number
   createdAt: string
   updatedAt: string
   lines: QuoteLine[]

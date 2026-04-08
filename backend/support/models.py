@@ -34,6 +34,12 @@ class Task(models.Model):
     MODES = [('manual', 'manual'), ('fixed', 'fixed')]
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='tasks')
     title = models.CharField(max_length=255)
+    brief_intro = models.CharField(
+        max_length=600,
+        blank=True,
+        default='',
+        help_text='Görev özeti — ayrıntı sayfasında üretilecek ürün kartında kısa tanıtım',
+    )
     owner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='tasks_owned')
     assignee = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='tasks_assigned')
     team = models.ForeignKey('accounts.Team', on_delete=models.SET_NULL, null=True, blank=True, related_name='tasks')

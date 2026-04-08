@@ -102,6 +102,6 @@ export function addWorkingMinutes(
     d = new Date(d.getTime() + toAdd * 60 * 1000)
     if (remaining > 0) d = nextWorkDay(d)
   }
-  return d.toISOString().slice(0, 16)
+  return toDatetimeLocalValue(d)
 }
 

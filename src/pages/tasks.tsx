@@ -179,6 +179,7 @@ const taskSchema = z
     end: z.string(),
     due: z.string().optional(),
     notes: z.string().max(2000, 'Not çok uzun').optional(),
+    briefIntro: z.string().max(600, 'Tanıtım en fazla 600 karakter').optional(),
     productLines: z.array(taskProductLineSchema).min(1, 'En az bir ürün kalemi ekleyin'),
     activeProductIndex: z.number().int().min(0).optional(),
     workflowTeamIds: z.array(z.string()).optional(),
@@ -2045,6 +2046,11 @@ export function TaskDetailPage() {
                     ? 'Sabit model görevi — model, bıçak ve adet bilgisi üretim için geçerlidir.'
                     : 'Manuel görev — aşağıdaki plan ve ölçüler üretim talimatıdır.'}
               </p>
+              {task.briefIntro?.trim() ? (
+                <p className="text-sm text-muted-foreground border-l-2 border-primary/35 pl-2 mt-2 leading-snug">
+                  {task.briefIntro.trim()}
+                </p>
+              ) : null}
             </div>
             {task.productLines && task.productLines.length > 0 ? (
               <div className="space-y-2">
@@ -2126,6 +2132,11 @@ export function TaskDetailPage() {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
                 <DetailRow label="Görev modu" value={task.mode === 'fixed' ? 'Sabit (model bazlı)' : 'Manuel'} />
+                {task.briefIntro?.trim() ? (
+                  <p className="sm:col-span-2 text-sm text-muted-foreground border-l-2 border-primary/35 pl-2 -mt-1 mb-0.5 leading-snug">
+                    {task.briefIntro.trim()}
+                  </p>
+                ) : null}
                 <DetailRow label="Hedef adet (toplam)" value={String(task.quantity ?? 1)} />
                 <DetailRow label="Model kodu" value={task.modelCode?.trim() ? task.modelCode : '—'} />
                 <DetailRow label="Varyant" value={task.variant?.trim() ? task.variant : '—'} />
@@ -2780,6 +2791,7 @@ function TaskModal({
     resolver: zodResolver(taskSchema) as any,
     defaultValues: {
       title: task?.title ?? '',
+      briefIntro: task?.briefIntro ?? '',
       owner: pickDefaultTaskOwner(users, task?.owner),
       assignee: task?.assignee ?? users[0]?.id ?? '',
       teamId: task?.teamId ?? '',
@@ -2862,15 +2874,10 @@ function TaskModal({
   useEffect(() => {
     if (!watchStart || !totalMinutesSum || totalMinutesSum <= 0) return
     const start = String(watchStart)
-    const endStr = orgSettings
-      ? addWorkingMinutes(
-          start,
-          totalMinutesSum,
-          orgSettings.working_hours_start || '08:00',
-          orgSettings.working_hours_end || '18:00',
-          orgSettings.working_days?.length ? orgSettings.working_days : [0, 1, 2, 3, 4]
-        )
-      : new Date(new Date(start).getTime() + totalMinutesSum * 60 * 1000).toISOString().slice(0, 16)
+    const workStart = orgSettings?.working_hours_start || '08:00'
+    const workEnd = orgSettings?.working_hours_end || '18:00'
+    const workDays = orgSettings?.working_days?.length ? orgSettings.working_days : [0, 1, 2, 3, 4]
+    const endStr = addWorkingMinutes(start, totalMinutesSum, workStart, workEnd, workDays)
     form.setValue('end', endStr)
   }, [watchStart, totalMinutesSum, orgSettings, form])
 
@@ -2979,7 +2986,6 @@ function TaskModal({
                     modelDurationMinutes: duration,
                     modelBladeDepth: row.modelBladeDepth ?? variantObj?.blade ?? '',
                     totalPlannedMinutes: Number(total.toFixed(2)),
-                    modelSizes: preset?.sizes?.length ? [...(preset.sizes || [])] : row.modelSizes,
                     modelCode: row.modelCode || preset?.code || '',
                   }
                 } else {
@@ -3029,6 +3035,16 @@ function TaskModal({
             <Label>Başlık</Label>
             <Input {...form.register('title')} className={cn(errors.title && 'border-destructive')} />
             <FormError message={errors.title?.message} />
+          </div>
+          <div>
+            <Label>Minimal görev tanıtımı</Label>
+            <Textarea
+              {...form.register('briefIntro')}
+              placeholder="Üretime kısa özet (isteğe bağlı, ayrıntı sayfasında görünür)"
+              rows={2}
+              className={cn('resize-y min-h-[60px]', errors.briefIntro && 'border-destructive')}
+            />
+            <FormError message={(errors as any).briefIntro?.message} />
           </div>
           <div className="space-y-3 rounded-md border p-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

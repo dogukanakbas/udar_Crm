@@ -46,14 +46,15 @@ class Command(BaseCommand):
             status="Draft",
             valid_until=date.today() + timedelta(days=15),
             currency="USD",
+            vat_rate=Decimal("20"),
             payment_terms="Net 30",
             delivery_terms="CIF",
         )
         QuoteLine.objects.create(quote=quote, product=prod, name=prod.name, qty=2, unit_price=prod.price, discount=0, tax=18)
         quote.subtotal = Decimal("2400")
         quote.discount_total = Decimal("0")
-        quote.tax_total = Decimal("432")
-        quote.total = Decimal("2832")
+        quote.tax_total = Decimal("480")
+        quote.total = Decimal("2880")
         quote.save()
 
         SalesOrder.objects.get_or_create(

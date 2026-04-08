@@ -117,7 +117,7 @@ class QuoteSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'number', 'customer', 'opportunity', 'owner', 'status', 'valid_until',
             'subtotal', 'discount_total', 'tax_total', 'total', 'currency',
-            'payment_terms', 'delivery_terms', 'notes', 'lines', 'created_at', 'updated_at',
+            'payment_terms', 'delivery_terms', 'notes', 'vat_rate', 'lines', 'created_at', 'updated_at',
         ]
         read_only_fields = ['number', 'subtotal', 'discount_total', 'tax_total', 'total']
 
@@ -135,6 +135,8 @@ class QuoteSerializer(serializers.ModelSerializer):
             mutable['payment_terms'] = mutable.pop('payment')
         if 'delivery' in mutable:
             mutable['delivery_terms'] = mutable.pop('delivery')
+        if 'vatRate' in mutable and 'vat_rate' not in mutable:
+            mutable['vat_rate'] = mutable.pop('vatRate')
         # lines normalize
         lines = mutable.get('lines', [])
         normalized_lines = []
@@ -213,7 +215,8 @@ class QuoteSerializer(serializers.ModelSerializer):
             if subtotal >= threshold:
                 discount += subtotal * (r.value / 100)
 
-        tax = (subtotal - discount) * 0.18
+        rate = float(quote.vat_rate) / 100.0 if quote.vat_rate is not None else 0.20
+        tax = (subtotal - discount) * rate
         quote.subtotal = subtotal
         quote.discount_total = discount
         quote.tax_total = tax

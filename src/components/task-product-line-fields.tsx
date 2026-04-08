@@ -121,18 +121,6 @@ export function TaskProductLineFields({
         form.setValue(`${p}.modelBladeDepth`, num ? `${num}-${num}` : blade)
       }
     }
-    if (shouldOverwriteTiming && watchModel) {
-      const sizesSet = new Set<string>()
-      if (apiModel?.width_mm != null && apiModel?.height_mm != null) {
-        sizesSet.add(`${apiModel.width_mm}x${apiModel.height_mm}`)
-      }
-      if (apiModel?.thickness_mm != null) {
-        sizesSet.add(`Kalınlık ${apiModel.thickness_mm} mm`)
-      }
-      ;(apiModel?.sizes || []).forEach((s) => sizesSet.add(String(s)))
-      ;(preset?.sizes || []).forEach((s) => sizesSet.add(String(s)))
-      form.setValue(`${p}.modelSizes`, Array.from(sizesSet))
-    }
   }, [watchMode, watchModel, watchVariant, apiTaskModels, modelPresets, task?.id, task?.productLines, index, p, form])
 
   useEffect(() => {
@@ -343,7 +331,7 @@ export function TaskProductLineFields({
             </div>
           </div>
           <div className="md:col-span-2">
-            <Label className="text-xs">Ölçüler (otomatik + düzenlenebilir)</Label>
+            <Label className="text-xs">Ölçüler (isteğe bağlı, virgülle ayırın)</Label>
             <Input
               value={(form.watch(`${p}.modelSizes`) || []).join(', ')}
               onChange={(e) =>

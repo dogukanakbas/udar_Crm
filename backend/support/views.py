@@ -31,7 +31,11 @@ from datetime import datetime as dt_datetime
 
 from .workflow_utils import (
     apply_product_line_to_task,
+    apply_effective_production_quantity_to_task,
+    cascade_downstream_targets_after_shortfall,
+    default_workflow_qty_target,
     ensure_workflow_state,
+    format_shortfall_reason_for_storage,
     workflow_team_id_list,
     parallel_queue_visible,
     workflow_stage_production_met,
@@ -614,7 +618,8 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 return Response({'detail': 'Bu aşama zaten usta başı onayı bekliyor'}, status=status.HTTP_400_BAD_REQUEST)
             st_e['pending_approval'] = True
             if shortfall_reason:
-                st_e['production_shortfall_reason'] = shortfall_reason
+                done_e = int(st_e.get('qty_done') or 0)
+                st_e['production_shortfall_reason'] = format_shortfall_reason_for_storage(done_e, shortfall_reason)
             else:
                 st_e.pop('production_shortfall_reason', None)
             state_early[key_e] = st_e
@@ -666,7 +671,8 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 return gate_err_p
             st['pending_approval'] = True
             if shortfall_p:
-                st['production_shortfall_reason'] = shortfall_p
+                done_p = int(st.get('qty_done') or 0)
+                st['production_shortfall_reason'] = format_shortfall_reason_for_storage(done_p, shortfall_p)
             else:
                 st.pop('production_shortfall_reason', None)
             state[str(active_tid)] = st
@@ -917,8 +923,41 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         state[str(team_id)] = st
         task.workflow_stage_state = state
 
+        try:
+            wf_idx = wf.index(team_id)
+        except ValueError:
+            wf_idx = -1
+
+        qty_adjust_fields = []
+        if not wf_parallel and wf_idx >= 0:
+            st_chk = dict((task.workflow_stage_state or {}).get(str(team_id), {}) or {})
+            done_here = int(st_chk.get('qty_done') or 0)
+            tgt_here = int(st_chk.get('qty_target') or 0)
+            if tgt_here <= 0:
+                tgt_here = default_workflow_qty_target(task)
+            reason_here = (st_chk.get('production_shortfall_reason') or '').strip()
+            if reason_here and done_here > 0 and done_here < tgt_here:
+                if wf_idx < len(wf) - 1:
+                    cascade_downstream_targets_after_shortfall(task, wf_idx, done_here)
+                    qty_adjust_fields = [
+                        'workflow_stage_targets',
+                        'quantity',
+                        'product_lines',
+                        'total_planned_minutes',
+                        'planned_hours',
+                    ]
+                else:
+                    apply_effective_production_quantity_to_task(task, done_here)
+                    qty_adjust_fields = [
+                        'quantity',
+                        'product_lines',
+                        'total_planned_minutes',
+                        'planned_hours',
+                    ]
+
         if wf_parallel:
-            all_done = all((state.get(str(tid)) or {}).get('stage_done') for tid in wf)
+            fresh = task.workflow_stage_state or {}
+            all_done = all((fresh.get(str(tid)) or {}).get('stage_done') for tid in wf)
             extra_upd = ['workflow_stage_state', 'updated_at']
             if all_done:
                 task.status = 'done'
@@ -978,19 +1017,18 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             task.handover_at = timezone.now()
             task.handover_history = history
             task.status = 'in-progress'
-            task.save(
-                update_fields=[
-                    'workflow_stage_state',
-                    'current_team',
-                    'team',
-                    'assignee',
-                    'handover_reason',
-                    'handover_at',
-                    'handover_history',
-                    'status',
-                    'updated_at',
-                ]
-            )
+            _handover_fields = [
+                'workflow_stage_state',
+                'current_team',
+                'team',
+                'assignee',
+                'handover_reason',
+                'handover_at',
+                'handover_history',
+                'status',
+                'updated_at',
+            ] + qty_adjust_fields
+            task.save(update_fields=list(dict.fromkeys(_handover_fields)))
             TaskComment.objects.create(
                 task=task,
                 author=request.user,
@@ -1099,7 +1137,8 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
         task.status = 'done'
         task.assignee = None
-        task.save(update_fields=['workflow_stage_state', 'status', 'assignee', 'updated_at'])
+        _done_fields = ['workflow_stage_state', 'status', 'assignee', 'updated_at'] + qty_adjust_fields
+        task.save(update_fields=list(dict.fromkeys(_done_fields)))
         TaskComment.objects.create(
             task=task,
             author=request.user,
