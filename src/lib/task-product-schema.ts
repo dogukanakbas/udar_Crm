@@ -18,6 +18,10 @@ export const taskProductLineSchema = z.object({
   productColor: z.string().optional(),
   productColorCode: z.string().optional(),
   briefIntro: z.string().max(600, 'Tanıtım en fazla 600 karakter').optional(),
+  qtyProduced: z.preprocess(
+    (v) => (v === '' || v === undefined ? 0 : Number(v)),
+    z.number().min(0, '>=0 olmalı')
+  ),
 })
 
 export type TaskProductLineFormValues = z.infer<typeof taskProductLineSchema>

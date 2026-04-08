@@ -1214,22 +1214,127 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        lines = list(getattr(task, 'product_lines', None) or [])
+        pl_raw = request.data.get('product_line_index')
+        line_idx = None
+        if pl_raw is not None and str(pl_raw).strip() != '':
+            try:
+                line_idx = int(pl_raw)
+            except (TypeError, ValueError):
+                return Response(
+                    {'detail': 'product_line_index geçerli bir tam sayı olmalı'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if line_idx < 0 or (lines and line_idx >= len(lines)):
+                return Response(
+                    {'detail': 'product_line_index bu görevdeki kalem aralığında değil'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        if len(lines) > 1:
+            if line_idx is None:
+                return Response(
+                    {
+                        'detail': (
+                            'Bu görevde birden fazla ürün kalemi var. '
+                            'Üretimi hangi kalem için girdiğinizi belirtin (product_line_index, 0 ile başlar).'
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        elif len(lines) == 1:
+            if line_idx is None:
+                line_idx = 0
+
+        wf_parallel = getattr(task, 'workflow_parallel', False)
+        wf_increment = True
+        if wf and len(lines) > 1 and not wf_parallel:
+            ai = int(getattr(task, 'active_product_index', 0) or 0)
+            if line_idx is not None and line_idx != ai:
+                wf_increment = False
+
+        save_lines = False
+        if line_idx is not None and lines and 0 <= line_idx < len(lines):
+            row = dict(lines[line_idx] or {})
+            try:
+                prev_q = int(row.get('qty_produced') or 0)
+            except (TypeError, ValueError):
+                prev_q = 0
+            row['qty_produced'] = prev_q + qty
+            lines[line_idx] = row
+            task.product_lines = lines
+            save_lines = True
+
         ensure_workflow_state(task)
         state = dict(task.workflow_stage_state or {})
-        if str(tid) in state:
+        state_changed = False
+        if wf_increment and str(tid) in state:
             st = dict(state[str(tid)])
             st['qty_done'] = int(st.get('qty_done', 0) or 0) + qty
             state[str(tid)] = st
             task.workflow_stage_state = state
-            task.save(update_fields=['workflow_stage_state', 'updated_at'])
+            state_changed = True
+
+        save_fields = []
+        if state_changed:
+            save_fields.extend(['workflow_stage_state', 'updated_at'])
+        if save_lines:
+            save_fields.append('product_lines')
+        if save_fields:
+            task.save(update_fields=list(dict.fromkeys(save_fields)))
+
         TaskProductionEntry.objects.create(
             task=task,
             user=user,
             team_id=tid,
+            product_line_index=line_idx,
             entry_date=day,
             quantity=qty,
             note=str(request.data.get('note', '') or '')[:255],
         )
+
+        auto_done = False
+        if not wf and lines:
+            all_met = True
+            for ln in lines:
+                try:
+                    tgt = max(1, int((ln or {}).get('quantity') or 1))
+                except (TypeError, ValueError):
+                    tgt = 1
+                try:
+                    prod = int((ln or {}).get('qty_produced') or 0)
+                except (TypeError, ValueError):
+                    prod = 0
+                if prod < tgt:
+                    all_met = False
+                    break
+            if all_met and task.status in ('todo', 'in-progress'):
+                task.status = 'done'
+                task.assignee = None
+                task.save(update_fields=['status', 'assignee', 'updated_at'])
+                TaskComment.objects.create(
+                    task=task,
+                    author=user,
+                    type='activity',
+                    text=(
+                        f'✅ Tüm ürün kalemleri hedef üretime ulaştı — '
+                        f'{user.username} (iş akışı olmayan görev, otomatik tamamlandı)'
+                    ),
+                )
+                push_event(
+                    {
+                        'type': 'task.status',
+                        'task_id': task.id,
+                        'organization': task.organization_id,
+                        'title': task.title,
+                        'status': 'done',
+                        'assignee_id': None,
+                        'by': getattr(user, 'email', None),
+                    }
+                )
+                auto_done = True
+        if auto_done:
+            sync_workflow_checklist(task)
+
         if task.sales_order_id:
             from erp.models import SalesOrder
 
@@ -1273,6 +1378,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 'user_name': e.user.username if e.user else None,
                 'team_id': e.team_id,
                 'team_name': e.team.name if e.team else None,
+                'product_line_index': e.product_line_index,
                 'quantity': e.quantity,
                 'note': e.note,
                 'created_at': e.created_at.isoformat() if e.created_at else None,

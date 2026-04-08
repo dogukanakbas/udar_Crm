@@ -14,14 +14,9 @@ import { Link } from '@tanstack/react-router'
 import api from '@/lib/api'
 import { useToast } from '@/components/ui/use-toast'
 import type { Task } from '@/types'
-import { sumProductLineQuantities } from '@/lib/task-product-lines-helpers'
+import { workflowTargetFallbackQty } from '@/lib/task-product-lines-helpers'
 import { taskStatusLabelTR } from '@/lib/task-labels'
 import { taskVisibleToWorkerTeamMember, workerMayClaimTask } from '@/lib/task-worker-visibility'
-
-function workflowTargetFallbackQty(task: Task): number {
-  const sum = sumProductLineQuantities(task.productLines)
-  return sum > 0 ? sum : Number(task.quantity ?? 1) || 1
-}
 
 function mapTaskFromApi(t: any): Task {
   return {
@@ -343,7 +338,7 @@ export function DashboardPage() {
                                 try {
                                   let body: Record<string, string> | undefined
                                   if (canSeqSubmit && task.currentTeam && st) {
-                                    const tgt = Number(st.qty_target ?? 0) || workflowTargetFallbackQty(task) || 1
+                                    const tgt = Number(st.qty_target ?? 0) || workflowTargetFallbackQty(task as Task) || 1
                                     const done = Number(st.qty_done ?? 0)
                                     if (done < tgt) {
                                       const r = window.prompt(
@@ -372,7 +367,7 @@ export function DashboardPage() {
                                         !ws.pending_approval
                                       ) {
                                         const tgt =
-                                          Number(ws.qty_target ?? 0) || workflowTargetFallbackQty(task) || 1
+                                          Number(ws.qty_target ?? 0) || workflowTargetFallbackQty(task as Task) || 1
                                         const done = Number(ws.qty_done ?? 0)
                                         if (done < tgt) {
                                           const r = window.prompt(

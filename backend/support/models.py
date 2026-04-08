@@ -215,6 +215,12 @@ class TaskProductionEntry(models.Model):
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='production_entries')
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     team = models.ForeignKey('accounts.Team', on_delete=models.SET_NULL, null=True, blank=True)
+    product_line_index = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text='Çoklu ürün: 0-tabanlı kalem indeksi (yoksa eski/tek kalem davranışı)',
+    )
     entry_date = models.DateField(db_index=True)
     quantity = models.PositiveIntegerField(default=0)
     note = models.CharField(max_length=255, blank=True, default='')

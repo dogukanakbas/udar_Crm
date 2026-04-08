@@ -68,7 +68,19 @@ class TaskProductionEntrySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TaskProductionEntry
-        fields = ['id', 'task', 'user', 'user_name', 'team', 'team_name', 'entry_date', 'quantity', 'note', 'created_at']
+        fields = [
+            'id',
+            'task',
+            'user',
+            'user_name',
+            'team',
+            'team_name',
+            'product_line_index',
+            'entry_date',
+            'quantity',
+            'note',
+            'created_at',
+        ]
         read_only_fields = ['user_name', 'team_name', 'created_at']
 
     def get_user_name(self, obj):
@@ -220,6 +232,18 @@ class TaskSerializer(serializers.ModelSerializer):
         return instance
 
     def update(self, instance, validated_data):
+        if 'product_lines' in validated_data and instance:
+            old_lines = list(getattr(instance, 'product_lines', None) or [])
+            new_lines = list(validated_data.get('product_lines') or [])
+            merged = []
+            for i, nl in enumerate(new_lines):
+                d = dict(nl or {})
+                if i < len(old_lines):
+                    old = dict(old_lines[i] or {})
+                    if 'qty_produced' not in d and old.get('qty_produced') is not None:
+                        d['qty_produced'] = old.get('qty_produced')
+                merged.append(d)
+            validated_data['product_lines'] = merged
         instance = super().update(instance, validated_data)
         self._sync_product_lines_and_workflow(instance)
         return instance

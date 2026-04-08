@@ -436,6 +436,10 @@ export const useAppStore = create<AppState>()(
           userName: pe.user_name,
           team: pe.team != null ? String(pe.team) : undefined,
           teamName: pe.team_name,
+          productLineIndex:
+            pe.product_line_index != null && pe.product_line_index !== ''
+              ? Number(pe.product_line_index)
+              : undefined,
           entryDate: pe.entry_date || '',
           quantity: Number(pe.quantity ?? 0),
           note: pe.note,

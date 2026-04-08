@@ -30,7 +30,13 @@ import {
 import { taskPriorityLabelTR, taskSlaBucketLabelTR, taskStatusLabelTR } from '@/lib/task-labels'
 import type { Task, TaskChecklistItem, TaskTimeEntry, UserLite } from '@/types'
 import { taskProductLineSchema } from '@/lib/task-product-schema'
-import { initialProductLinesForForm, emptyProductLineRow, sumProductLineQuantities } from '@/lib/task-product-lines-helpers'
+import {
+  initialProductLinesForForm,
+  emptyProductLineRow,
+  sumProductLineQuantities,
+  sumProductLineQtyProduced,
+  workflowTargetFallbackQty,
+} from '@/lib/task-product-lines-helpers'
 import { TaskProductLineFields } from '@/components/task-product-line-fields'
 import { Calendar, ChevronDown, Lock, Plus, Paperclip, Download, Trash2, GripVertical } from 'lucide-react'
 import { RbacGuard } from '@/components/rbac'
@@ -1600,11 +1606,13 @@ export function TaskDetailPage() {
   const [handoverNote, setHandoverNote] = useState<string>('')
   const [prodQty, setProdQty] = useState('1')
   const [prodDate, setProdDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [lineProdInput, setLineProdInput] = useState<Record<number, { q: string; d: string }>>({})
   const [claimBusy, setClaimBusy] = useState(false)
   const [productionShortfallNote, setProductionShortfallNote] = useState('')
   useEffect(() => {
     setProdQty('1')
     setProdDate(new Date().toISOString().slice(0, 10))
+    setLineProdInput({})
   }, [taskId])
   if (!task) {
     return (
@@ -1617,7 +1625,8 @@ export function TaskDetailPage() {
   const assigneeName = data.users.find((u) => u.id === task.assignee)?.username || task.assignee || '—'
   const teamName = task.teamId ? data.teams.find((t) => t.id === task.teamId)?.name : '—'
   const productLineQtyTotal = sumProductLineQuantities(task.productLines)
-  const workflowQtyFallback = productLineQtyTotal > 0 ? productLineQtyTotal : Number(task.quantity ?? 1) || 1
+  const productLineProducedTotal = sumProductLineQtyProduced(task.productLines)
+  const workflowQtyFallback = workflowTargetFallbackQty(task)
   const checklist = (task.checklist || []) as TaskChecklistItem[]
   const workflowChecklistItems = [...checklist]
     .filter((c) => c.workflowTeamId)
@@ -2052,6 +2061,19 @@ export function TaskDetailPage() {
                   <span className="text-muted-foreground">Toplam sipariş adeti (kalemler toplamı): </span>
                   <span className="font-semibold tabular-nums text-foreground">{formatNumber(productLineQtyTotal)}</span>
                   <span className="text-muted-foreground"> adet</span>
+                  {productLineProducedTotal > 0 ? (
+                    <span className="text-muted-foreground">
+                      {' '}
+                      • Üretilen toplam:{' '}
+                      <span className="font-semibold tabular-nums text-foreground">{formatNumber(productLineProducedTotal)}</span>
+                    </span>
+                  ) : null}
+                </p>
+              ) : null}
+              {task.productLines && task.productLines.length > 1 ? (
+                <p className="text-xs text-amber-800 dark:text-amber-400 mt-1.5">
+                  Üretim girişi her ürün kartından ayrı yapılır; toplam üretilen, kalemlerde girilenlere göre otomatik
+                  güncellenir (üstte tek alan yoktur).
                 </p>
               ) : null}
             </div>
@@ -2060,6 +2082,14 @@ export function TaskDetailPage() {
                 {task.productLines.map((line, lidx) => {
                   const active = (task.activeProductIndex ?? 0) === lidx
                   const hex = cssColorFromProductCode(line.productColorCode)
+                  const seqLineProdLocked =
+                    sequentialFlow && hasWfTeams && !active && task.productLines && task.productLines.length > 1
+                  const lineEntries = (task.productionEntries || []).filter((e) => {
+                    if (e.productLineIndex != null && !Number.isNaN(Number(e.productLineIndex))) {
+                      return Number(e.productLineIndex) === lidx
+                    }
+                    return lidx === 0 && (task.productLines?.length ?? 0) > 0
+                  })
                   return (
                     <div
                       key={lidx}
@@ -2086,7 +2116,7 @@ export function TaskDetailPage() {
                       ) : null}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
                         <DetailRow label="Model" value={line.modelCode?.trim() ? line.modelCode : '—'} />
-                        <DetailRow label="Adet" value={String(line.quantity ?? '—')} />
+                        <DetailRow label="Sipariş (hedef adet)" value={String(line.quantity ?? '—')} />
                         <DetailRow label="Varyant" value={line.variant?.trim() ? line.variant : '—'} />
                         <div className="sm:col-span-2 flex flex-wrap items-center gap-3 rounded border bg-muted/30 px-2 py-1.5">
                           {hex ? (
@@ -2125,6 +2155,110 @@ export function TaskDetailPage() {
                           />
                         </div>
                       </div>
+                      <div className="rounded-md border border-dashed bg-muted/20 px-2 py-2 space-y-2">
+                        <p className="text-xs font-semibold uppercase text-muted-foreground">Üretim — bu kalem</p>
+                        <DetailRow
+                          label="Bu kalemde üretilen"
+                          value={`${formatNumber(Number(line.qtyProduced ?? 0))} / hedef ${formatNumber(Number(line.quantity ?? 0))}`}
+                        />
+                        {seqLineProdLocked ? (
+                          <p className="text-xs text-muted-foreground">
+                            Sıralı iş akışında şu an yalnızca vurgulu kalem için üretim kaydı ekleyebilirsiniz (iş
+                            akışı ilerlemesi).
+                          </p>
+                        ) : null}
+                        <div className="flex flex-wrap gap-2 items-end">
+                          <div>
+                            <Label className="text-xs">Adet</Label>
+                            <Input
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              autoComplete="off"
+                              className="h-8 w-24"
+                              value={lineProdInput[lidx]?.q ?? '1'}
+                              onChange={(e) => {
+                                const v = e.target.value
+                                if (v === '' || /^\d+$/.test(v)) {
+                                  setLineProdInput((prev) => ({
+                                    ...prev,
+                                    [lidx]: { q: v, d: prev[lidx]?.d ?? prodDate },
+                                  }))
+                                }
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Tarih</Label>
+                            <Input
+                              type="date"
+                              className="h-8 w-40"
+                              value={lineProdInput[lidx]?.d ?? prodDate}
+                              onChange={(e) => {
+                                setLineProdInput((prev) => ({
+                                  ...prev,
+                                  [lidx]: { q: prev[lidx]?.q ?? '1', d: e.target.value },
+                                }))
+                              }}
+                            />
+                          </div>
+                          <Button
+                            size="sm"
+                            disabled={task.status === 'done' || sequentialProdLocked || seqLineProdLocked}
+                            title={
+                              sequentialProdLocked
+                                ? 'Önce usta başı görevi üstlenmeli'
+                                : seqLineProdLocked
+                                  ? 'Bu aşamada sıradaki kalem değil'
+                                  : undefined
+                            }
+                            onClick={async () => {
+                              const row = lineProdInput[lidx] || { q: '1', d: prodDate }
+                              const raw = (row.q || '').trim()
+                              if (!raw || !/^\d+$/.test(raw)) {
+                                toast({
+                                  title: 'Adet gerekli',
+                                  description: '1 veya daha büyük bir tam sayı girin.',
+                                  variant: 'destructive',
+                                })
+                                return
+                              }
+                              const quantity = Math.max(1, parseInt(raw, 10))
+                              try {
+                                await api.post(`/tasks/${task.id}/log-production/`, {
+                                  quantity,
+                                  entry_date: row.d || prodDate,
+                                  product_line_index: lidx,
+                                })
+                                await hydrateFromApi()
+                                setLineProdInput((prev) => ({
+                                  ...prev,
+                                  [lidx]: { q: '1', d: prev[lidx]?.d ?? prodDate },
+                                }))
+                                toast({ title: 'Üretim kaydedildi', description: `Ürün ${lidx + 1}` })
+                              } catch (e: any) {
+                                toast({
+                                  title: 'Hata',
+                                  description: e?.response?.data?.detail || 'Kaydedilemedi',
+                                  variant: 'destructive',
+                                })
+                              }
+                            }}
+                          >
+                            Üretimi kaydet
+                          </Button>
+                        </div>
+                        {lineEntries.length > 0 ? (
+                          <ul className="text-[11px] space-y-0.5 max-h-28 overflow-y-auto text-muted-foreground">
+                            {lineEntries.slice(0, 30).map((pe) => (
+                              <li key={pe.id}>
+                                {pe.entryDate} • {pe.quantity} ad • {pe.userName || pe.user || '—'}
+                                {pe.teamName ? ` • ${pe.teamName}` : ''}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
                     </div>
                   )
                 })}
@@ -2137,6 +2271,12 @@ export function TaskDetailPage() {
                           ? `${formatNumber(productLineQtyTotal)} adet (satır toplamı)`
                           : '—'
                       }
+                    />
+                  ) : null}
+                  {task.productLines.length > 1 ? (
+                    <DetailRow
+                      label="Toplam üretilen"
+                      value={`${formatNumber(productLineProducedTotal)} adet (kalemler toplamı)`}
                     />
                   ) : null}
                   <DetailRow
@@ -2582,6 +2722,12 @@ export function TaskDetailPage() {
             )}
             <div className="rounded border p-3 space-y-2 mt-3">
               <p className="text-sm font-semibold">Günlük üretim (adet)</p>
+              {task.productLines && task.productLines.length > 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Bu görevde üretim girişi her ürün kartındaki «Üretim — bu kalem» alanından yapılır; tek bir toplam
+                  üretim kutusu yoktur.
+                </p>
+              ) : null}
               {task.productLines && task.productLines.length > 1 && productLineQtyTotal > 0 ? (
                 <p className="text-xs text-muted-foreground">
                   Görev <span className="font-medium text-foreground">toplam sipariş adeti</span> (kalemler toplamı):{' '}
@@ -2603,74 +2749,78 @@ export function TaskDetailPage() {
                   })()}
                 </p>
               )}
-              <div className="flex flex-wrap gap-2 items-end">
-                <div>
-                  <Label className="text-xs">Adet</Label>
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    autoComplete="off"
-                    className="h-8 w-24"
-                    value={prodQty}
-                    onChange={(e) => {
-                      const v = e.target.value
-                      if (v === '' || /^\d+$/.test(v)) setProdQty(v)
-                    }}
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs">Tarih</Label>
-                  <Input type="date" className="h-8 w-40" value={prodDate} onChange={(e) => setProdDate(e.target.value)} />
-                </div>
-                <Button
-                  size="sm"
-                  disabled={task.status === 'done' || sequentialProdLocked}
-                  title={
-                    sequentialProdLocked
-                      ? 'Önce usta başı görevi üstlenmeli'
-                      : undefined
-                  }
-                  onClick={async () => {
-                    const raw = prodQty.trim()
-                    if (!raw || !/^\d+$/.test(raw)) {
-                      toast({
-                        title: 'Adet gerekli',
-                        description: '1 veya daha büyük bir tam sayı girin.',
-                        variant: 'destructive',
-                      })
-                      return
-                    }
-                    const quantity = Math.max(1, parseInt(raw, 10))
-                    try {
-                      await api.post(`/tasks/${task.id}/log-production/`, {
-                        quantity,
-                        entry_date: prodDate,
-                      })
-                      await hydrateFromApi()
-                      setProdQty('1')
-                      toast({ title: 'Üretim kaydedildi' })
-                    } catch (e: any) {
-                      toast({
-                        title: 'Hata',
-                        description: e?.response?.data?.detail || 'Kaydedilemedi',
-                        variant: 'destructive',
-                      })
-                    }
-                  }}
-                >
-                  Üretimi kaydet
-                </Button>
-              </div>
-              {(task.productionEntries || []).length > 0 && (
-                <ul className="text-xs space-y-1 max-h-36 overflow-y-auto text-muted-foreground">
-                  {(task.productionEntries || []).slice(0, 40).map((pe) => (
-                    <li key={pe.id}>
-                      {pe.entryDate} • {pe.quantity} ad • {pe.userName || pe.user || '—'}
-                      {pe.teamName ? ` • ${pe.teamName}` : ''}
-                    </li>
-                  ))}
-                </ul>
+              {(!task.productLines || task.productLines.length === 0) && (
+                <>
+                  <div className="flex flex-wrap gap-2 items-end">
+                    <div>
+                      <Label className="text-xs">Adet</Label>
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        autoComplete="off"
+                        className="h-8 w-24"
+                        value={prodQty}
+                        onChange={(e) => {
+                          const v = e.target.value
+                          if (v === '' || /^\d+$/.test(v)) setProdQty(v)
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Tarih</Label>
+                      <Input type="date" className="h-8 w-40" value={prodDate} onChange={(e) => setProdDate(e.target.value)} />
+                    </div>
+                    <Button
+                      size="sm"
+                      disabled={task.status === 'done' || sequentialProdLocked}
+                      title={
+                        sequentialProdLocked
+                          ? 'Önce usta başı görevi üstlenmeli'
+                          : undefined
+                      }
+                      onClick={async () => {
+                        const raw = prodQty.trim()
+                        if (!raw || !/^\d+$/.test(raw)) {
+                          toast({
+                            title: 'Adet gerekli',
+                            description: '1 veya daha büyük bir tam sayı girin.',
+                            variant: 'destructive',
+                          })
+                          return
+                        }
+                        const quantity = Math.max(1, parseInt(raw, 10))
+                        try {
+                          await api.post(`/tasks/${task.id}/log-production/`, {
+                            quantity,
+                            entry_date: prodDate,
+                          })
+                          await hydrateFromApi()
+                          setProdQty('1')
+                          toast({ title: 'Üretim kaydedildi' })
+                        } catch (e: any) {
+                          toast({
+                            title: 'Hata',
+                            description: e?.response?.data?.detail || 'Kaydedilemedi',
+                            variant: 'destructive',
+                          })
+                        }
+                      }}
+                    >
+                      Üretimi kaydet
+                    </Button>
+                  </div>
+                  {(task.productionEntries || []).length > 0 && (
+                    <ul className="text-xs space-y-1 max-h-36 overflow-y-auto text-muted-foreground">
+                      {(task.productionEntries || []).slice(0, 40).map((pe) => (
+                        <li key={pe.id}>
+                          {pe.entryDate} • {pe.quantity} ad • {pe.userName || pe.user || '—'}
+                          {pe.teamName ? ` • ${pe.teamName}` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -2869,12 +3019,23 @@ function TaskModal({
   const watchLines =
     useWatch({ control: form.control, name: 'productLines', defaultValue: initialLines }) ?? initialLines
   const watchStart = useWatch({ control: form.control, name: 'start' })
+  const watchActiveLineIdx =
+    useWatch({ control: form.control, name: 'activeProductIndex', defaultValue: task?.activeProductIndex ?? 0 }) ?? 0
+  const watchWorkflowParallel = useWatch({ control: form.control, name: 'workflowParallel' }) === true
   const workflowDefaultTargetQty = useMemo(() => {
     const lines = watchLines || []
     if (!lines.length) return 1
+    if (lines.length > 1 && !watchWorkflowParallel) {
+      const ai = Math.min(
+        Math.max(0, Number(watchActiveLineIdx) || 0),
+        Math.max(0, lines.length - 1)
+      )
+      const q = Math.max(0, Number((lines[ai] as { quantity?: unknown })?.quantity) || 0)
+      return q > 0 ? q : 1
+    }
     const sum = lines.reduce((s, l) => s + Math.max(0, Number((l as { quantity?: unknown })?.quantity) || 0), 0)
     return sum > 0 ? sum : 1
-  }, [watchLines])
+  }, [watchLines, watchActiveLineIdx, watchWorkflowParallel])
   const totalMinutesSum = useMemo(() => sumProductLinesPlannedMinutes(watchLines), [watchLines])
   const minsPerMesaiDay = useMemo(() => {
     const start = orgSettings?.working_hours_start || '08:00'
@@ -3225,8 +3386,10 @@ function TaskModal({
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Her adım için ekip ve hedef adet seçin. Paralel modda bölümler aynı anda; sıralı modda önceki bölüm bitince
-              sonrakine geçilir.
+              Her adım için ekip ve hedef adet seçin. Birden fazla ürün kaleminde varsayılan hedef,{' '}
+              <span className="font-medium text-foreground">aktif ürün satırının</span> sipariş adedidir (paralel modda
+              tüm kalemlerin toplamı arka planda kullanılır). Paralel bölümler aynı anda; sıralı akışta önceki bölüm
+              bitince sonrakine geçilir.
             </p>
             <WorkflowStepsEditor
               teams={teams}

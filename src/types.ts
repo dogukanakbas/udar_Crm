@@ -161,6 +161,8 @@ export interface TaskProductLine {
   productColorCode?: string
   /** Ürün kalemi için kısa tanıtım (ayrıntı kartında) */
   briefIntro?: string
+  /** Bu kalem için raporlanan toplam üretim adedi (sunucu: qty_produced) */
+  qtyProduced?: number
 }
 
 export interface Task {
@@ -226,6 +228,8 @@ export interface TaskProductionEntry {
   userName?: string
   team?: string
   teamName?: string
+  /** Çoklu ürün: kalem indeksi (yoksa eski kayıt) */
+  productLineIndex?: number | null
   entryDate: string
   quantity: number
   note?: string

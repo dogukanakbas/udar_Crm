@@ -7,6 +7,37 @@ export function sumProductLineQuantities(lines: { quantity?: unknown }[] | undef
   return lines.reduce((s, line) => s + Math.max(0, Number(line?.quantity) || 0), 0)
 }
 
+/** Kalemlerde kayıtlı üretilmiş adet toplamı (qty_produced). */
+export function sumProductLineQtyProduced(
+  lines: { qtyProduced?: unknown; qty_produced?: unknown }[] | undefined | null
+): number {
+  if (!lines?.length) return 0
+  return lines.reduce((s, line) => {
+    const raw = line?.qtyProduced ?? line?.qty_produced
+    return s + Math.max(0, Number(raw) || 0)
+  }, 0)
+}
+
+/** İş akışı hedef yedeği: sıralı çoklu kalemde aktif satır adedi; aksi halde satır toplamı veya görev adedi. */
+export function workflowTargetFallbackQty(task: {
+  productLines?: { quantity?: unknown }[]
+  workflowParallel?: boolean
+  activeProductIndex?: number
+  quantity?: unknown
+}): number {
+  const lines = task.productLines || []
+  if (lines.length > 1 && !task.workflowParallel) {
+    const ai = Math.min(
+      Math.max(0, Number(task.activeProductIndex) || 0),
+      Math.max(0, lines.length - 1)
+    )
+    const q = Math.max(0, Number(lines[ai]?.quantity) || 0)
+    return q > 0 ? q : Number(task.quantity ?? 1) || 1
+  }
+  const sum = sumProductLineQuantities(lines)
+  return sum > 0 ? sum : Number(task.quantity ?? 1) || 1
+}
+
 export function emptyProductLineRow(): TaskProductLineFormValues {
   return {
     mode: 'manual',
@@ -20,6 +51,7 @@ export function emptyProductLineRow(): TaskProductLineFormValues {
     productColor: '',
     productColorCode: '',
     briefIntro: '',
+    qtyProduced: 0,
   }
 }
 
@@ -67,6 +99,12 @@ export function mapApiProductLineToTask(ln: any): TaskProductLine {
         : ln?.briefIntro != null && String(ln.briefIntro).trim() !== ''
           ? String(ln.briefIntro).trim()
           : undefined,
+    qtyProduced:
+      ln?.qty_produced != null
+        ? Number(ln.qty_produced)
+        : ln?.qtyProduced != null
+          ? Number(ln.qtyProduced)
+          : undefined,
   }
 }
 
@@ -83,6 +121,7 @@ export function taskProductLinesToApiPayload(lines: TaskProductLineFormValues[])
     product_color: line.productColor ?? '',
     product_color_code: line.productColorCode ?? '',
     brief_intro: String(line.briefIntro ?? '').trim().slice(0, 600),
+    qty_produced: Math.max(0, Number((line as { qtyProduced?: unknown }).qtyProduced ?? 0)),
   }))
 }
 
@@ -100,6 +139,7 @@ export function initialProductLinesForForm(task?: Task): TaskProductLineFormValu
       productColor: p.productColor ?? '',
       productColorCode: p.productColorCode ?? '',
       briefIntro: p.briefIntro ?? '',
+      qtyProduced: Number(p.qtyProduced ?? 0),
     }))
   }
   return [
@@ -115,6 +155,7 @@ export function initialProductLinesForForm(task?: Task): TaskProductLineFormValu
       productColor: task?.productColor ?? '',
       productColorCode: task?.productColorCode ?? '',
       briefIntro: '',
+      qtyProduced: 0,
     },
   ]
 }

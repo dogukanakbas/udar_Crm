@@ -182,9 +182,23 @@ def apply_product_line_to_task(task, index=None):
 
 
 def default_workflow_qty_target(task):
-    """İş akışı adım hedefi: çoklu ürün varsa tüm satırların adet toplamı; yoksa görev adedi."""
+    """
+    İş akışı adım hedefi adedi.
+    Sıralı akışta birden fazla ürün kalemi varsa yalnızca aktif kalemin sipariş adedi;
+    paralel akışta veya tek kalemde tüm satırların adet toplamı (veya görev adedi).
+    """
     lines = list(getattr(task, 'product_lines', None) or [])
+    parallel = getattr(task, 'workflow_parallel', False)
     if lines:
+        if len(lines) > 1 and not parallel:
+            ai = int(getattr(task, 'active_product_index', 0) or 0)
+            if 0 <= ai < len(lines):
+                try:
+                    q = max(0, int((lines[ai] or {}).get('quantity') or 0))
+                except (TypeError, ValueError):
+                    q = 0
+                if q > 0:
+                    return max(1, q)
         total = 0
         for ln in lines:
             try:
