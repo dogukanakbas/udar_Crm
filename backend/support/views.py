@@ -769,111 +769,27 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 "by": getattr(request.user, "email", None),
             })
         else:
-            # Son aşama — çoklu ürün + sıralı akış: sıradaki ürün kalemi için iş akışını baştan başlat
-            lines = list(getattr(task, 'product_lines', None) or [])
-            active = int(getattr(task, 'active_product_index', 0) or 0)
-            if (
-                len(lines) > 1
-                and active < len(lines) - 1
-                and not getattr(task, 'workflow_parallel', False)
-            ):
-                task.active_product_index = active + 1
-                apply_product_line_to_task(task, task.active_product_index)
-                task.workflow_stage_state = {}
-                wf_ids = workflow_team_id_list(task)
-                if wf_ids:
-                    _q = int(task.quantity or 1)
-                    task.workflow_stage_targets = [_q] * len(wf_ids)
-                ensure_workflow_state(task)
-                first_team = Team.objects.filter(id=wf_ids[0], organization=org).first() if wf_ids else None
-                task.status = 'in-progress'
-                if first_team:
-                    task.current_team = first_team
-                    task.team = first_team
-                    assign_task_to_team_leader(task, first_team)
-                history.append(
-                    {
-                        'from_team': from_team.id if from_team else None,
-                        'from_team_name': from_team.name if from_team else None,
-                        'to_team': first_team.id if first_team else None,
-                        'to_team_name': first_team.name if first_team else None,
-                        'by': request.user.username,
-                        'note': f"Ürün {active + 1}/{len(lines)} tamamlandı — ürün {active + 2} üretimine geçildi",
-                        'type': 'next-product',
-                        'at': timezone.now().isoformat(),
-                    }
-                )
-                task.handover_history = history
-                task.handover_reason = 'Çoklu ürün: sıradaki kalem'
-                task.handover_at = timezone.now()
-                task.save(
-                    update_fields=[
-                        'active_product_index',
-                        'mode',
-                        'model_code',
-                        'variant',
-                        'quantity',
-                        'model_duration_minutes',
-                        'total_planned_minutes',
-                        'model_blade_depth',
-                        'model_sizes',
-                        'product_color',
-                        'product_color_code',
-                        'planned_hours',
-                        'workflow_stage_targets',
-                        'workflow_stage_state',
-                        'status',
-                        'current_team',
-                        'team',
-                        'assignee',
-                        'handover_history',
-                        'handover_reason',
-                        'handover_at',
-                        'updated_at',
-                    ]
-                )
-                TaskComment.objects.create(
-                    task=task,
-                    author=request.user,
-                    type='activity',
-                    text=(
-                        f"✅ {request.user.username} ürün {active + 1} akışını tamamladı — "
-                        f"ürün {active + 2} için {first_team.name if first_team else 'ekip'} devam ediyor"
-                    ),
-                )
-                if first_team:
-                    push_event(
-                        {
-                            'type': 'task.handover',
-                            'task_id': task.id,
-                            'organization': task.organization_id,
-                            'title': task.title,
-                            'assignee_id': task.assignee_id,
-                            'to_team': first_team.id,
-                            'by': getattr(request.user, 'email', None),
-                        }
-                    )
-            else:
-                task.status = 'done'
-                task.assignee = None
-                task.save(update_fields=['status', 'assignee', 'updated_at'])
-                TaskComment.objects.create(
-                    task=task,
-                    author=request.user,
-                    type='activity',
-                    text=f"✅ {request.user.username} görevi tamamen tamamladı",
-                )
-                push_event(
-                    {
-                        'type': 'task.status',
-                        'task_id': task.id,
-                        'organization': task.organization_id,
-                        'title': task.title,
-                        'status': 'done',
-                        'assignee_id': None,
-                        'by': getattr(request.user, 'email', None),
-                    }
-                )
+            # Son aşama: görev tamamlanır. Çoklu ürün olsa bile akış başa sarmaz.
+            task.status = 'done'
+            task.assignee = None
+            task.save(update_fields=['status', 'assignee', 'updated_at'])
+            TaskComment.objects.create(
+                task=task,
+                author=request.user,
+                type='activity',
+                text=f"✅ {request.user.username} görevi tamamen tamamladı",
+            )
+            push_event(
+                {
+                    'type': 'task.status',
+                    'task_id': task.id,
+                    'organization': task.organization_id,
+                    'title': task.title,
+                    'status': 'done',
+                    'assignee_id': None,
+                    'by': getattr(request.user, 'email', None),
+                }
+            )
 
         sync_workflow_checklist(task)
         return Response(TaskSerializer(task, context={'request': request}).data)
@@ -1054,86 +970,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
         lines = list(getattr(task, 'product_lines', None) or [])
         active = int(getattr(task, 'active_product_index', 0) or 0)
-        if len(lines) > 1 and active < len(lines) - 1:
-            task.active_product_index = active + 1
-            apply_product_line_to_task(task, task.active_product_index)
-            task.workflow_stage_state = {}
-            wf_ids = workflow_team_id_list(task)
-            if wf_ids:
-                _q = int(task.quantity or 1)
-                task.workflow_stage_targets = [_q] * len(wf_ids)
-            ensure_workflow_state(task)
-            first_team = Team.objects.filter(id=wf_ids[0], organization=org).first() if wf_ids else None
-            task.status = 'in-progress'
-            if first_team:
-                task.current_team = first_team
-                task.team = first_team
-            task.assignee = None
-            history = list(task.handover_history or [])
-            history.append(
-                {
-                    'from_team': team.id,
-                    'from_team_name': team.name,
-                    'to_team': first_team.id if first_team else None,
-                    'to_team_name': first_team.name if first_team else None,
-                    'by': request.user.username,
-                    'note': f"Ürün {active + 1}/{len(lines)} tamamlandı — ürün {active + 2} üretimine geçildi",
-                    'type': 'next-product',
-                    'at': timezone.now().isoformat(),
-                }
-            )
-            task.handover_history = history
-            task.handover_reason = 'Çoklu ürün: sıradaki kalem'
-            task.handover_at = timezone.now()
-            task.save(
-                update_fields=[
-                    'active_product_index',
-                    'mode',
-                    'model_code',
-                    'variant',
-                    'quantity',
-                    'model_duration_minutes',
-                    'total_planned_minutes',
-                    'model_blade_depth',
-                    'model_sizes',
-                    'product_color',
-                    'product_color_code',
-                    'planned_hours',
-                    'workflow_stage_targets',
-                    'workflow_stage_state',
-                    'status',
-                    'current_team',
-                    'team',
-                    'assignee',
-                    'handover_history',
-                    'handover_reason',
-                    'handover_at',
-                    'updated_at',
-                ]
-            )
-            TaskComment.objects.create(
-                task=task,
-                author=request.user,
-                type='activity',
-                text=(
-                    f"✅ {request.user.username} ürün {active + 1} akışını tamamladı — "
-                    f"ürün {active + 2} için {first_team.name if first_team else 'ekip'} devam ediyor"
-                ),
-            )
-            if first_team:
-                push_event(
-                    {
-                        'type': 'task.handover',
-                        'task_id': task.id,
-                        'organization': task.organization_id,
-                        'title': task.title,
-                        'assignee_id': task.assignee_id,
-                        'to_team': first_team.id,
-                        'by': getattr(request.user, "email", None),
-                    }
-                )
-            sync_workflow_checklist(task)
-            return Response(TaskSerializer(task, context={'request': request}).data)
+        # NOT: Çoklu ürün olsa bile, son ekip onayından sonra workflow başa sarmaz.
 
         task.status = 'done'
         task.assignee = None
@@ -1185,13 +1022,24 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         team_raw = request.data.get('team')
         tid = int(team_raw) if team_raw not in (None, '') else None
         if tid is None:
-            for t in user_teams:
-                if wf and t in wf:
-                    tid = t
-                    break
-                if not wf and t == (task.current_team_id or task.team_id):
-                    tid = t
-                    break
+            # Sıralı workflow'ta hangi ekip aktifse, üretim kaydı o ekibe gitmeli.
+            # Kullanıcı birden fazla workflow ekibinin üyesi ise eski mantık ilk uygun ekibi
+            # seçip A/B verisini karıştırabiliyordu.
+            if wf and not getattr(task, 'workflow_parallel', False) and getattr(task, 'current_team_id', None):
+                try:
+                    cur_tid = int(task.current_team_id)
+                except (TypeError, ValueError):
+                    cur_tid = None
+                if cur_tid is not None and cur_tid in wf and cur_tid in user_teams:
+                    tid = cur_tid
+            if tid is None:
+                for t in user_teams:
+                    if wf and t in wf:
+                        tid = t
+                        break
+                    if not wf and t == (task.current_team_id or task.team_id):
+                        tid = t
+                        break
         if tid is None:
             return Response({'detail': 'Bölüm (ekip) belirlenemedi'}, status=status.HTTP_400_BAD_REQUEST)
         if wf and tid not in wf:
@@ -1247,7 +1095,9 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
         save_lines = False
         prev_q = 0
-        if line_idx is not None and lines and 0 <= line_idx < len(lines):
+        # Workflow varsa üretim "aşama/ekip" bazında tutulur (workflow_stage_state.qty_done).
+        # product_lines.qty_produced yalnızca workflow olmayan görevlerde kullanılır.
+        if not wf and line_idx is not None and lines and 0 <= line_idx < len(lines):
             row = dict(lines[line_idx] or {})
             try:
                 prev_q = int(row.get('qty_produced') or 0)
@@ -1269,7 +1119,23 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 prev_team_done = 0
         if wf and str(tid) in state:
             st = dict(state[str(tid)])
-            st['qty_done'] = qty
+            # Çoklu ürün kaleminde ekip üretimi kalem bazında tutulur.
+            # qty_done: geriye uyum için "aktif kalem" sayısı (veya tek kalem)
+            # qty_done_by_line: { "<index>": qty }
+            qmap = dict(st.get('qty_done_by_line') or {})
+            if line_idx is not None:
+                qmap[str(int(line_idx))] = qty
+            st['qty_done_by_line'] = qmap
+            lines_count = len(lines or [])
+            if lines_count <= 1 or line_idx is None:
+                st['qty_done'] = qty
+            else:
+                try:
+                    ai = int(getattr(task, 'active_product_index', 0) or 0)
+                except (TypeError, ValueError):
+                    ai = 0
+                if line_idx == ai:
+                    st['qty_done'] = qty
             state[str(tid)] = st
             task.workflow_stage_state = state
             state_changed = True

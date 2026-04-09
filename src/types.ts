@@ -183,6 +183,8 @@ export interface Task {
       assignee_id?: number | null
       qty_target?: number
       qty_done?: number
+      /** Çoklu ürün: kalem indeksi -> o ekipte bildirilen mutlak üretim */
+      qty_done_by_line?: Record<string, number>
       pending_approval?: boolean
       stage_done?: boolean
       /** Hedefin altında onaya gönderilirken yazılan gerekçe (API: production_shortfall_reason) */

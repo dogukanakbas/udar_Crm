@@ -158,7 +158,15 @@ class TaskSerializer(serializers.ModelSerializer):
                     if assignee_in in (None, ''):
                         lid = getattr(first_team, 'leader_id', None)
                         if lid and first_team.members.filter(id=lid).exists():
-                            attrs['assignee'] = lid
+                            # DRF bu aşamada FK için User instance bekler (validated_data içi).
+                            from accounts.models import User
+
+                            leader = User.objects.filter(
+                                id=lid,
+                                organization_id=getattr(first_team, 'organization_id', None),
+                            ).first()
+                            if leader:
+                                attrs['assignee'] = leader
         # current_team yoksa team'e eşitle
         if not attrs.get('current_team') and getattr(self.instance, 'current_team', None) is None:
             attrs['current_team'] = attrs.get('team') or getattr(self.instance, 'team', None)

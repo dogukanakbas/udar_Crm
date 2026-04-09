@@ -2052,7 +2052,20 @@ export function TaskDetailPage() {
                   const active = (task.activeProductIndex ?? 0) === lidx
                   const hex = cssColorFromProductCode(line.productColorCode)
                   const lineTarget = Math.max(1, Number(line.quantity ?? 1))
-                  const lineProduced = Math.max(0, Number(line.qtyProduced ?? 0))
+                  // Workflow'ta "üretilen" ekip/aşama bazındadır. Sıralı akışta aktif ekip değişince üretilen 0'dan başlar.
+                  const stageProduced =
+                    sequentialFlow && hasWfTeams && task.currentTeam
+                      ? (() => {
+                          const st: any = wfState?.[task.currentTeam] || {}
+                          const byLine = st?.qty_done_by_line || st?.qtyDoneByLine
+                          if (byLine && typeof byLine === 'object') {
+                            const v = (byLine[String(lidx)] ?? byLine[lidx]) as any
+                            return Math.max(0, Number(v ?? 0))
+                          }
+                          return Math.max(0, Number(st?.qty_done ?? 0))
+                        })()
+                      : null
+                  const lineProduced = stageProduced != null ? stageProduced : Math.max(0, Number(line.qtyProduced ?? 0))
                   const lineRemaining = Math.max(0, lineTarget - lineProduced)
                   const lineEntries = (task.productionEntries || []).filter((e) => {
                     if (e.productLineIndex != null && !Number.isNaN(Number(e.productLineIndex))) {
@@ -2144,7 +2157,7 @@ export function TaskDetailPage() {
                               autoComplete="off"
                               className="h-8 w-24"
                               value={
-                                lineProdInput[lidx]?.q ?? String(Math.max(0, Number(line.qtyProduced ?? 0)))
+                                lineProdInput[lidx]?.q ?? String(Math.max(0, Number(lineProduced ?? 0)))
                               }
                               onChange={(e) => {
                                 const v = e.target.value
@@ -2177,7 +2190,7 @@ export function TaskDetailPage() {
                             title={sequentialProdLocked ? 'Önce usta başı görevi üstlenmeli' : undefined}
                             onClick={async () => {
                               const row = lineProdInput[lidx] || {
-                                q: String(Math.max(0, Number(line.qtyProduced ?? 0))),
+                                q: String(Math.max(0, Number(lineProduced ?? 0))),
                                 d: prodDate,
                               }
                               const raw = (row.q || '').trim()
