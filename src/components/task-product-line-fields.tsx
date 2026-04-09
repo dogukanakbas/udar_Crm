@@ -174,7 +174,9 @@ export function TaskProductLineFields({
         )}
       </div>
       <div>
-        <Label className="text-xs text-muted-foreground">Minimal görev tanıtımı (bu ürün için)</Label>
+        <Label className="text-xs text-muted-foreground">
+          Minimal görev tanıtımı (bu ürün için) <span className="text-destructive">*</span>
+        </Label>
         <Textarea
           {...form.register(`${p}.briefIntro`)}
           placeholder="Bu kalem için üretime kısa özet (isteğe bağlı)"

@@ -62,8 +62,8 @@ export function ReportsPage() {
   const [prodDay, setProdDay] = useState(() => new Date().toISOString().slice(0, 10))
   const [prodReport, setProdReport] = useState<{
     date: string
-    total_quantity: number
-    by_team: Record<string, number>
+    entries_count: number
+    by_team_entry_counts: Record<string, number>
     entries: { task_title: string; quantity: number; team_name?: string; user_name?: string }[]
   } | null>(null)
 
@@ -269,7 +269,10 @@ export function ReportsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Günlük üretim</CardTitle>
-          <CardDescription>Görevlerden girilen tamamlanan adetler (tarih seçip yenileyin)</CardDescription>
+          <CardDescription>
+            Görevlerden girilen üretim kayıtları. Her satırdaki adet, o anda bildirilen mutlak toplamdır; aynı görevde
+            birden fazla kayıt satırları toplanarak stok çıkmaz — güncel üretilen görev kaleminde tutulur.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-end gap-2">
@@ -284,21 +287,23 @@ export function ReportsPage() {
           {prodReport && (
             <>
               <p className="text-sm">
-                Toplam: <strong>{prodReport.total_quantity}</strong> ad
+                Bugünkü kayıt sayısı: <strong>{prodReport.entries_count}</strong>
               </p>
-              {prodReport.by_team && Object.keys(prodReport.by_team).length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {Object.entries(prodReport.by_team).map(([name, q]) => (
-                    <Badge key={name} variant="secondary">
-                      {name}: {q}
-                    </Badge>
-                  ))}
-                </div>
-              )}
+              {prodReport.by_team_entry_counts &&
+                Object.keys(prodReport.by_team_entry_counts).length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(prodReport.by_team_entry_counts).map(([name, n]) => (
+                      <Badge key={name} variant="secondary">
+                        {name}: {n} kayıt
+                      </Badge>
+                    ))}
+                  </div>
+                )}
               <div className="max-h-56 overflow-y-auto text-xs space-y-1 border rounded p-2">
                 {(prodReport.entries || []).map((e, i) => (
                   <div key={i}>
-                    {prodReport.date} • {e.task_title} • {e.quantity} ad • {e.team_name || '—'} • {e.user_name || '—'}
+                    {prodReport.date} • {e.task_title} • bildirilen {e.quantity} ad (mutlak) •{' '}
+                    {e.team_name || '—'} • {e.user_name || '—'}
                   </div>
                 ))}
               </div>

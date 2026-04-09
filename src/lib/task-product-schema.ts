@@ -17,7 +17,10 @@ export const taskProductLineSchema = z.object({
   modelSizes: z.array(z.string()).optional(),
   productColor: z.string().optional(),
   productColorCode: z.string().optional(),
-  briefIntro: z.string().max(600, 'Tanıtım en fazla 600 karakter').optional(),
+  briefIntro: z
+    .string()
+    .min(1, 'Minimal görev tanıtımı zorunludur')
+    .max(600, 'Tanıtım en fazla 600 karakter'),
   qtyProduced: z.preprocess(
     (v) => (v === '' || v === undefined ? 0 : Number(v)),
     z.number().min(0, '>=0 olmalı')

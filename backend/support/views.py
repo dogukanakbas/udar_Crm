@@ -1169,8 +1169,8 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             qty = int(request.data.get('quantity', 0) or 0)
         except (TypeError, ValueError):
             qty = 0
-        if qty <= 0:
-            return Response({'detail': 'quantity 0\'dan büyük olmalı'}, status=status.HTTP_400_BAD_REQUEST)
+        if qty < 0:
+            return Response({'detail': 'quantity negatif olamaz'}, status=status.HTTP_400_BAD_REQUEST)
         day_raw = request.data.get('entry_date')
         if day_raw:
             try:
@@ -1245,21 +1245,15 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             if line_idx is None:
                 line_idx = 0
 
-        wf_parallel = getattr(task, 'workflow_parallel', False)
-        wf_increment = True
-        if wf and len(lines) > 1 and not wf_parallel:
-            ai = int(getattr(task, 'active_product_index', 0) or 0)
-            if line_idx is not None and line_idx != ai:
-                wf_increment = False
-
         save_lines = False
+        prev_q = 0
         if line_idx is not None and lines and 0 <= line_idx < len(lines):
             row = dict(lines[line_idx] or {})
             try:
                 prev_q = int(row.get('qty_produced') or 0)
             except (TypeError, ValueError):
                 prev_q = 0
-            row['qty_produced'] = prev_q + qty
+            row['qty_produced'] = qty
             lines[line_idx] = row
             task.product_lines = lines
             save_lines = True
@@ -1267,9 +1261,15 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         ensure_workflow_state(task)
         state = dict(task.workflow_stage_state or {})
         state_changed = False
-        if wf_increment and str(tid) in state:
+        prev_team_done = 0
+        if str(tid) in state:
+            try:
+                prev_team_done = int((state[str(tid)] or {}).get('qty_done', 0) or 0)
+            except (TypeError, ValueError):
+                prev_team_done = 0
+        if wf and str(tid) in state:
             st = dict(state[str(tid)])
-            st['qty_done'] = int(st.get('qty_done', 0) or 0) + qty
+            st['qty_done'] = qty
             state[str(tid)] = st
             task.workflow_stage_state = state
             state_changed = True
@@ -1342,9 +1342,24 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             if so:
                 ordered = int(getattr(so, 'order_quantity', 0) or 0)
                 produced = int(getattr(so, 'quantity_produced', 0) or 0)
-                remaining = max(0, ordered - produced)
-                add = min(qty, remaining) if ordered else qty
-                so.quantity_produced = produced + add
+                if save_lines:
+                    delta_so = qty - prev_q
+                elif state_changed:
+                    delta_so = qty - prev_team_done
+                elif not wf:
+                    # Ürün satırı + iş akışı yok: eski davranış (günlük dilim artışı)
+                    if ordered > 0:
+                        delta_so = min(qty, max(0, ordered - produced))
+                    else:
+                        delta_so = qty
+                else:
+                    delta_so = 0
+                next_produced = produced + delta_so
+                if next_produced < 0:
+                    next_produced = 0
+                if ordered and next_produced > ordered:
+                    next_produced = ordered
+                so.quantity_produced = next_produced
                 so.save(update_fields=['quantity_produced'])
         return Response(TaskSerializer(task, context={'request': request}).data)
 
@@ -1355,7 +1370,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             raise PermissionDenied("Bu rapora yalnızca Admin veya Manager erişebilir")
         org = getattr(request.user, 'organization', None)
         if not org:
-            return Response({'date': None, 'entries': [], 'total_quantity': 0})
+            return Response({'date': None, 'entries': [], 'entries_count': 0, 'by_team_entry_counts': {}})
         day_raw = request.query_params.get('date')
         if day_raw:
             try:
@@ -1385,12 +1400,19 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             }
             for e in rows
         ]
-        total_q = sum(e['quantity'] for e in entries)
-        by_team = {}
+        # quantity her kayıtta o an bildirilen mutlak üretimdir; satırların toplamı fiziksel çıktı değildir.
+        by_team_entry_counts = {}
         for e in entries:
             key = e['team_name'] or '—'
-            by_team[key] = by_team.get(key, 0) + e['quantity']
-        return Response({'date': str(d), 'entries': entries, 'total_quantity': total_q, 'by_team': by_team})
+            by_team_entry_counts[key] = by_team_entry_counts.get(key, 0) + 1
+        return Response(
+            {
+                'date': str(d),
+                'entries': entries,
+                'entries_count': len(entries),
+                'by_team_entry_counts': by_team_entry_counts,
+            }
+        )
 
     @action(detail=False, methods=['get'], url_path='my-team-queue')
     def my_team_queue(self, request):

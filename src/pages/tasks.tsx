@@ -176,8 +176,8 @@ const MODEL_PRESETS = MODEL_CODES.map((code) => {
 const taskSchema = z
   .object({
     title: z.string().min(2, 'Başlık en az 2 karakter olmalı'),
-    owner: z.string().min(1, 'Sahip seçilmeli'),
-    assignee: z.string().min(1, 'Atanan seçilmeli'),
+    owner: z.string().min(1, 'Görevi takip eden seçilmeli'),
+    assignee: z.string().optional(),
     teamId: z.string().optional(),
     status: z.enum(['todo', 'in-progress', 'done']),
     priority: z.enum(['low', 'medium', 'high']),
@@ -522,7 +522,7 @@ export function TasksPage() {
       Durum: taskStatusLabelTR(t.status),
       Öncelik: taskPriorityLabelTR(t.priority),
       Atanan: data.users.find((u) => u.id === t.assignee)?.username || '',
-      Sahip: data.users.find((u) => u.id === t.owner)?.username || '',
+      'Görevi takip eden': data.users.find((u) => u.id === t.owner)?.username || '',
       Ekip: data.teams.find((tm) => tm.id === t.teamId)?.name || '',
       Başlangıç: formatDate(t.start ?? ''),
       Bitiş: formatDate(t.end ?? ''),
@@ -612,7 +612,7 @@ export function TasksPage() {
     },
     {
       accessorKey: 'owner',
-      header: 'Sahip',
+      header: 'Görevi takip eden',
       cell: ({ row }) => data.users.find((u) => u.id === row.original.owner)?.username ?? row.original.owner,
     },
     {
@@ -1788,49 +1788,18 @@ export function TaskDetailPage() {
 
   const sequentialProdLocked = sequentialFlow && !!task.currentTeam && !task.assignee
 
-  const colorLabel = [task.productColor?.trim(), task.productColorCode?.trim()].filter(Boolean).join(' · ')
-
   return (
     <div className="space-y-4">
       <PageHeader
         title={`Görev: ${task.title}`}
-        description={`Durum: ${taskStatusLabelTR(task.status)} • Öncelik: ${taskPriorityLabelTR(task.priority)}${
-          colorLabel ? ` • Renk: ${colorLabel}` : ''
-        }`}
+        description={`Durum: ${taskStatusLabelTR(task.status)} • Öncelik: ${taskPriorityLabelTR(task.priority)}`}
       />
       <Card>
         <CardHeader>
           <CardTitle>Detaylar</CardTitle>
-          <CardDescription>Sahip, atanan, tarih ve ekler</CardDescription>
+          <CardDescription>Görevi takip eden, atanan, tarih ve ekler. Ürün renkleri her ürün kaleminde gösterilir.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {(task.productColor?.trim() || task.productColorCode?.trim()) && (
-            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-primary/25 bg-primary/5 px-3 py-2.5">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
-                Ürün rengi
-              </span>
-              {(() => {
-                const hex = cssColorFromProductCode(task.productColorCode)
-                return hex ? (
-                  <span
-                    className="h-9 w-9 shrink-0 rounded-md border-2 border-border shadow-sm"
-                    style={{ backgroundColor: hex }}
-                    title={task.productColorCode!.trim()}
-                  />
-                ) : null
-              })()}
-              <div className="flex flex-wrap items-center gap-2 min-w-0">
-                {task.productColor?.trim() && (
-                  <Badge variant="secondary">{task.productColor.trim()}</Badge>
-                )}
-                {task.productColorCode?.trim() && (
-                  <Badge variant="outline" className="font-mono text-xs">
-                    {task.productColorCode.trim()}
-                  </Badge>
-                )}
-              </div>
-            </div>
-          )}
           <div className="rounded border p-3 space-y-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -2051,7 +2020,7 @@ export function TaskDetailPage() {
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {task.productLines && task.productLines.length > 1
-                  ? 'Tüm kalemler ekiplerce görünür. Sıralı akışta şu an işlenen kalem vurgulanır; bir kalem tüm bölümlerden geçince sıradaki kaleme geçilir.'
+                  ? 'Tüm kalemler ekiplerce görünür. Sıralı akışta şu an işlenen kalem vurgulanır; üretim girişi için kalem sırası zorunlu değildir—her kaleme ayrı mutlak üretim değeri girilir.'
                   : task.mode === 'fixed'
                     ? 'Sabit model görevi — model, bıçak ve adet bilgisi üretim için geçerlidir.'
                     : 'Manuel görev — aşağıdaki plan ve ölçüler üretim talimatıdır.'}
@@ -2082,8 +2051,9 @@ export function TaskDetailPage() {
                 {task.productLines.map((line, lidx) => {
                   const active = (task.activeProductIndex ?? 0) === lidx
                   const hex = cssColorFromProductCode(line.productColorCode)
-                  const seqLineProdLocked =
-                    sequentialFlow && hasWfTeams && !active && task.productLines && task.productLines.length > 1
+                  const lineTarget = Math.max(1, Number(line.quantity ?? 1))
+                  const lineProduced = Math.max(0, Number(line.qtyProduced ?? 0))
+                  const lineRemaining = Math.max(0, lineTarget - lineProduced)
                   const lineEntries = (task.productionEntries || []).filter((e) => {
                     if (e.productLineIndex != null && !Number.isNaN(Number(e.productLineIndex))) {
                       return Number(e.productLineIndex) === lidx
@@ -2116,7 +2086,10 @@ export function TaskDetailPage() {
                       ) : null}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
                         <DetailRow label="Model" value={line.modelCode?.trim() ? line.modelCode : '—'} />
-                        <DetailRow label="Sipariş (hedef adet)" value={String(line.quantity ?? '—')} />
+                        <DetailRow
+                          label="Hedef / üretilen / kalan"
+                          value={`${formatNumber(lineTarget)} / ${formatNumber(lineProduced)} / ${formatNumber(lineRemaining)}`}
+                        />
                         <DetailRow label="Varyant" value={line.variant?.trim() ? line.variant : '—'} />
                         <div className="sm:col-span-2 flex flex-wrap items-center gap-3 rounded border bg-muted/30 px-2 py-1.5">
                           {hex ? (
@@ -2157,26 +2130,22 @@ export function TaskDetailPage() {
                       </div>
                       <div className="rounded-md border border-dashed bg-muted/20 px-2 py-2 space-y-2">
                         <p className="text-xs font-semibold uppercase text-muted-foreground">Üretim — bu kalem</p>
-                        <DetailRow
-                          label="Bu kalemde üretilen"
-                          value={`${formatNumber(Number(line.qtyProduced ?? 0))} / hedef ${formatNumber(Number(line.quantity ?? 0))}`}
-                        />
-                        {seqLineProdLocked ? (
-                          <p className="text-xs text-muted-foreground">
-                            Sıralı iş akışında şu an yalnızca vurgulu kalem için üretim kaydı ekleyebilirsiniz (iş
-                            akışı ilerlemesi).
-                          </p>
-                        ) : null}
+                        <p className="text-xs text-muted-foreground">
+                          Girilen değer <span className="font-medium text-foreground">bu kalem için toplam üretilmiş adet</span>
+                          (mutlak)dır; ekipler üst üste eklemez — son giriş geçerlidir.
+                        </p>
                         <div className="flex flex-wrap gap-2 items-end">
                           <div>
-                            <Label className="text-xs">Adet</Label>
+                            <Label className="text-xs">Toplam üretilen (mutlak)</Label>
                             <Input
                               type="text"
                               inputMode="numeric"
                               pattern="[0-9]*"
                               autoComplete="off"
                               className="h-8 w-24"
-                              value={lineProdInput[lidx]?.q ?? '1'}
+                              value={
+                                lineProdInput[lidx]?.q ?? String(Math.max(0, Number(line.qtyProduced ?? 0)))
+                              }
                               onChange={(e) => {
                                 const v = e.target.value
                                 if (v === '' || /^\d+$/.test(v)) {
@@ -2204,26 +2173,23 @@ export function TaskDetailPage() {
                           </div>
                           <Button
                             size="sm"
-                            disabled={task.status === 'done' || sequentialProdLocked || seqLineProdLocked}
-                            title={
-                              sequentialProdLocked
-                                ? 'Önce usta başı görevi üstlenmeli'
-                                : seqLineProdLocked
-                                  ? 'Bu aşamada sıradaki kalem değil'
-                                  : undefined
-                            }
+                            disabled={task.status === 'done' || sequentialProdLocked}
+                            title={sequentialProdLocked ? 'Önce usta başı görevi üstlenmeli' : undefined}
                             onClick={async () => {
-                              const row = lineProdInput[lidx] || { q: '1', d: prodDate }
+                              const row = lineProdInput[lidx] || {
+                                q: String(Math.max(0, Number(line.qtyProduced ?? 0))),
+                                d: prodDate,
+                              }
                               const raw = (row.q || '').trim()
-                              if (!raw || !/^\d+$/.test(raw)) {
+                              if (!/^\d+$/.test(raw)) {
                                 toast({
                                   title: 'Adet gerekli',
-                                  description: '1 veya daha büyük bir tam sayı girin.',
+                                  description: '0 veya daha büyük bir tam sayı girin.',
                                   variant: 'destructive',
                                 })
                                 return
                               }
-                              const quantity = Math.max(1, parseInt(raw, 10))
+                              const quantity = Math.max(0, parseInt(raw, 10))
                               try {
                                 await api.post(`/tasks/${task.id}/log-production/`, {
                                   quantity,
@@ -2231,10 +2197,11 @@ export function TaskDetailPage() {
                                   product_line_index: lidx,
                                 })
                                 await hydrateFromApi()
-                                setLineProdInput((prev) => ({
-                                  ...prev,
-                                  [lidx]: { q: '1', d: prev[lidx]?.d ?? prodDate },
-                                }))
+                                setLineProdInput((prev) => {
+                                  const next = { ...prev }
+                                  delete next[lidx]
+                                  return next
+                                })
                                 toast({ title: 'Üretim kaydedildi', description: `Ürün ${lidx + 1}` })
                               } catch (e: any) {
                                 toast({
@@ -2249,14 +2216,17 @@ export function TaskDetailPage() {
                           </Button>
                         </div>
                         {lineEntries.length > 0 ? (
-                          <ul className="text-[11px] space-y-0.5 max-h-28 overflow-y-auto text-muted-foreground">
-                            {lineEntries.slice(0, 30).map((pe) => (
-                              <li key={pe.id}>
-                                {pe.entryDate} • {pe.quantity} ad • {pe.userName || pe.user || '—'}
-                                {pe.teamName ? ` • ${pe.teamName}` : ''}
-                              </li>
-                            ))}
-                          </ul>
+                          <div className="space-y-0.5">
+                            <p className="text-[10px] text-muted-foreground">Kayıt geçmişi (toplanmaz):</p>
+                            <ul className="text-[11px] space-y-0.5 max-h-28 overflow-y-auto text-muted-foreground">
+                              {lineEntries.slice(0, 30).map((pe) => (
+                                <li key={pe.id}>
+                                  {pe.entryDate} • bildirilen {pe.quantity} ad • {pe.userName || pe.user || '—'}
+                                  {pe.teamName ? ` • ${pe.teamName}` : ''}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
                         ) : null}
                       </div>
                     </div>
@@ -2363,7 +2333,7 @@ export function TaskDetailPage() {
                         <span className="font-medium">{tname}</span>
                         <span className="text-muted-foreground text-xs sm:text-sm">
                           Hedef: <span className="font-medium text-foreground">{tgt}</span> adet
-                          {done != null ? ` • Bu bölümde raporlanan: ${done}` : ''}
+                          {done != null ? ` • Son bildirilen (mutlak): ${done}` : ''}
                         </span>
                       </li>
                     )
@@ -2374,7 +2344,7 @@ export function TaskDetailPage() {
           </div>
           {isAdmin && (
             <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
-              <DetailRow label="Sahip" value={ownerName} />
+              <DetailRow label="Görevi takip eden" value={ownerName} />
               <DetailRow label="Atanan" value={assigneeName} />
               <DetailRow label="Ekip" value={teamName || '—'} />
               <DetailRow label="Başlangıç" value={formatDate(task.start ?? '')} />
@@ -2706,8 +2676,8 @@ export function TaskDetailPage() {
                     const name = data.teams.find((t) => t.id === tid)?.name || tid
                     return (
                       <li key={tid}>
-                        <span className="font-medium text-foreground">{name}</span>: hedef {st.qty_target ?? '—'}, raporlanan{' '}
-                        {st.qty_done ?? 0}
+                        <span className="font-medium text-foreground">{name}</span>: hedef {st.qty_target ?? '—'}, son bildirilen{' '}
+                        (mutlak) {st.qty_done ?? 0}
                         {st.stage_done ? ' ✓ tamam' : st.pending_approval ? ' — onay bekliyor' : ''}
                         {st.production_shortfall_reason ? (
                           <span className="block mt-0.5 text-amber-700 dark:text-amber-400">
@@ -2722,6 +2692,12 @@ export function TaskDetailPage() {
             )}
             <div className="rounded border p-3 space-y-2 mt-3">
               <p className="text-sm font-semibold">Günlük üretim (adet)</p>
+              <p className="text-xs text-muted-foreground">
+                Geçmiş satırlar denetim kaydıdır: her satırdaki adet, o anda bildirilen{' '}
+                <span className="font-medium text-foreground">mutlak</span> üretimdir. İlk ekip 81 bildirdiyse süreç bu
+                sayı üzerinden devam eder; sonraki ekip 80 bildirirse güncel üretilen 80 olur — satırların toplamı (ör.
+                81+1+80) anlamlı değildir. Asıl kaynak: ürün kartındaki «Hedef / üretilen / kalan».
+              </p>
               {task.productLines && task.productLines.length > 0 ? (
                 <p className="text-xs text-muted-foreground">
                   Bu görevde üretim girişi her ürün kartındaki «Üretim — bu kalem» alanından yapılır; tek bir toplam
@@ -2811,14 +2787,19 @@ export function TaskDetailPage() {
                     </Button>
                   </div>
                   {(task.productionEntries || []).length > 0 && (
-                    <ul className="text-xs space-y-1 max-h-36 overflow-y-auto text-muted-foreground">
-                      {(task.productionEntries || []).slice(0, 40).map((pe) => (
-                        <li key={pe.id}>
-                          {pe.entryDate} • {pe.quantity} ad • {pe.userName || pe.user || '—'}
-                          {pe.teamName ? ` • ${pe.teamName}` : ''}
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="space-y-1">
+                      <p className="text-[11px] text-muted-foreground">
+                        Kayıt geçmişi — her satır mutlak bildirim; satırlar toplanmaz.
+                      </p>
+                      <ul className="text-xs space-y-1 max-h-36 overflow-y-auto text-muted-foreground">
+                        {(task.productionEntries || []).slice(0, 40).map((pe) => (
+                          <li key={pe.id}>
+                            {pe.entryDate} • bildirilen {pe.quantity} ad • {pe.userName || pe.user || '—'}
+                            {pe.teamName ? ` • ${pe.teamName}` : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
                 </>
               )}
@@ -2966,7 +2947,7 @@ function TaskModal({
     defaultValues: {
       title: task?.title ?? '',
       owner: pickDefaultTaskOwner(users, task?.owner),
-      assignee: task?.assignee ?? users[0]?.id ?? '',
+      assignee: task?.assignee ?? '',
       teamId: task?.teamId ?? '',
       status: task?.status ?? 'todo',
       priority: task?.priority ?? 'medium',
@@ -3320,7 +3301,7 @@ function TaskModal({
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div>
-              <Label>Sahip</Label>
+              <Label>Görevi takip eden</Label>
               <Select value={form.watch('owner')} onValueChange={(v) => form.setValue('owner', v)}>
                 <SelectTrigger>
                   <SelectValue />
@@ -3335,41 +3316,13 @@ function TaskModal({
               </Select>
               <FormError message={errors.owner?.message} />
             </div>
-            <div>
-              <Label>Atanan</Label>
-              <Select value={form.watch('assignee')} onValueChange={(v) => form.setValue('assignee', v)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="max-h-[300px] overflow-y-auto">
-                  {users.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>
-                      {u.username}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <FormError message={errors.assignee?.message} />
+            <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              <p className="font-medium text-foreground">Atanan ve ekip</p>
+              <p className="mt-1">
+                Yeni görevde süreç adımlarındaki ilk ekibin usta başı otomatik atanır; ekip sırası iş akışı adımlarından
+                gelir. Değişiklik için görev detayında devir / üstlenme kullanın.
+              </p>
             </div>
-          <div>
-            <Label>Ekip</Label>
-            <Select
-              value={form.watch('teamId') ?? 'none'}
-              onValueChange={(v) => form.setValue('teamId', v === 'none' ? '' : v)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Ekip seç" />
-              </SelectTrigger>
-              <SelectContent className="max-h-[300px] overflow-y-auto">
-                <SelectItem value="none">—</SelectItem>
-                {teams.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>
-                    {t.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
           </div>
           <div className="space-y-2 rounded-md border p-3">
             <div className="flex flex-wrap items-center gap-4">
