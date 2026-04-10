@@ -12,8 +12,12 @@ class BusinessPartner(models.Model):
     name = models.CharField(max_length=255)
     email = models.EmailField(blank=True)
     phone = models.CharField(max_length=50, blank=True)
+    address = models.TextField(blank=True)
     city = models.CharField(max_length=100, blank=True)
     country = models.CharField(max_length=50, blank=True)
+    tax_office = models.CharField(max_length=100, blank=True)
+    tax_number = models.CharField(max_length=64, blank=True)
+    authorized_person = models.CharField(max_length=255, blank=True)
     group = models.CharField(max_length=50, blank=True)
 
     def __str__(self):
@@ -79,6 +83,10 @@ class PricingRule(models.Model):
 
 
 class Quote(models.Model):
+    DOCUMENT_TYPES = [
+        ('Quote', 'Quote'),
+        ('Contract', 'Contract'),
+    ]
     STATUSES = [
         ('Draft', 'Draft'),
         ('Sent', 'Sent'),
@@ -88,10 +96,13 @@ class Quote(models.Model):
         ('Converted', 'Converted'),
     ]
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='quotes')
+    document_type = models.CharField(max_length=20, choices=DOCUMENT_TYPES, default='Quote')
     number = models.CharField(max_length=50)
     customer = models.ForeignKey(BusinessPartner, on_delete=models.PROTECT, related_name='quotes')
     opportunity = models.ForeignKey(Opportunity, on_delete=models.SET_NULL, null=True, blank=True)
     owner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    prepared_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='prepared_quotes')
+    seller_company_key = models.CharField(max_length=50, blank=True)
     status = models.CharField(max_length=20, choices=STATUSES, default='Draft')
     valid_until = models.DateField(null=True, blank=True)
     subtotal = models.DecimalField(max_digits=14, decimal_places=2, default=0)
@@ -102,6 +113,7 @@ class Quote(models.Model):
     payment_terms = models.CharField(max_length=255, blank=True)
     delivery_terms = models.CharField(max_length=255, blank=True)
     notes = models.TextField(blank=True)
+    contract_config = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -115,11 +127,15 @@ class Quote(models.Model):
 class QuoteLine(models.Model):
     quote = models.ForeignKey(Quote, on_delete=models.CASCADE, related_name='lines')
     product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True)
+    section_key = models.CharField(max_length=64, blank=True)
     name = models.CharField(max_length=255)
+    unit = models.CharField(max_length=50, blank=True)
     qty = models.DecimalField(max_digits=10, decimal_places=2)
     unit_price = models.DecimalField(max_digits=12, decimal_places=2)
     discount = models.DecimalField(max_digits=6, decimal_places=2, default=0)
     tax = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    sort_order = models.PositiveIntegerField(default=0)
+    details = models.JSONField(default=dict, blank=True)
 
     def line_total(self):
         subtotal = self.qty * self.unit_price
@@ -139,6 +155,3 @@ def audit_quote(sender, instance, created, **kwargs):
         user=instance.owner,
         new_value=instance.status,
     )
-from django.db import models
-
-# Create your models here.

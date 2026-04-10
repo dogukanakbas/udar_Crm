@@ -1,5 +1,5 @@
 PERMISSIONS_BY_MODULE = {
-    "quotes": ["quotes.view", "quotes.edit", "quotes.approve"],
+    "quotes": ["quotes.view", "quotes.edit", "quotes.prepare", "quotes.approve"],
     "pricing": ["pricing.manage"],
     "leads": ["leads.view", "leads.edit"],
     "opportunities": ["opportunities.view", "opportunities.edit"],
@@ -23,6 +23,7 @@ DEFAULT_ROLE_PERMS = {
     "Manager": [
         "quotes.view",
         "quotes.edit",
+        "quotes.prepare",
         "quotes.approve",
         "pricing.manage",
         "invoices.view",
@@ -35,7 +36,7 @@ DEFAULT_ROLE_PERMS = {
         "teams.view",
         "teams.edit",
     ],
-    "Sales": ["quotes.view", "quotes.edit", "products.view", "partners.view", "orders.view", "tasks.view", "tasks.edit"],
+    "Sales": ["quotes.view", "quotes.edit", "quotes.prepare", "products.view", "partners.view", "orders.view", "tasks.view", "tasks.edit"],
     "Finance": [
         "quotes.view",
         "quotes.approve",

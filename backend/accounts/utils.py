@@ -23,3 +23,19 @@ def user_has_perm(user, perm_code: str) -> bool:
     perms = DEFAULT_ROLE_PERMS.get(role, []) or DEFAULT_ROLE_PERMS.get(role.capitalize(), [])
     return perm_code in perms
 
+
+def get_effective_permissions(user) -> list[str]:
+    role = (getattr(user, 'role', None) or '').strip()
+    if role == 'Admin':
+        return ['*']
+
+    db_perms = list(
+        RolePermission.objects.filter(role__iexact=role)
+        .select_related('permission')
+        .values_list('permission__code', flat=True)
+    )
+    if db_perms:
+        return sorted(set(db_perms))
+
+    return sorted(set(DEFAULT_ROLE_PERMS.get(role, []) or DEFAULT_ROLE_PERMS.get(role.capitalize(), [])))
+

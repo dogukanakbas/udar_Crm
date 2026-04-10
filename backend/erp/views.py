@@ -1,4 +1,4 @@
-from rest_framework import viewsets, permissions, filters
+from rest_framework import filters, permissions, viewsets
 from rest_framework.response import Response
 from permissions import IsOrgMember, HasAPIPermission
 from audit.utils import log_entity_action
@@ -65,41 +65,6 @@ class ProductViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         'destroy': 'products.edit',
     }
     queryset = Product.objects.all()
-
-    def create(self, request, *args, **kwargs):
-        import uuid
-        data = request.data.copy()
-        org = _ensure_org(request)
-        sku = (data.get('sku') or '').strip()
-        if not sku:
-            sku = f"SKU-{uuid.uuid4().hex[:6].upper()}"
-        # unique per org
-        base = sku
-        counter = 1
-        while Product.objects.filter(organization=org, sku=sku).exists():
-            sku = f"{base}-{counter}"
-            counter += 1
-        name = (data.get('name') or '').strip() or sku
-        category = data.get('category')
-        category_obj = None
-        if category:
-            try:
-                category_obj = Category.objects.filter(organization=org, id=category).first()
-            except Exception:
-                category_obj = None
-        product = Product.objects.create(
-            organization=org,
-            sku=sku,
-            name=name,
-            price=data.get('price') or 0,
-            stock=data.get('stock') or 0,
-            reserved=data.get('reserved') or 0,
-            reorder_point=data.get('reorder_point') or 0,
-            category=category_obj,
-        )
-        serializer = self.get_serializer(product)
-        headers = self.get_success_headers(serializer.data)
-        return Response(serializer.data, status=201, headers=headers)
 
 
 class CategoryViewSet(OrgScopedMixin, viewsets.ModelViewSet):

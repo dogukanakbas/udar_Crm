@@ -11,6 +11,7 @@ export type InvoiceStatus = 'Draft' | 'Sent' | 'Paid' | 'Overdue'
 export type SalesOrderStatus = 'Draft' | 'Confirmed' | 'Packing' | 'Shipped' | 'Delivered' | 'Cancelled'
 export type PurchaseStatus = 'Draft' | 'Ordered' | 'Receiving' | 'Closed'
 export type QuoteStatus = 'Draft' | 'Sent' | 'Under Review' | 'Approved' | 'Rejected' | 'Converted'
+export type SalesDocumentType = 'Quote' | 'Contract'
 
 export interface TimelineItem {
   id: string
@@ -55,11 +56,35 @@ export interface Company {
   name: string
   industry: string
   region: string
+  country?: string
   size: string
   owner: string
   rating: number
   currency: string
   annualRevenue: number
+  address?: string
+  taxOffice?: string
+  taxNumber?: string
+  authorizedPerson?: string
+  phone?: string
+  email?: string
+}
+
+export interface CategoryTemplateField {
+  field_key: string
+  label: string
+  type: 'text' | 'number' | 'select' | 'textarea'
+  options?: string[]
+  required?: boolean
+  order?: number
+  applies_to_documents?: 'quote' | 'contract' | 'both'
+}
+
+export interface Category {
+  id: string
+  name: string
+  templateDefaults?: Record<string, any>
+  attributeSchema?: CategoryTemplateField[]
 }
 
 export interface Contact {
@@ -101,11 +126,20 @@ export interface Product {
   sku: string
   name: string
   category: string
+  categoryId?: string
+  categoryName?: string
   stock: number
   reserved: number
   reorderPoint: number
   warehouse: string
   price: number
+  templateFamily?: string
+  templateDefaults?: Record<string, any>
+  categoryTemplateDefaults?: Record<string, any>
+  categoryAttributeSchema?: CategoryTemplateField[]
+  resolvedAttributeSchema?: CategoryTemplateField[]
+  attributeValues?: Record<string, any>
+  attributeSchemaOverride?: CategoryTemplateField[]
 }
 
 export interface InvoicePayment {
@@ -245,6 +279,9 @@ export interface UserLite {
   role: string
   firstName?: string
   lastName?: string
+  fullName?: string
+  permissions?: string[]
+  canPrepareQuotes?: boolean
 }
 
 export interface Attachment {
@@ -313,13 +350,23 @@ export interface TaskTimeEntry {
 }
 
 export interface QuoteLine {
+  id?: string
+  productId?: string
   sku: string
   name: string
+  sectionKey?: string
+  category?: string
+  unit?: string
   qty: number
   unitPrice: number
   discount?: number
   tax?: number
-  category?: string
+  details?: {
+    code?: string
+    primary?: string
+    secondary?: string
+    attributes?: Record<string, any>
+  }
 }
 
 export interface QuoteApprovalStep {
@@ -340,11 +387,16 @@ export interface QuoteHistoryItem {
 
 export interface Quote {
   id: string
+  documentType: SalesDocumentType
   number: string
   customerId: string
+  customerName?: string
   opportunityId?: string
   leadId?: string
   owner: string
+  preparedById?: string
+  preparedByName?: string
+  sellerCompanyKey?: string
   status: QuoteStatus
   validUntil: string
   total: number
@@ -357,6 +409,37 @@ export interface Quote {
   lines: QuoteLine[]
   approval: QuoteApprovalStep[]
   history: QuoteHistoryItem[]
+  contractConfig?: {
+    templateSheet?: string
+    template_sheet?: string
+    validityLabel?: string
+    validity_label?: string
+    priceListLabel?: string
+    deliveryType?: string
+    delivery_type?: string
+    paymentOption?: string
+    payment_option?: string
+    contractDate?: string
+    contract_date?: string
+    customerSnapshot?: Record<string, string>
+    customer_snapshot?: Record<string, string>
+    preparedBySnapshot?: Record<string, string>
+    prepared_by_snapshot?: Record<string, string>
+    signatureCustomerLabel?: string
+    signature_customer_label?: string
+    templateMode?: string
+    template_mode?: string
+    templateKey?: string
+    template_key?: string
+    termsText?: string
+    terms_text?: string
+    contractNotesText?: string
+    contract_notes_text?: string
+    contractNotes?: string[]
+    contract_notes?: string[]
+    generalTerms?: string[]
+    general_terms?: string[]
+  }
   terms: {
     payment: string
     delivery: string
@@ -402,6 +485,7 @@ export interface MockDbSnapshot {
   opportunities: Opportunity[]
   companies: Company[]
   contacts: Contact[]
+  categories?: Category[]
   products: Product[]
   salesOrders: SalesOrder[]
   purchaseOrders: PurchaseOrder[]
