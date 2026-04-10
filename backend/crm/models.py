@@ -136,15 +136,17 @@ class QuoteLine(models.Model):
     qty = models.DecimalField(max_digits=10, decimal_places=2)
     unit_price = models.DecimalField(max_digits=12, decimal_places=2)
     discount = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    discount_secondary = models.DecimalField(max_digits=6, decimal_places=2, default=0)
     tax = models.DecimalField(max_digits=6, decimal_places=2, default=0)
     sort_order = models.PositiveIntegerField(default=0)
     details = models.JSONField(default=dict, blank=True)
 
     def line_total(self):
         subtotal = self.qty * self.unit_price
-        discount_val = subtotal * (self.discount / 100)
-        tax_val = (subtotal - discount_val) * (self.tax / 100)
-        return subtotal - discount_val + tax_val
+        first_discounted = subtotal * (Decimal('1') - (self.discount / Decimal('100')))
+        discounted_total = first_discounted * (Decimal('1') - (self.discount_secondary / Decimal('100')))
+        tax_val = discounted_total * (self.tax / Decimal('100'))
+        return discounted_total + tax_val
 
 
 @receiver(post_save, sender=Quote)

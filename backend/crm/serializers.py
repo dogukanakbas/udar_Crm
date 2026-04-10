@@ -129,6 +129,7 @@ class QuoteLineSerializer(serializers.ModelSerializer):
             'qty',
             'unit_price',
             'discount',
+            'discount_secondary',
             'tax',
             'sort_order',
             'details',
@@ -139,6 +140,20 @@ class QuoteLineSerializer(serializers.ModelSerializer):
 
     def get_product_name(self, obj):
         return obj.product.name if obj.product else ''
+
+    def validate(self, attrs):
+        hundred = Decimal('100')
+        max_discount = Decimal('50')
+        first_discount = Decimal(attrs.get('discount') or 0)
+        second_discount = Decimal(attrs.get('discount_secondary') or 0)
+
+        if first_discount > max_discount or second_discount > max_discount:
+            raise serializers.ValidationError('Her iskonto alanı en fazla %50 olabilir.')
+
+        effective_discount = hundred - (((hundred - first_discount) * (hundred - second_discount)) / hundred)
+        if effective_discount > max_discount:
+            raise serializers.ValidationError('İki iskonto birlikte en fazla %50 etkin iskonto oluşturabilir.')
+        return attrs
 
 
 class QuoteSerializer(serializers.ModelSerializer):
@@ -243,6 +258,7 @@ class QuoteSerializer(serializers.ModelSerializer):
                     'qty': line.get('qty') or line.get('quantity') or 1,
                     'unit_price': line.get('unit_price') or line.get('unitPrice') or 0,
                     'discount': line.get('discount') or 0,
+                    'discount_secondary': line.get('discount_secondary') or line.get('discountSecondary') or line.get('discount2') or 0,
                     'tax': line.get('tax') or 0,
                     'sort_order': line.get('sort_order') or line.get('sortOrder') or idx,
                     'details': details,
@@ -401,6 +417,7 @@ class QuoteSerializer(serializers.ModelSerializer):
                 qty=line.get('qty') or 0,
                 unit_price=line.get('unit_price') or 0,
                 discount=line.get('discount') or 0,
+                discount_secondary=line.get('discount_secondary') or 0,
                 tax=line.get('tax') or 0,
                 sort_order=line.get('sort_order') if line.get('sort_order') is not None else idx,
                 details=details,
@@ -410,12 +427,14 @@ class QuoteSerializer(serializers.ModelSerializer):
         org = quote.organization
         rules = PricingRule.objects.filter(organization=org)
         hundred = Decimal('100')
-        tax_rate = Decimal('0.18')
         subtotal = sum((l.qty * l.unit_price for l in quote.lines.all()), Decimal('0'))
-        discount = sum(((l.qty * l.unit_price) * (l.discount / hundred) for l in quote.lines.all()), Decimal('0'))
+        discount = Decimal('0')
 
         for line in quote.lines.select_related('product__category'):
             base = line.qty * line.unit_price
+            discounted_base = base * (Decimal('1') - (line.discount / hundred))
+            discounted_base *= Decimal('1') - (line.discount_secondary / hundred)
+            discount += base - discounted_base
             if line.product and line.product.category:
                 for r in rules.filter(type='category', target=line.product.category.name):
                     discount += base * (r.value / hundred)
@@ -433,7 +452,7 @@ class QuoteSerializer(serializers.ModelSerializer):
             if subtotal >= threshold:
                 discount += subtotal * (r.value / hundred)
 
-        rate = float(quote.vat_rate) / 100.0 if quote.vat_rate is not None else 0.20
+        rate = (quote.vat_rate if quote.vat_rate is not None else Decimal('20')) / hundred
         tax = (subtotal - discount) * rate
         quote.subtotal = subtotal
         quote.discount_total = discount

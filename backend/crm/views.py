@@ -188,8 +188,11 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         for l in lines:
             base = float(l.get('qty', 0)) * float(l.get('unitPrice', 0))
             cat = l.get('category')
-            # line discount
-            discount_total += base * float(l.get('discount', 0)) / 100
+            first_discount_rate = float(l.get('discount', 0) or 0) / 100
+            second_discount_rate = float(l.get('discountSecondary', l.get('discount_secondary', 0)) or 0) / 100
+            discounted_base = base * (1 - first_discount_rate)
+            discounted_base *= 1 - second_discount_rate
+            discount_total += base - discounted_base
             # category rule
             for r in rules.filter(type='category', target=cat):
                 discount_total += base * float(r.value) / 100

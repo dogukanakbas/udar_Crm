@@ -368,6 +368,7 @@ export interface QuoteLine {
   qty: number
   unitPrice: number
   discount?: number
+  discountSecondary?: number
   tax?: number
   details?: {
     code?: string

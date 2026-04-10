@@ -4,7 +4,11 @@ import type { Quote, QuoteLine } from '@/types'
 export function downloadQuoteAsXlsx(quote: Quote, customerName: string) {
   const vatPct = (quote as Quote & { vatRate?: number }).vatRate ?? 20
   const subtotal = quote.lines.reduce((s, l) => s + l.qty * l.unitPrice, 0)
-  const disc = quote.lines.reduce((s, l) => s + (l.discount ?? 0) / 100 * l.qty * l.unitPrice, 0)
+  const disc = quote.lines.reduce((s, l) => {
+    const lineSub = l.qty * l.unitPrice
+    const afterFirst = lineSub * (1 - (l.discount ?? 0) / 100)
+    return s + (lineSub - afterFirst * (1 - (l.discountSecondary ?? 0) / 100))
+  }, 0)
   const exVat = subtotal - disc
   const tax = quote.taxTotal
   const total = quote.total
@@ -22,8 +26,9 @@ export function downloadQuoteAsXlsx(quote: Quote, customerName: string) {
   const tableHead = [['Kalem açıklaması', 'Miktar', 'Birim fiyat', 'İskonto %', 'Vergi %', 'Satır (vergi öncesi tutar)']]
   const tableBody = quote.lines.map((l: QuoteLine) => {
     const lineSub = l.qty * l.unitPrice
-    const lineDisc = ((l.discount ?? 0) / 100) * lineSub
-    return [l.name, l.qty, l.unitPrice, l.discount ?? 0, l.tax ?? 0, lineSub - lineDisc]
+    const afterFirst = lineSub * (1 - (l.discount ?? 0) / 100)
+    const net = afterFirst * (1 - (l.discountSecondary ?? 0) / 100)
+    return [l.name, l.qty, l.unitPrice, l.discount ?? 0, l.discountSecondary ?? 0, l.tax ?? 0, net]
   })
   const footer = [
     [],
