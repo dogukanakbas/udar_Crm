@@ -131,6 +131,7 @@ const mapQuote = (q: any, idx = 0) => ({
     qty: Number(l.qty ?? 0),
     unitPrice: Number(l.unit_price ?? 0),
     discount: Number(l.discount ?? 0),
+    discountSecondary: Number(l.discount_secondary ?? 0),
     tax: Number(l.tax ?? 0),
     unit: l.unit || '',
     category: l.section_key || '',

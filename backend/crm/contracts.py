@@ -431,7 +431,7 @@ def _fill_line_blocks(ws, quote, template):
             _set_cell_value(ws, f'G{row_number}', float(line.qty))
             _set_cell_value(ws, f'H{row_number}', float(line.unit_price))
             _set_cell_value(ws, f'I{row_number}', float(Decimal(line.discount or 0)))
-            _set_cell_value(ws, f'J{row_number}', 0)
+            _set_cell_value(ws, f'J{row_number}', float(Decimal(getattr(line, 'discount_secondary', 0) or 0)))
             _set_cell_value(ws, f'K{row_number}', line.unit or 'Adet')
             _set_cell_value(ws, f'L{row_number}', float(net_unit))
             _set_cell_value(ws, f'M{row_number}', float(line_total))
@@ -577,7 +577,8 @@ def _line_tax(line):
 
 
 def _net_unit_price(line):
-    return Decimal(line.unit_price) * (Decimal('1') - (Decimal(line.discount or 0) / Decimal('100')))
+    net_unit = Decimal(line.unit_price) * (Decimal('1') - (Decimal(line.discount or 0) / Decimal('100')))
+    return net_unit * (Decimal('1') - (Decimal(getattr(line, 'discount_secondary', 0) or 0) / Decimal('100')))
 
 
 def _customer_snapshot(config):

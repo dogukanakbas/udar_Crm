@@ -20,7 +20,7 @@ import type { Category, Product } from '@/types'
 
 const EMPTY_CATEGORY = {
   name: '',
-  templateDefaults: { section_key: '', unit: '', tax: 20, discount: 0, template_family: '' },
+  templateDefaults: { section_key: '', unit: '', tax: 20, discount: 0, discount_secondary: 0, template_family: '' },
   attributeSchema: [],
 }
 
@@ -32,7 +32,7 @@ const EMPTY_PRODUCT = {
   stock: 0,
   reserved: 0,
   reorderPoint: 0,
-  templateDefaults: { section_key: '', unit: '', tax: 20, discount: 0, template_family: '' },
+  templateDefaults: { section_key: '', unit: '', tax: 20, discount: 0, discount_secondary: 0, template_family: '' },
   attributeValues: {},
   attributeSchemaOverride: [],
 }
@@ -242,6 +242,7 @@ function ProductEditorDialog({ open, product, categories, onClose, onSave }: { o
               unit: product.templateDefaults?.unit || '',
               tax: Number(product.templateDefaults?.tax ?? 20),
               discount: Number(product.templateDefaults?.discount ?? 0),
+              discount_secondary: Number(product.templateDefaults?.discount_secondary ?? 0),
               template_family: product.templateDefaults?.template_family || '',
             },
             attributeValues: product.attributeValues || {},
@@ -286,6 +287,7 @@ function ProductEditorDialog({ open, product, categories, onClose, onSave }: { o
                         unit: current.templateDefaults?.unit || nextCategory.templateDefaults?.unit || '',
                         tax: Number(current.templateDefaults?.tax ?? nextCategory.templateDefaults?.tax ?? 20),
                         discount: Number(current.templateDefaults?.discount ?? nextCategory.templateDefaults?.discount ?? 0),
+                        discount_secondary: Number(current.templateDefaults?.discount_secondary ?? nextCategory.templateDefaults?.discount_secondary ?? 0),
                         template_family: current.templateDefaults?.template_family || nextCategory.templateDefaults?.template_family || '',
                       },
                     }))
@@ -307,11 +309,12 @@ function ProductEditorDialog({ open, product, categories, onClose, onSave }: { o
             <Field label="Rezerve"><Input type="number" value={values.reserved || 0} onChange={(event) => setBasic('reserved', Number(event.target.value))} /></Field>
             <Field label="Emniyet st."><Input type="number" value={values.reorderPoint || 0} onChange={(event) => setBasic('reorderPoint', Number(event.target.value))} /></Field>
           </div>
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-5 gap-3">
             <Field label="Belge grubu"><Input value={values.templateDefaults?.section_key || ''} onChange={(event) => setTemplate('section_key', event.target.value)} /></Field>
             <Field label="Vars. birim"><Input value={values.templateDefaults?.unit || ''} onChange={(event) => setTemplate('unit', event.target.value)} /></Field>
             <Field label="Vars. KDV"><Input type="number" value={values.templateDefaults?.tax || 0} onChange={(event) => setTemplate('tax', Number(event.target.value))} /></Field>
             <Field label="Vars. iskonto"><Input type="number" value={values.templateDefaults?.discount || 0} onChange={(event) => setTemplate('discount', Number(event.target.value))} /></Field>
+            <Field label="Vars. iskonto 2"><Input type="number" value={values.templateDefaults?.discount_secondary || 0} onChange={(event) => setTemplate('discount_secondary', Number(event.target.value))} /></Field>
           </div>
 
           {mergedSchema.length > 0 && (
@@ -383,6 +386,7 @@ function CategoryTemplateDialog({ open, category, onClose, onSave }: { open: boo
               unit: category.templateDefaults?.unit || '',
               tax: Number(category.templateDefaults?.tax ?? 20),
               discount: Number(category.templateDefaults?.discount ?? 0),
+              discount_secondary: Number(category.templateDefaults?.discount_secondary ?? 0),
               template_family: category.templateDefaults?.template_family || '',
             },
             attributeSchema: category.attributeSchema || [],
@@ -409,11 +413,12 @@ function CategoryTemplateDialog({ open, category, onClose, onSave }: { open: boo
             <Field label="Kategori adı"><Input value={values.name || ''} onChange={(event) => setBasic('name', event.target.value)} /></Field>
             <Field label="Şablon ailesi"><Input value={values.templateDefaults?.template_family || ''} onChange={(event) => setTemplate('template_family', event.target.value)} /></Field>
           </div>
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-5 gap-3">
             <Field label="Belge grubu"><Input value={values.templateDefaults?.section_key || ''} onChange={(event) => setTemplate('section_key', event.target.value)} /></Field>
             <Field label="Vars. birim"><Input value={values.templateDefaults?.unit || ''} onChange={(event) => setTemplate('unit', event.target.value)} /></Field>
             <Field label="KDV"><Input type="number" value={values.templateDefaults?.tax || 0} onChange={(event) => setTemplate('tax', Number(event.target.value))} /></Field>
             <Field label="Iskonto"><Input type="number" value={values.templateDefaults?.discount || 0} onChange={(event) => setTemplate('discount', Number(event.target.value))} /></Field>
+            <Field label="Iskonto 2"><Input type="number" value={values.templateDefaults?.discount_secondary || 0} onChange={(event) => setTemplate('discount_secondary', Number(event.target.value))} /></Field>
           </div>
           <SchemaBuilder title="Teknik alan şablonu" rows={values.attributeSchema || []} onAdd={addSchema} onChange={updateSchema} onRemove={removeSchema} />
         </div>
