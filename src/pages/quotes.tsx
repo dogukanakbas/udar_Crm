@@ -333,6 +333,8 @@ export function QuotesPage() {
     [quotes, status, customer, documentType, minAmount, maxAmount]
   )
 
+  const hasActiveFilters = documentType !== 'all' || status !== 'all' || customer !== 'all' || Boolean(minAmount) || Boolean(maxAmount)
+
   const columns: ColumnDef<Quote>[] = [
     { accessorKey: 'documentType', header: 'Tür', cell: ({ row }) => <Badge variant="outline">{DOCUMENT_TYPE_TR[row.original.documentType]}</Badge> },
     { accessorKey: 'number', header: 'No' },
@@ -406,21 +408,75 @@ export function QuotesPage() {
         }
       />
 
-      <div className="flex flex-wrap gap-2">
-        <Select value={documentType} onValueChange={(value) => setDocumentType(value as any)}>
-          <SelectTrigger className="w-44"><SelectValue placeholder="Belge türü" /></SelectTrigger>
-          <SelectContent><SelectItem value="all">Tümü</SelectItem><SelectItem value="Contract">Sözleşme</SelectItem><SelectItem value="Quote">Teklif</SelectItem></SelectContent>
-        </Select>
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-44"><SelectValue placeholder="Durum" /></SelectTrigger>
-          <SelectContent><SelectItem value="all">Tümü</SelectItem>{['Draft', 'Sent', 'Under Review', 'Approved', 'Rejected', 'Converted'].map((item) => <SelectItem key={item} value={item}>{quoteStatusTr(item)}</SelectItem>)}</SelectContent>
-        </Select>
-        <Select value={customer} onValueChange={setCustomer}>
-          <SelectTrigger className="w-60"><SelectValue placeholder="Müşteri" /></SelectTrigger>
-          <SelectContent><SelectItem value="all">Tüm müşteriler</SelectItem>{companies.map((company) => <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>)}</SelectContent>
-        </Select>
-        <Input placeholder="Min tutar" value={minAmount} onChange={(event) => setMinAmount(event.target.value)} className="w-28" />
-        <Input placeholder="Max tutar" value={maxAmount} onChange={(event) => setMaxAmount(event.target.value)} className="w-28" />
+      <div className="grid gap-3 rounded-xl border border-border/70 bg-card/40 p-4 md:grid-cols-2 xl:grid-cols-[220px_220px_minmax(280px,1fr)_140px_140px_auto]">
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Belge tipi</Label>
+          <Select value={documentType} onValueChange={(value) => setDocumentType(value as any)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Teklif / Sözleşme" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Teklif / Sözleşme</SelectItem>
+              <SelectItem value="Quote">Sadece teklifler</SelectItem>
+              <SelectItem value="Contract">Sadece sözleşmeler</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Durum</Label>
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger>
+              <SelectValue placeholder="Tüm durumlar" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tüm durumlar</SelectItem>
+              {['Draft', 'Sent', 'Under Review', 'Approved', 'Rejected', 'Converted'].map((item) => <SelectItem key={item} value={item}>{quoteStatusTr(item)}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Müşteri</Label>
+          <Select value={customer} onValueChange={setCustomer}>
+            <SelectTrigger>
+              <SelectValue placeholder="Tüm müşteriler" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tüm müşteriler</SelectItem>
+              {companies.map((company) => <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Min. tutar</Label>
+          <Input placeholder="Alt limit" value={minAmount} onChange={(event) => setMinAmount(event.target.value)} inputMode="numeric" />
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Maks. tutar</Label>
+          <Input placeholder="Üst limit" value={maxAmount} onChange={(event) => setMaxAmount(event.target.value)} inputMode="numeric" />
+        </div>
+
+        <div className="flex items-end">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="w-full xl:w-auto"
+            disabled={!hasActiveFilters}
+            onClick={() => {
+              setDocumentType('all')
+              setStatus('all')
+              setCustomer('all')
+              setMinAmount('')
+              setMaxAmount('')
+            }}
+          >
+            Filtreleri temizle
+          </Button>
+        </div>
       </div>
 
       <Card>
