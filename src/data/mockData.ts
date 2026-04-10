@@ -336,9 +336,13 @@ const makeQuotes = (companies: Company[], products: Product[]): Quote[] => {
     ]
     return {
       id: `q-${i + 1}`,
+      documentType: 'Quote',
       number: `Q-${20250 + i}`,
       customerId: company.id,
+      customerName: company.name,
       owner: owners[i % owners.length],
+      preparedByName: owners[i % owners.length],
+      sellerCompanyKey: 'AYKA',
       status: statuses[i % statuses.length],
       validUntil: new Date(Date.now() + (15 + i) * 86400000).toISOString(),
       total,
@@ -351,6 +355,7 @@ const makeQuotes = (companies: Company[], products: Product[]): Quote[] => {
       lines,
       approval,
       history,
+      contractConfig: {},
       terms: {
         payment: 'Net 30',
         delivery: 'CIF',

@@ -4,6 +4,7 @@ from django.db import models
 class Organization(models.Model):
     name = models.CharField(max_length=255)
     code = models.CharField(max_length=50, unique=True)
+    contract_settings = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -39,6 +40,7 @@ class Warehouse(models.Model):
 class NumberRange(models.Model):
     DOC_TYPES = [
         ('QUOTE', 'Quote'),
+        ('CONTRACT', 'Contract'),
         ('ORDER', 'SalesOrder'),
         ('INVOICE', 'Invoice'),
     ]
@@ -55,6 +57,3 @@ class NumberRange(models.Model):
         self.current += 1
         self.save(update_fields=['current'])
         return f"{self.prefix}{value}"
-from django.db import models
-
-# Create your models here.

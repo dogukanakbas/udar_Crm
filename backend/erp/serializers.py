@@ -1,7 +1,8 @@
 from rest_framework import serializers
 
-from .models import Category, Product, Invoice, InvoicePayment, SalesOrder, PurchaseOrder, StockMovement, Vehicle
 from organizations.models import Organization
+
+from .models import Category, Invoice, InvoicePayment, Product, PurchaseOrder, SalesOrder, StockMovement, Vehicle
 
 
 def _ensure_org(request):
@@ -14,10 +15,66 @@ def _ensure_org(request):
     return org
 
 
+def _normalize_schema(value):
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _merge_attribute_schema(category_schema, override_schema):
+    merged = {}
+    ordered_keys = []
+    for item in _normalize_schema(category_schema):
+        key = str(item.get('field_key') or '').strip()
+        if not key:
+            continue
+        merged[key] = dict(item)
+        ordered_keys.append(key)
+    for item in _normalize_schema(override_schema):
+        key = str(item.get('field_key') or '').strip()
+        if not key:
+            continue
+        merged[key] = {**merged.get(key, {}), **dict(item)}
+        if key not in ordered_keys:
+            ordered_keys.append(key)
+    return [merged[key] for key in ordered_keys if key in merged]
+
+
 class CategorySerializer(serializers.ModelSerializer):
+    organization = serializers.PrimaryKeyRelatedField(
+        required=False,
+        allow_null=True,
+        queryset=Organization.objects.all(),
+        default=None,
+    )
+
     class Meta:
         model = Category
         fields = '__all__'
+        extra_kwargs = {
+            'organization': {'required': False, 'allow_null': True},
+            'name': {'required': False, 'allow_blank': True},
+            'template_defaults': {'required': False},
+            'attribute_schema': {'required': False},
+        }
+
+    def to_internal_value(self, data):
+        mutable = data.copy()
+        if 'organization' not in mutable or mutable.get('organization') in [None, '']:
+            org = _ensure_org(self.context.get('request'))
+            mutable['organization'] = getattr(org, 'id', org)
+        mutable['attribute_schema'] = _normalize_schema(mutable.get('attribute_schema'))
+        return super().to_internal_value(mutable)
+
+    def create(self, validated_data):
+        validated_data.setdefault('organization', _ensure_org(self.context.get('request')))
+        validated_data['attribute_schema'] = _normalize_schema(validated_data.get('attribute_schema'))
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if 'attribute_schema' in validated_data:
+            validated_data['attribute_schema'] = _normalize_schema(validated_data.get('attribute_schema'))
+        return super().update(instance, validated_data)
 
 
 class ProductSerializer(serializers.ModelSerializer):
@@ -32,7 +89,7 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = '__all__'
-        validators = []  # skip unique_together validation; handled manually
+        validators = []
         extra_kwargs = {
             'sku': {'required': False, 'allow_blank': True},
             'name': {'required': False, 'allow_blank': True},
@@ -42,6 +99,9 @@ class ProductSerializer(serializers.ModelSerializer):
             'reorder_point': {'required': False},
             'organization': {'required': False, 'allow_null': True},
             'category': {'required': False, 'allow_null': True},
+            'template_defaults': {'required': False},
+            'attribute_values': {'required': False},
+            'attribute_schema_override': {'required': False},
         }
 
     def __init__(self, *args, **kwargs):
@@ -61,19 +121,19 @@ class ProductSerializer(serializers.ModelSerializer):
             mutable['organization'] = getattr(org, 'id', org)
         if 'sku' not in mutable or mutable.get('sku') in [None]:
             mutable['sku'] = ''
+        mutable['attribute_schema_override'] = _normalize_schema(mutable.get('attribute_schema_override'))
         return super().to_internal_value(mutable)
 
     def create(self, validated_data):
         org = _ensure_org(self.context.get('request'))
         validated_data.setdefault('organization', org)
 
-        # boş/dup SKU için güvenli üretim
         sku = validated_data.get('sku')
         if not sku or str(sku).strip() == '':
             import uuid
+
             sku = f"SKU-{uuid.uuid4().hex[:6].upper()}"
         sku = str(sku).strip()
-        # eşsiz yap
         base = sku
         counter = 1
         while Product.objects.filter(organization=validated_data.get('organization'), sku=sku).exists():
@@ -81,32 +141,46 @@ class ProductSerializer(serializers.ModelSerializer):
             counter += 1
         validated_data['sku'] = sku
 
-        name = validated_data.get('name')
-        if not name or str(name).strip() == '':
+        if not validated_data.get('name') or str(validated_data.get('name')).strip() == '':
             validated_data['name'] = sku
 
-        # sayısal alanları default 0'a çek
         for field in ['price', 'stock', 'reserved', 'reorder_point']:
             if validated_data.get(field) in [None, '']:
                 validated_data[field] = 0
 
+        validated_data['attribute_schema_override'] = _normalize_schema(validated_data.get('attribute_schema_override'))
+        validated_data['attribute_values'] = dict(validated_data.get('attribute_values') or {})
         return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if 'attribute_schema_override' in validated_data:
+            validated_data['attribute_schema_override'] = _normalize_schema(validated_data.get('attribute_schema_override'))
+        if 'attribute_values' in validated_data:
+            validated_data['attribute_values'] = dict(validated_data.get('attribute_values') or {})
+        return super().update(instance, validated_data)
 
     def validate(self, attrs):
         org = attrs.get('organization') or _ensure_org(self.context.get('request'))
         sku = (attrs.get('sku') or '').strip()
         if sku:
-            qs = Product.objects.filter(organization=org, sku=sku)
+            queryset = Product.objects.filter(organization=org, sku=sku)
             if self.instance:
-                qs = qs.exclude(pk=self.instance.pk)
-            if qs.exists():
-                raise serializers.ValidationError({'sku': 'Aynı organizasyonda bu SKU zaten var'})
+                queryset = queryset.exclude(pk=self.instance.pk)
+            if queryset.exists():
+                raise serializers.ValidationError({'sku': 'Ayni organizasyonda bu SKU zaten var'})
         return super().validate(attrs)
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
         if isinstance(instance.organization, Organization):
             data['organization'] = instance.organization.id
+        data['category_name'] = instance.category.name if instance.category else ''
+        data['category_template_defaults'] = instance.category.template_defaults if instance.category else {}
+        data['category_attribute_schema'] = instance.category.attribute_schema if instance.category else []
+        data['resolved_attribute_schema'] = _merge_attribute_schema(
+            instance.category.attribute_schema if instance.category else [],
+            instance.attribute_schema_override,
+        )
         return data
 
 
@@ -127,19 +201,19 @@ class InvoiceSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         payments = validated_data.pop('payments', [])
         invoice = Invoice.objects.create(**validated_data)
-        for p in payments:
-            InvoicePayment.objects.create(invoice=invoice, **p)
+        for payment in payments:
+            InvoicePayment.objects.create(invoice=invoice, **payment)
         return invoice
 
     def update(self, instance, validated_data):
         payments = validated_data.pop('payments', None)
-        for attr, val in validated_data.items():
-            setattr(instance, attr, val)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
         instance.save()
         if payments is not None:
             instance.payments.all().delete()
-            for p in payments:
-                InvoicePayment.objects.create(invoice=instance, **p)
+            for payment in payments:
+                InvoicePayment.objects.create(invoice=instance, **payment)
         return instance
 
 
@@ -181,8 +255,6 @@ class StockMovementSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         org = _ensure_org(self.context.get('request'))
         validated_data.setdefault('organization', org)
-
-        # product yoksa sku ile bul veya oluştur
         product = validated_data.get('product')
         if not product:
             sku = None
@@ -204,7 +276,6 @@ class StockMovementSerializer(serializers.ModelSerializer):
                         reorder_point=0,
                     )
                 validated_data['product'] = product
-
         return super().create(validated_data)
 
     def to_representation(self, instance):
@@ -235,8 +306,8 @@ class VehicleSerializer(serializers.ModelSerializer):
         plate = validated_data.get('plate')
         if not plate:
             import uuid
+
             validated_data['plate'] = f"PLT-{uuid.uuid4().hex[:6].upper()}"
         if not validated_data.get('name'):
             validated_data['name'] = validated_data['plate']
         return super().create(validated_data)
-
