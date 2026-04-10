@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { Check, Download, Plus, Send, Shield, Trash2 } from 'lucide-react'
 
 import { PageHeader } from '@/components/app-shell'
+import { CompanyModal } from '@/components/company-modal'
 import { DataTable } from '@/components/data-table'
 import { RbacGuard } from '@/components/rbac'
 import { Badge } from '@/components/ui/badge'
@@ -23,7 +24,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
 import api from '@/lib/api'
 import { TemplateQuoteWizardTrigger } from '@/components/quote-template-wizard'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { useAppStore } from '@/state/use-app-store'
 import type { Product, Quote, SalesDocumentType } from '@/types'
 
@@ -42,6 +43,7 @@ const DOCUMENT_TYPE_TR = {
 }
 
 const SELLER_OPTIONS = [{ value: 'ORTKA', label: 'ORTKA' }, { value: 'AYKA', label: 'AYKA' }]
+const ADD_CUSTOMER_OPTION = '__add_company__'
 
 const SECTION_OPTIONS = [
   { value: 'steel_door', label: 'Çelik Kapı' },
@@ -215,7 +217,21 @@ const getLineDiscountedBase = (line: any) => {
 const getLineDiscountTotal = (line: any) => getLineBase(line) - getLineDiscountedBase(line)
 const getEffectiveDiscountRate = (line: any) => 100 - ((100 - Number(line.discount || 0)) * (100 - Number(line.discountSecondary || 0))) / 100
 
-const buildCsv = (quotes: Quote[]) => quotes.map((quote) => [DOCUMENT_TYPE_TR[quote.documentType], quote.number, quote.customerName || quote.customerId, quote.preparedByName || quote.owner, quoteStatusTr(quote.status), quote.validUntil, quote.total].join(',')).join('\n')
+const buildCsv = (quotes: Quote[]) =>
+  quotes
+    .map((quote) =>
+      [
+        DOCUMENT_TYPE_TR[quote.documentType],
+        quote.number,
+        quote.customerName || quote.customerId,
+        quote.preparedByName || quote.owner,
+        formatDateTime(quote.createdAt),
+        quoteStatusTr(quote.status),
+        quote.validUntil,
+        quote.total,
+      ].join(',')
+    )
+    .join('\n')
 
 async function downloadDocument(quoteId: string) {
   const manifestResponse = await api.get(`/quotes/${quoteId}/export-files/`)
@@ -319,9 +335,12 @@ export function QuotesPage() {
     [quotes, status, customer, documentType, minAmount, maxAmount]
   )
 
+  const hasActiveFilters = documentType !== 'all' || status !== 'all' || customer !== 'all' || Boolean(minAmount) || Boolean(maxAmount)
+
   const columns: ColumnDef<Quote>[] = [
     { accessorKey: 'documentType', header: 'Tür', cell: ({ row }) => <Badge variant="outline">{DOCUMENT_TYPE_TR[row.original.documentType]}</Badge> },
     { accessorKey: 'number', header: 'No' },
+    { accessorKey: 'createdAt', header: 'Oluşturulma', cell: ({ row }) => formatDateTime(row.original.createdAt) },
     { accessorKey: 'customerId', header: 'Müşteri', cell: ({ row }) => row.original.customerName || companies.find((company) => company.id === row.original.customerId)?.name || '' },
     { accessorKey: 'preparedByName', header: 'Hazırlayan', cell: ({ row }) => row.original.preparedByName || row.original.owner },
     { accessorKey: 'total', header: 'Tutar', cell: ({ row }) => formatCurrency(row.original.total) },
@@ -359,7 +378,7 @@ export function QuotesPage() {
     <div className="space-y-4">
       <PageHeader
         title="Teklif ve Sözleşme Yönetimi"
-        description="Teklifler, sözleşmeler ve ayrı XLSX dışa aktarma"
+        description="Teklif ve sözleşme oluşturma, durum takibi, detay görüntüleme ve belge indirme"
         actions={
           <div className="flex gap-2">
             <RbacGuard perm="quotes.edit">
@@ -391,21 +410,75 @@ export function QuotesPage() {
         }
       />
 
-      <div className="flex flex-wrap gap-2">
-        <Select value={documentType} onValueChange={(value) => setDocumentType(value as any)}>
-          <SelectTrigger className="w-44"><SelectValue placeholder="Belge türü" /></SelectTrigger>
-          <SelectContent><SelectItem value="all">Tümü</SelectItem><SelectItem value="Contract">Sözleşme</SelectItem><SelectItem value="Quote">Teklif</SelectItem></SelectContent>
-        </Select>
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-44"><SelectValue placeholder="Durum" /></SelectTrigger>
-          <SelectContent><SelectItem value="all">Tümü</SelectItem>{['Draft', 'Sent', 'Under Review', 'Approved', 'Rejected', 'Converted'].map((item) => <SelectItem key={item} value={item}>{quoteStatusTr(item)}</SelectItem>)}</SelectContent>
-        </Select>
-        <Select value={customer} onValueChange={setCustomer}>
-          <SelectTrigger className="w-60"><SelectValue placeholder="Müşteri" /></SelectTrigger>
-          <SelectContent><SelectItem value="all">Tüm müşteriler</SelectItem>{companies.map((company) => <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>)}</SelectContent>
-        </Select>
-        <Input placeholder="Min tutar" value={minAmount} onChange={(event) => setMinAmount(event.target.value)} className="w-28" />
-        <Input placeholder="Max tutar" value={maxAmount} onChange={(event) => setMaxAmount(event.target.value)} className="w-28" />
+      <div className="grid gap-3 rounded-xl border border-border/70 bg-card/40 p-4 md:grid-cols-2 xl:grid-cols-[220px_220px_minmax(280px,1fr)_140px_140px_auto]">
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Belge tipi</Label>
+          <Select value={documentType} onValueChange={(value) => setDocumentType(value as any)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Teklif / Sözleşme" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Teklif / Sözleşme</SelectItem>
+              <SelectItem value="Quote">Sadece teklifler</SelectItem>
+              <SelectItem value="Contract">Sadece sözleşmeler</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Durum</Label>
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger>
+              <SelectValue placeholder="Tüm durumlar" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tüm durumlar</SelectItem>
+              {['Draft', 'Sent', 'Under Review', 'Approved', 'Rejected', 'Converted'].map((item) => <SelectItem key={item} value={item}>{quoteStatusTr(item)}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Müşteri</Label>
+          <Select value={customer} onValueChange={setCustomer}>
+            <SelectTrigger>
+              <SelectValue placeholder="Tüm müşteriler" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tüm müşteriler</SelectItem>
+              {companies.map((company) => <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Min. tutar</Label>
+          <Input placeholder="Alt limit" value={minAmount} onChange={(event) => setMinAmount(event.target.value)} inputMode="numeric" />
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Maks. tutar</Label>
+          <Input placeholder="Üst limit" value={maxAmount} onChange={(event) => setMaxAmount(event.target.value)} inputMode="numeric" />
+        </div>
+
+        <div className="flex items-end">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="w-full xl:w-auto"
+            disabled={!hasActiveFilters}
+            onClick={() => {
+              setDocumentType('all')
+              setStatus('all')
+              setCustomer('all')
+              setMinAmount('')
+              setMaxAmount('')
+            }}
+          >
+            Filtreleri temizle
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -428,9 +501,10 @@ export function QuotesPage() {
 }
 
 function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
-  const { data, createQuote } = useAppStore()
+  const { data, createCompany, createQuote } = useAppStore()
   const { toast } = useToast()
   const [open, setOpen] = useState(false)
+  const [customerModalOpen, setCustomerModalOpen] = useState(false)
   const companies = data.companies
   const products = data.products
   const preparers = useMemo(() => data.users.filter((user) => user.canPrepareQuotes || user.permissions?.includes('quotes.prepare')), [data.users])
@@ -443,16 +517,22 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
   const selectedCustomer = companies.find((company) => company.id === form.watch('customerId'))
   const lines = form.watch('lines')
 
+  const applyCustomerToForm = (company: any, includeCustomerId = false) => {
+    if (!company) return
+    if (includeCustomerId) form.setValue('customerId', company.id, { shouldDirty: true, shouldValidate: true })
+    form.setValue('customerName', company.name || '')
+    form.setValue('customerTaxOffice', company.taxOffice || '')
+    form.setValue('customerTaxNumber', company.taxNumber || '')
+    form.setValue('customerAddress', company.address || '')
+    form.setValue('customerAuthorizedPerson', company.authorizedPerson || '')
+    form.setValue('customerPhone', company.phone || '')
+    form.setValue('customerEmail', company.email || '')
+    form.setValue('signatureCustomerLabel', company.name || '')
+  }
+
   useEffect(() => {
     if (!selectedCustomer) return
-    form.setValue('customerName', selectedCustomer.name || '')
-    form.setValue('customerTaxOffice', selectedCustomer.taxOffice || '')
-    form.setValue('customerTaxNumber', selectedCustomer.taxNumber || '')
-    form.setValue('customerAddress', selectedCustomer.address || '')
-    form.setValue('customerAuthorizedPerson', selectedCustomer.authorizedPerson || '')
-    form.setValue('customerPhone', selectedCustomer.phone || '')
-    form.setValue('customerEmail', selectedCustomer.email || '')
-    form.setValue('signatureCustomerLabel', selectedCustomer.name || '')
+    applyCustomerToForm(selectedCustomer)
   }, [selectedCustomer, form])
 
   const subtotal = lines.reduce((sum, line) => sum + getLineBase(line), 0)
@@ -470,6 +550,22 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
   const getDiscountValidationMessage = (nextLines: any[]) => {
     const invalidLineIndex = nextLines.findIndex((line) => getEffectiveDiscountRate(line) > 50)
     return invalidLineIndex >= 0 ? `${invalidLineIndex + 1}. kalemde iki iskonto birlikte en fazla %50 etkin iskonto oluşturabilir.` : null
+  }
+  const handleCustomerCreate = async (values: any) => {
+    const createdCompany = await createCompany(values as any)
+    const nextCompany =
+      createdCompany ??
+      useAppStore
+        .getState()
+        .data.companies.find(
+          (company) =>
+            company.name === values.name &&
+            (!values.email || company.email === values.email) &&
+            (!values.phone || company.phone === values.phone)
+        )
+
+    if (nextCompany) applyCustomerToForm(nextCompany, true)
+    toast({ title: 'Müşteri eklendi' })
   }
 
   const handleSave = form.handleSubmit(async (values) => {
@@ -535,14 +631,16 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
   })
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <>
+      <CompanyModal open={customerModalOpen} onOpenChange={setCustomerModalOpen} onSubmit={handleCustomerCreate} />
+      <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm" variant={mode === 'Contract' ? 'default' : 'outline'}>
           <Plus className="mr-2 h-4 w-4" />
           {mode === 'Contract' ? 'Yeni sözleşme' : 'Yeni teklif'}
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[92vh] max-w-6xl overflow-y-auto">
+      <DialogContent className={cn('max-h-[92vh] max-w-[82rem] overflow-y-auto', customerModalOpen && 'pointer-events-none opacity-0')}>
         <DialogHeader><DialogTitle>{mode === 'Contract' ? 'Sözleşme oluştur' : 'Teklif oluştur'}</DialogTitle></DialogHeader>
         <Tabs defaultValue="customer">
           <TabsList className="mb-3 grid grid-cols-4">
@@ -552,12 +650,31 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
             <TabsTrigger value="review">Özet</TabsTrigger>
           </TabsList>
           <TabsContent value="customer" className="space-y-4">
-            <div>
-              <Label>Müşteri</Label>
-              <Select value={form.watch('customerId')} onValueChange={(value) => form.setValue('customerId', value)}>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label>Müşteri</Label>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setCustomerModalOpen(true)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Müşteri ekle
+                </Button>
+              </div>
+              <Select
+                value={form.watch('customerId')}
+                onValueChange={(value) => {
+                  if (value === ADD_CUSTOMER_OPTION) {
+                    setCustomerModalOpen(true)
+                    return
+                  }
+                  form.setValue('customerId', value, { shouldDirty: true, shouldValidate: true })
+                }}
+              >
                 <SelectTrigger><SelectValue placeholder="Müşteri seçin" /></SelectTrigger>
-                <SelectContent>{companies.map((company) => <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>)}</SelectContent>
+                <SelectContent>
+                  <SelectItem value={ADD_CUSTOMER_OPTION}>Yeni müşteri / firma ekle</SelectItem>
+                  {companies.map((company) => <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>)}
+                </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">Listeden ayrılmadan yeni firma ekleyebilir ve eklediğiniz müşteriyi anında seçebilirsiniz.</p>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               <div><Label>Cari ünvanı</Label><Input value={form.watch('customerName') || ''} onChange={(event) => form.setValue('customerName', event.target.value)} /></div>
@@ -637,6 +754,7 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
         <DialogFooter><Button onClick={handleSave}>Kaydet</Button></DialogFooter>
       </DialogContent>
     </Dialog>
+    </>
   )
 }
 
@@ -694,7 +812,7 @@ export function QuoteDetailPage() {
           <TabsTrigger value="history">Geçmiş</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview"><Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Müşteri: {quote.customerName || company?.name}</p><p>Sahip: {quote.owner}</p><p>Hazırlayan: {quote.preparedByName || '-'}</p><p>Geçerlilik: {formatDate(quote.validUntil)}</p><p>Ödeme: {quote.terms.payment || '-'}</p><p>Teslim: {quote.terms.delivery || '-'}</p><p>KDV oranı: %{quote.vatRate ?? 20}</p><p>Toplam: {formatCurrency(quote.total)}</p></CardContent></Card></TabsContent>
+        <TabsContent value="overview"><Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Müşteri: {quote.customerName || company?.name}</p><p>Sahip: {quote.owner}</p><p>Hazırlayan: {quote.preparedByName || '-'}</p><p>Oluşturulma: {formatDateTime(quote.createdAt)}</p><p>Geçerlilik: {formatDate(quote.validUntil)}</p><p>Ödeme: {quote.terms.payment || '-'}</p><p>Teslim: {quote.terms.delivery || '-'}</p><p>KDV oranı: %{quote.vatRate ?? 20}</p><p>Toplam: {formatCurrency(quote.total)}</p></CardContent></Card></TabsContent>
         <TabsContent value="lines"><Card><CardContent className="space-y-3 pt-4">{quote.lines.map((line, index) => <div key={`${line.name}-${index}`} className="rounded-md border p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold">{line.name}</p><p className="text-muted-foreground">{sectionLabel(line.sectionKey)} - Kod: {line.details?.code || line.sku || '-'}</p></div><p>{formatCurrency(line.unitPrice)} / {line.unit || 'Adet'}</p></div><div className="mt-2 grid gap-1 md:grid-cols-3"><span>Detay 1: {line.details?.primary || '-'}</span><span>Detay 2: {line.details?.secondary || '-'}</span><span>Miktar: {line.qty}</span><span>İskonto 1: %{line.discount || 0}</span><span>İskonto 2: %{line.discountSecondary || 0}</span><span>KDV: %{line.tax || 0}</span><span>Etkin iskonto: %{getEffectiveDiscountRate(line).toFixed(2)}</span><span>Net tutar: {formatCurrency(getLineDiscountedBase(line))}</span><span>Tutar: {formatCurrency(getLineBase(line))}</span></div>{line.details?.attributes && Object.keys(line.details.attributes).length > 0 && <div className="mt-3 grid gap-2 rounded-md bg-muted/30 p-3 md:grid-cols-2">{Object.entries(line.details.attributes).map(([key, value]) => <span key={key}>{key}: {String(value)}</span>)}</div>}</div>)}</CardContent></Card></TabsContent>
         <TabsContent value="document"><Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Satıcı firma: {quote.sellerCompanyKey || '-'}</p><p>Şablon: {templateLabel(quote.documentType, quote.contractConfig?.templateKey || quote.contractConfig?.template_key)}</p><p>Cari ünvanı: {customerSnapshot.name || quote.customerName || company?.name || '-'}</p><p>Vergi bilgisi: {[customerSnapshot.tax_office || customerSnapshot.taxOffice, customerSnapshot.tax_number || customerSnapshot.taxNumber].filter(Boolean).join(' / ') || '-'}</p><p>Yetkili: {customerSnapshot.authorized_person || customerSnapshot.authorizedPerson || '-'}</p><p>Telefon / mail: {[customerSnapshot.phone, customerSnapshot.email].filter(Boolean).join(' / ') || '-'}</p><p>Adres: {customerSnapshot.address || '-'}</p>{termsLines.length > 0 && <div className="space-y-2 pt-2"><p className="font-medium">Maddeler</p>{termsLines.map((term, index) => <p key={`term-${index}`}>{term}</p>)}</div>}{contractNotesLines.length > 0 && <div className="space-y-2 pt-2"><p className="font-medium">Sözleşme notları</p>{contractNotesLines.map((term, index) => <p key={`contract-note-${index}`}>{term}</p>)}</div>}</CardContent></Card></TabsContent>
         <TabsContent value="pricing"><Card><CardContent className="pt-4 space-y-2 text-sm"><p>Fiyatlama kuralları müşteri, ürün kategorisi ve hacim bazlı uygulanır.</p><div className="flex gap-2"><Badge>VIP müşteri %8</Badge><Badge>Donanım %5</Badge><Badge>50k+ %3</Badge></div></CardContent></Card></TabsContent>

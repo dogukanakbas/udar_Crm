@@ -125,6 +125,7 @@ export function AppShell() {
   }, [])
 
   const activePath = routerState.location.pathname
+  const isQuotesWorkspace = activePath.startsWith('/crm/quotes')
 
   if (isPublic) {
     return (
@@ -138,7 +139,7 @@ export function AppShell() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/30">
-      <div className="mx-auto flex max-w-[1400px]">
+      <div className={cn('mx-auto flex', isQuotesWorkspace ? 'max-w-[1640px]' : 'max-w-[1400px]')}>
         {loggedIn && (
           <aside className="hidden w-64 shrink-0 border-r border-border/70 bg-card/60 p-4 lg:block">
           <div className="mb-6 flex items-center gap-2">
@@ -200,7 +201,7 @@ export function AppShell() {
           </aside>
         )}
 
-        <main className="flex-1 min-w-0 px-3 md:px-6 overflow-x-hidden">
+        <main className={cn('flex-1 min-w-0 overflow-x-hidden px-3 md:px-6', isQuotesWorkspace && 'xl:px-7')}>
           <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-border/80 bg-background/80 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/70">
             <div className="lg:hidden">
               <MobileMenu />
