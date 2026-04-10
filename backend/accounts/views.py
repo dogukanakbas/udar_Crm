@@ -24,6 +24,7 @@ from rest_framework import viewsets, permissions, filters
 from permissions import IsOrgMember, HasAPIPermission
 from .models import Team, TeamAssociate, OrganizationSettings
 from .serializers import TeamSerializer, TeamAssociateSerializer
+from .utils import ensure_permissions_seeded, get_effective_permissions, user_has_perm
 
 
 class MeView(APIView):
@@ -69,6 +70,9 @@ class UsersListView(APIView):
             "role": u.role,
             "first_name": u.first_name or "",
             "last_name": u.last_name or "",
+            "full_name": f"{(u.first_name or '').strip()} {(u.last_name or '').strip()}".strip() or u.username,
+            "permissions": get_effective_permissions(u),
+            "can_prepare_quotes": user_has_perm(u, "quotes.prepare"),
         }
         for u in qs
     ]
@@ -441,6 +445,7 @@ class PermissionListView(APIView):
   permission_classes = [IsAuthenticated]
 
   def get(self, request):
+    ensure_permissions_seeded()
     perms = list(Permission.objects.all().values_list("code", flat=True))
     return Response({"permissions": perms})
 
@@ -449,6 +454,7 @@ class RolePermissionView(APIView):
   permission_classes = [IsAuthenticated]
 
   def get(self, request):
+    ensure_permissions_seeded()
     # Only Admin users can view/edit role permissions
     if getattr(request.user, "role", "") != "Admin":
       return Response({"detail": "Only Admin"}, status=status.HTTP_403_FORBIDDEN)
@@ -458,6 +464,7 @@ class RolePermissionView(APIView):
     return Response(data)
 
   def post(self, request):
+    ensure_permissions_seeded()
     if getattr(request.user, "role", "") != "Admin":
       return Response({"detail": "Only Admin"}, status=status.HTTP_403_FORBIDDEN)
     role = request.data.get("role")

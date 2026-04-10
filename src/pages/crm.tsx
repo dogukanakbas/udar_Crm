@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
+import { Textarea } from '@/components/ui/textarea'
 import { PageHeader } from '@/components/app-shell'
 import { useToast } from '@/components/ui/use-toast'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -38,9 +39,16 @@ const companySchema = z.object({
   name: z.string().min(2),
   industry: z.string().optional().default(''),
   region: z.string().optional().default(''),
+  country: z.string().optional().default(''),
   size: z.string().optional().default(''),
   owner: z.string().optional().default(''),
   annualRevenue: z.coerce.number().optional().default(0),
+  address: z.string().optional().default(''),
+  taxOffice: z.string().optional().default(''),
+  taxNumber: z.string().optional().default(''),
+  authorizedPerson: z.string().optional().default(''),
+  phone: z.string().optional().default(''),
+  email: z.string().optional().default(''),
 })
 
 const contactSchema = z.object({
@@ -459,37 +467,119 @@ export function LeadDetailPage() {
   )
 }
 
-function CompanyModal({ children, onSubmit }: { children: React.ReactNode; onSubmit: (values: z.infer<typeof companySchema>) => void }) {
+function CompanyModal({
+  children,
+  onSubmit,
+  company,
+}: {
+  children: React.ReactNode
+  onSubmit: (values: z.infer<typeof companySchema>) => void | Promise<void>
+  company?: CompanyType
+}) {
   const form = useForm<z.infer<typeof companySchema>>({
     resolver: zodResolver(companySchema) as any,
-    defaultValues: { name: '', industry: '', region: '', size: '', owner: '', annualRevenue: 0 },
+    defaultValues: {
+      name: company?.name ?? '',
+      industry: company?.industry ?? '',
+      region: company?.region ?? '',
+      country: company?.country ?? '',
+      size: company?.size ?? '',
+      owner: company?.owner ?? '',
+      annualRevenue: company?.annualRevenue ?? 0,
+      address: company?.address ?? '',
+      taxOffice: company?.taxOffice ?? '',
+      taxNumber: company?.taxNumber ?? '',
+      authorizedPerson: company?.authorizedPerson ?? '',
+      phone: company?.phone ?? '',
+      email: company?.email ?? '',
+    },
   })
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    form.reset({
+      name: company?.name ?? '',
+      industry: company?.industry ?? '',
+      region: company?.region ?? '',
+      country: company?.country ?? '',
+      size: company?.size ?? '',
+      owner: company?.owner ?? '',
+      annualRevenue: company?.annualRevenue ?? 0,
+      address: company?.address ?? '',
+      taxOffice: company?.taxOffice ?? '',
+      taxNumber: company?.taxNumber ?? '',
+      authorizedPerson: company?.authorizedPerson ?? '',
+      phone: company?.phone ?? '',
+      email: company?.email ?? '',
+    })
+  }, [company, form])
+
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Yeni Şirket</DialogTitle>
+          <DialogTitle>{company ? 'Şirketi Düzenle' : 'Yeni Şirket'}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
-          <div>
-            <Label>Ad</Label>
-            <Input {...form.register('name')} />
-          </div>
-          <div>
-            <Label>Sektör</Label>
-            <Input {...form.register('industry')} />
-          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>Bölge</Label>
+              <Label>Ad</Label>
+              <Input {...form.register('name')} />
+            </div>
+            <div>
+              <Label>Sektör / grup</Label>
+              <Input {...form.register('industry')} />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <Label>Şehir</Label>
               <Input {...form.register('region')} />
+            </div>
+            <div>
+              <Label>Ülke</Label>
+              <Input {...form.register('country')} />
             </div>
             <div>
               <Label>Ölçek</Label>
               <Input {...form.register('size')} />
             </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Yetkili</Label>
+              <Input {...form.register('authorizedPerson')} />
+            </div>
+            <div>
+              <Label>Vergi dairesi</Label>
+              <Input {...form.register('taxOffice')} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Vergi no</Label>
+              <Input {...form.register('taxNumber')} />
+            </div>
+            <div>
+              <Label>Sahip</Label>
+              <Input {...form.register('owner')} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Telefon</Label>
+              <Input {...form.register('phone')} />
+            </div>
+            <div>
+              <Label>E-posta</Label>
+              <Input type="email" {...form.register('email')} />
+            </div>
+          </div>
+          <div>
+            <Label>Adres</Label>
+            <Textarea rows={4} {...form.register('address')} />
           </div>
         </div>
         <DialogFooter>
@@ -499,6 +589,22 @@ function CompanyModal({ children, onSubmit }: { children: React.ReactNode; onSub
               setSubmitError(null)
               try {
                 await onSubmit(values)
+                form.reset({
+                  name: company?.name ?? '',
+                  industry: company?.industry ?? '',
+                  region: company?.region ?? '',
+                  country: company?.country ?? '',
+                  size: company?.size ?? '',
+                  owner: company?.owner ?? '',
+                  annualRevenue: company?.annualRevenue ?? 0,
+                  address: company?.address ?? '',
+                  taxOffice: company?.taxOffice ?? '',
+                  taxNumber: company?.taxNumber ?? '',
+                  authorizedPerson: company?.authorizedPerson ?? '',
+                  phone: company?.phone ?? '',
+                  email: company?.email ?? '',
+                })
+                setOpen(false)
               } catch (err: any) {
                 const detail = err?.response?.data
                 if (detail && typeof detail === 'object') {
@@ -808,25 +914,59 @@ export function OpportunitiesPage() {
 }
 
 export function CompaniesPage() {
-  const { data, createCompany } = useAppStore()
+  const { data, createCompany, updateCompany } = useAppStore()
   const { toast } = useToast()
   const columns: ColumnDef<(typeof data.companies)[number]>[] = [
     { accessorKey: 'name', header: 'Şirket' },
     { accessorKey: 'industry', header: 'Sektör' },
-    { accessorKey: 'region', header: 'Bölge' },
-    { accessorKey: 'size', header: 'Ölçek' },
-    { accessorKey: 'owner', header: 'Sahip' },
-    { accessorKey: 'annualRevenue', header: 'Ciro', cell: ({ row }) => formatCurrency(row.original.annualRevenue) },
+    { accessorKey: 'authorizedPerson', header: 'Yetkili' },
+    {
+      accessorKey: 'taxNumber',
+      header: 'Vergi',
+      cell: ({ row }) => [row.original.taxOffice, row.original.taxNumber].filter(Boolean).join(' / ') || '—',
+    },
+    {
+      accessorKey: 'contact',
+      header: 'İletişim',
+      cell: ({ row }) => [row.original.phone, row.original.email].filter(Boolean).join(' / ') || '—',
+    },
+    {
+      accessorKey: 'location',
+      header: 'Konum',
+      cell: ({ row }) => [row.original.region, row.original.country].filter(Boolean).join(' / ') || '—',
+    },
+    {
+      accessorKey: 'address',
+      header: 'Adres',
+      cell: ({ row }) => row.original.address || '—',
+    },
+    {
+      id: 'actions',
+      header: '',
+      cell: ({ row }) => (
+        <CompanyModal
+          company={row.original}
+          onSubmit={async (values) => {
+            await updateCompany(row.original.id, values as any)
+            toast({ title: 'Şirket güncellendi' })
+          }}
+        >
+          <Button variant="ghost" size="sm">
+            Düzenle
+          </Button>
+        </CompanyModal>
+      ),
+    },
   ]
   return (
-    <div>
+    <div className="space-y-4">
       <PageHeader
         title="Şirketler"
-        description="Hızlı istatistiklerle dizin"
+        description="Cari bilgiler, vergi detayları ve sözleşmede kullanılacak alıcı alanları"
         actions={
           <CompanyModal
-            onSubmit={(values) => {
-              createCompany(values as any)
+            onSubmit={async (values) => {
+              await createCompany(values as any)
               toast({ title: 'Şirket oluşturuldu' })
             }}
           >
@@ -837,6 +977,30 @@ export function CompaniesPage() {
           </CompanyModal>
         }
       />
+      <div className="grid gap-3 md:grid-cols-3">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Toplam şirket</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">{data.companies.length}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Vergi bilgisi dolu</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {data.companies.filter((company) => company.taxNumber || company.taxOffice).length}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">İletişim bilgisi dolu</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {data.companies.filter((company) => company.phone || company.email || company.address).length}
+          </CardContent>
+        </Card>
+      </div>
       <DataTable columns={columns} data={data.companies} searchKey="name" />
     </div>
   )

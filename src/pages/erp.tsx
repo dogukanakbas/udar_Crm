@@ -20,9 +20,10 @@ import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle, SheetTrigger
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
+import { InventoryPanel } from '@/pages/inventory-panel'
 import { useAppStore } from '@/state/use-app-store'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import type { Invoice, Product, SalesOrder } from '@/types'
+import type { Category, Invoice, Product, SalesOrder } from '@/types'
 import { RbacGuard } from '@/components/rbac'
 
 export function SalesOrdersPage() {
@@ -160,9 +161,16 @@ export function PurchasesPage() {
 }
 
 export function InventoryPage() {
-  const { data, adjustInventory, upsertProduct } = useAppStore()
+  return <InventoryPanel />
+}
+
+function LegacyInventoryPage() {
+  const { data, adjustInventory, upsertCategory, upsertProduct } = useAppStore()
   const [adjustSku, setAdjustSku] = useState<string | null>(null)
   const [openProduct, setOpenProduct] = useState(false)
+  const [openCategory, setOpenCategory] = useState(false)
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null)
 
   const columns: ColumnDef<Product>[] = [
     { accessorKey: 'sku', header: 'SKU' },

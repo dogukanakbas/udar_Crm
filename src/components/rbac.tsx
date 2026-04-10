@@ -11,7 +11,7 @@ export function RbacGuard({ perm, children, fallback = null }: Props) {
   const staticMap: Record<string, string[]> = {
     Admin: ['*'],
     Manager: ['*'],
-    Sales: ['quotes.view', 'quotes.edit', 'products.view', 'partners.view', 'orders.view', 'tasks.view', 'tasks.edit', 'leads.view', 'leads.edit', 'opportunities.view', 'opportunities.edit'],
+    Sales: ['quotes.view', 'quotes.edit', 'quotes.prepare', 'products.view', 'partners.view', 'orders.view', 'tasks.view', 'tasks.edit', 'leads.view', 'leads.edit', 'opportunities.view', 'opportunities.edit'],
     Finance: ['quotes.view', 'quotes.approve', 'invoices.view', 'invoices.edit', 'invoices.pay', 'approvals.view', 'orders.view'],
     Support: ['tickets.view', 'tickets.edit', 'tasks.view', 'tasks.edit'],
     Warehouse: ['products.view', 'orders.view', 'orders.receive', 'inventory.view', 'inventory.edit'],
@@ -36,7 +36,7 @@ export function RbacFormGuard({ perm, children }: FormGuardProps) {
     const staticMap: Record<string, string[]> = {
       Admin: ['*'],
       Manager: ['*'],
-      Sales: ['quotes.view', 'quotes.edit', 'products.view', 'partners.view', 'orders.view', 'tasks.view', 'tasks.edit', 'leads.view', 'leads.edit', 'opportunities.view', 'opportunities.edit'],
+      Sales: ['quotes.view', 'quotes.edit', 'quotes.prepare', 'products.view', 'partners.view', 'orders.view', 'tasks.view', 'tasks.edit', 'leads.view', 'leads.edit', 'opportunities.view', 'opportunities.edit'],
       Finance: ['quotes.view', 'quotes.approve', 'invoices.view', 'invoices.edit', 'invoices.pay', 'approvals.view', 'orders.view'],
       Support: ['tickets.view', 'tickets.edit', 'tasks.view', 'tasks.edit'],
       Warehouse: ['products.view', 'orders.view', 'orders.receive', 'inventory.view', 'inventory.edit'],

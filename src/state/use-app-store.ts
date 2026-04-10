@@ -4,6 +4,7 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import api from '@/lib/api'
 import { clearTokens, getTokens } from '@/lib/auth'
 import type {
+  Category,
   Invoice,
   Lead,
   MockDbSnapshot,
@@ -33,6 +34,7 @@ type AppState = {
   logAccess?: (action: string, meta?: Record<string, any>) => void
   setLocale: (locale: MockDbSnapshot['settings']['locale']) => void
   createCompany: (payload: Omit<Company, 'id'>) => void
+  updateCompany: (id: string, patch: Partial<Company>) => void
   createContact: (payload: Omit<Contact, 'id'>) => void
   createLead: (payload: Omit<Lead, 'id' | 'createdAt' | 'timeline'>) => void
   updateLead: (id: string, patch: Partial<Lead>) => void
@@ -46,6 +48,7 @@ type AppState = {
   addInvoicePayment: (id: string, payment: Invoice['payments'][number]) => void
   adjustInventory: (sku: string, delta: number) => void
   upsertProduct: (product: Partial<Product> & { sku: string }) => void
+  upsertCategory: (category: Partial<Category>) => void
   createVehicle: (payload: Omit<Vehicle, 'id' | 'last_update'>) => void
   createSalesOrder: (payload: Partial<SalesOrder>) => void
   createTask: (task: Omit<Task, 'id'>) => void
@@ -74,6 +77,7 @@ const emptySnapshot: MockDbSnapshot = {
   opportunities: [],
   companies: [],
   contacts: [],
+  categories: [],
   products: [],
   salesOrders: [],
   purchaseOrders: [],
@@ -99,9 +103,14 @@ const emptySnapshot: MockDbSnapshot = {
 
 const mapQuote = (q: any, idx = 0) => ({
   id: String(q.id ?? idx),
+  documentType: q.document_type || 'Quote',
   number: q.number,
   customerId: String(q.customer ?? q.customer_id ?? ''),
+  customerName: q.customer_name || '',
   owner: q.owner_name || 'N/A',
+  preparedById: q.prepared_by ? String(q.prepared_by) : undefined,
+  preparedByName: q.prepared_by_name || '',
+  sellerCompanyKey: q.seller_company_key || '',
   status: q.status,
   validUntil: q.valid_until,
   total: Number(q.total ?? 0),
@@ -112,18 +121,37 @@ const mapQuote = (q: any, idx = 0) => ({
   vatRate: Number(q.vat_rate ?? 20),
   createdAt: q.created_at,
   updatedAt: q.updated_at,
+  contractConfig: q.contract_config || {},
   lines: (q.lines || []).map((l: any) => ({
-    sku: l.product || l.name,
+    id: l.id ? String(l.id) : undefined,
+    productId: l.product ? String(l.product) : undefined,
+    sku: l.product_sku || l.details?.code || l.name,
     name: l.name,
+    sectionKey: l.section_key || '',
     qty: Number(l.qty ?? 0),
     unitPrice: Number(l.unit_price ?? 0),
     discount: Number(l.discount ?? 0),
     tax: Number(l.tax ?? 0),
-    category: l.product?.category?.name || '',
+    unit: l.unit || '',
+    category: l.section_key || '',
+    details: l.details || {},
   })),
   approval: [],
   history: [],
   terms: { payment: q.payment_terms || '', delivery: q.delivery_terms || '', notes: q.notes || '' },
+})
+
+const serializeCompanyPayload = (payload: Partial<Company>) => ({
+  name: payload.name || '',
+  group: payload.industry || '',
+  city: payload.region || '',
+  country: payload.country || '',
+  address: payload.address || '',
+  tax_office: payload.taxOffice || '',
+  tax_number: payload.taxNumber || '',
+  authorized_person: payload.authorizedPerson || '',
+  phone: payload.phone || '',
+  email: payload.email || '',
 })
 
 export const useAppStore = create<AppState>()(
@@ -189,6 +217,7 @@ export const useAppStore = create<AppState>()(
       const emptyList = Promise.resolve({ data: [] })
       const settled = await Promise.allSettled([
         isWorkerRole ? emptyList : api.get('/products/'),
+        isWorkerRole ? emptyList : api.get('/categories/'),
         isWorkerRole ? emptyList : api.get('/quotes/'),
         isWorkerRole ? emptyList : api.get('/partners/'),
         isWorkerRole ? emptyList : api.get('/contacts/'),
@@ -203,6 +232,7 @@ export const useAppStore = create<AppState>()(
       ])
       const [
         productsRes,
+        categoriesRes,
         quotesRes,
         partnersRes,
         contactsRes,
@@ -215,27 +245,49 @@ export const useAppStore = create<AppState>()(
         usersRes,
         tasksRes,
       ] = settled.map((r: any) => (r.status === 'fulfilled' ? r.value : { data: [] }))
+      const categories = (categoriesRes.data || []).map((category: any, idx: number) => ({
+        id: String(category.id ?? idx),
+        name: category.name || '',
+        templateDefaults: category.template_defaults || {},
+        attributeSchema: category.attribute_schema || [],
+      }))
       const products = (productsRes.data || []).map((p: any, idx: number) => ({
         id: String(p.id ?? idx),
         sku: p.sku || p.name || `SKU-${idx}`,
         name: p.name,
-        category: p.category?.name || '',
+        category: p.category_name || '',
+        categoryId: p.category ? String(p.category) : undefined,
+        categoryName: p.category_name || '',
         stock: Number(p.stock ?? 0),
         reserved: Number(p.reserved ?? 0),
-        reorderPoint: 0,
+        reorderPoint: Number(p.reorder_point ?? 0),
         warehouse: '',
         price: Number(p.price ?? 0),
+        templateFamily: p.template_defaults?.template_family || p.category_template_defaults?.template_family || '',
+        templateDefaults: p.template_defaults || {},
+        categoryTemplateDefaults: p.category_template_defaults || {},
+        categoryAttributeSchema: p.category_attribute_schema || [],
+        resolvedAttributeSchema: p.resolved_attribute_schema || [],
+        attributeValues: p.attribute_values || {},
+        attributeSchemaOverride: p.attribute_schema_override || [],
       }))
       const companies = (partnersRes.data || []).map((c: any, idx: number) => ({
         id: String(c.id ?? idx),
         name: c.name,
         industry: c.group || '',
         region: c.city || '',
+        country: c.country || '',
         size: 'Enterprise',
         owner: 'N/A',
         rating: 0,
         currency: 'USD',
         annualRevenue: 0,
+        address: c.address || '',
+        taxOffice: c.tax_office || '',
+        taxNumber: c.tax_number || '',
+        authorizedPerson: c.authorized_person || '',
+        phone: c.phone || '',
+        email: c.email || '',
       }))
       const quotes = (quotesRes.data || []).map((q: any, idx: number) => mapQuote(q, idx))
       const leads = (leadsRes.data || []).map((l: any, idx: number) => ({
@@ -331,6 +383,9 @@ export const useAppStore = create<AppState>()(
         role: u.role,
         firstName: u.first_name || '',
         lastName: u.last_name || '',
+        fullName: u.full_name || [u.first_name, u.last_name].filter(Boolean).join(' ') || u.username,
+        permissions: u.permissions || [],
+        canPrepareQuotes: Boolean(u.can_prepare_quotes),
       }))
       const tasks: Task[] = (tasksRes.data || []).map((t: any, idx: number) => ({
         id: String(t.id ?? idx),
@@ -453,6 +508,7 @@ export const useAppStore = create<AppState>()(
           products,
           companies,
           contacts,
+          categories,
           quotes,
           leads,
           opportunities,
@@ -495,10 +551,19 @@ export const useAppStore = create<AppState>()(
     })(),
   createCompany: async (payload) => {
     try {
-      await api.post('/partners/', payload)
+      await api.post('/partners/', serializeCompanyPayload(payload))
       await get().hydrateFromApi()
     } catch (err) {
       console.error('API createCompany failed', err)
+      throw err
+    }
+  },
+  updateCompany: async (id, patch) => {
+    try {
+      await api.patch(`/partners/${id}/`, serializeCompanyPayload(patch))
+      await get().hydrateFromApi()
+    } catch (err) {
+      console.error('API updateCompany failed', err)
       throw err
     }
   },
@@ -649,9 +714,8 @@ export const useAppStore = create<AppState>()(
     try {
       const payload: any = { ...product }
       if (!payload.sku) payload.sku = ''
-      if (!payload.category) {
-        delete payload.category
-      }
+      payload.category = payload.categoryId || payload.category || null
+      delete payload.categoryId
       if ((product as any).id) {
         await api.patch(`/products/${(product as any).id}/`, payload)
       } else {
@@ -660,6 +724,24 @@ export const useAppStore = create<AppState>()(
       await get().hydrateFromApi()
     } catch (err) {
       console.error('API upsertProduct failed', err)
+      throw err
+    }
+  },
+  upsertCategory: async (category) => {
+    try {
+      const payload: any = {
+        name: category.name || '',
+        template_defaults: (category as any).templateDefaults || {},
+        attribute_schema: (category as any).attributeSchema || [],
+      }
+      if ((category as any).id) {
+        await api.patch(`/categories/${(category as any).id}/`, payload)
+      } else {
+        await api.post('/categories/', payload)
+      }
+      await get().hydrateFromApi()
+    } catch (err) {
+      console.error('API upsertCategory failed', err)
       throw err
     }
   },
@@ -946,6 +1028,7 @@ export const useAppStore = create<AppState>()(
       set((state) => ({ data: { ...state.data, quotes } }))
     } catch (err) {
       console.error('API createQuote failed', err)
+      throw err
     }
   },
   updateQuote: async (id, patch) => {
@@ -956,6 +1039,7 @@ export const useAppStore = create<AppState>()(
       set((state) => ({ data: { ...state.data, quotes } }))
     } catch (err) {
       console.error('API updateQuote failed', err)
+      throw err
     }
   },
   deleteQuotes: async (ids) => {

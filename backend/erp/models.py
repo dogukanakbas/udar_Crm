@@ -5,6 +5,8 @@ from organizations.models import Organization, Warehouse
 class Category(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='categories')
     name = models.CharField(max_length=100)
+    template_defaults = models.JSONField(default=dict, blank=True)
+    attribute_schema = models.JSONField(default=list, blank=True)
 
     def __str__(self):
         return self.name
@@ -15,6 +17,9 @@ class Product(models.Model):
     sku = models.CharField(max_length=100)
     name = models.CharField(max_length=255)
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True)
+    template_defaults = models.JSONField(default=dict, blank=True)
+    attribute_values = models.JSONField(default=dict, blank=True)
+    attribute_schema_override = models.JSONField(default=list, blank=True)
     price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     stock = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     reserved = models.DecimalField(max_digits=12, decimal_places=2, default=0)

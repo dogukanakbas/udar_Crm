@@ -1,8 +1,10 @@
-from rest_framework import viewsets, permissions, filters
+from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from django.http import FileResponse
 
 from .models import Quote, PricingRule, BusinessPartner, Lead, Opportunity, Contact
+from .contracts import build_document_export, list_document_exports
 from workflow.models import ApprovalInstance, ApprovalStep
 from erp.models import Product
 from .serializers import QuoteSerializer, PricingRuleSerializer, BusinessPartnerSerializer, ProductSerializer, LeadSerializer, OpportunitySerializer, ContactSerializer
@@ -42,20 +44,26 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         'apply_preview': 'quotes.edit',
     }
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['number', 'customer__name', 'status']
+    search_fields = ['number', 'customer__name', 'status', 'document_type']
     ordering_fields = ['created_at', 'total']
-    queryset = Quote.objects.all().select_related('customer')
+    queryset = Quote.objects.all().select_related('customer', 'owner', 'prepared_by').prefetch_related('lines__product__category')
 
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
+        document_type = self.request.query_params.get('document_type')
+        if document_type:
+            qs = qs.filter(document_type=document_type)
         if getattr(user, 'role', '') not in ['Admin', 'Manager']:
             qs = qs.filter(owner=user)
         return qs
 
     def perform_create(self, serializer):
         org = self.request.user.organization
-        number_range, _ = NumberRange.objects.get_or_create(organization=org, doc_type='QUOTE', defaults={'prefix': 'Q-'})
+        document_type = serializer.validated_data.get('document_type', 'Quote')
+        doc_type = 'CONTRACT' if document_type == 'Contract' else 'QUOTE'
+        prefix = 'C-' if doc_type == 'CONTRACT' else 'Q-'
+        number_range, _ = NumberRange.objects.get_or_create(organization=org, doc_type=doc_type, defaults={'prefix': prefix})
         number = number_range.next_number()
         serializer.save(organization=org, number=number, owner=self.request.user)
 
@@ -200,6 +208,25 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         tax_total = (subtotal - discount_total) * 0.18
         total = subtotal - discount_total + tax_total
         return Response({'subtotal': subtotal, 'discount_total': discount_total, 'tax_total': tax_total, 'total': total})
+
+    @action(detail=True, methods=['get'], url_path='export-xlsx')
+    def export_xlsx(self, request, pk=None):
+        quote = self.get_object()
+        try:
+            export = build_document_export(quote, template_key=request.query_params.get('template_key'))
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return FileResponse(
+            export['content'],
+            as_attachment=True,
+            filename=export['filename'],
+            content_type=export['content_type'],
+        )
+
+    @action(detail=True, methods=['get'], url_path='export-files')
+    def export_files(self, request, pk=None):
+        quote = self.get_object()
+        return Response({'files': list_document_exports(quote)})
 
 
 class PricingRuleViewSet(OrgScopedMixin, viewsets.ModelViewSet):
