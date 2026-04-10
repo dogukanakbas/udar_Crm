@@ -122,6 +122,7 @@ class Quote(models.Model):
 
     class Meta:
         unique_together = ('organization', 'number')
+        ordering = ['-created_at', '-id']
 
     def __str__(self):
         return self.number

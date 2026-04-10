@@ -56,7 +56,7 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             qs = qs.filter(document_type=document_type)
         if getattr(user, 'role', '') not in ['Admin', 'Manager']:
             qs = qs.filter(owner=user)
-        return qs
+        return qs.order_by('-created_at', '-id')
 
     def perform_create(self, serializer):
         org = self.request.user.organization
