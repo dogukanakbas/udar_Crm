@@ -33,7 +33,7 @@ type AppState = {
   setRole: (role: Role) => void
   logAccess?: (action: string, meta?: Record<string, any>) => void
   setLocale: (locale: MockDbSnapshot['settings']['locale']) => void
-  createCompany: (payload: Omit<Company, 'id'>) => void
+  createCompany: (payload: Omit<Company, 'id'>) => Promise<Company | undefined>
   updateCompany: (id: string, patch: Partial<Company>) => void
   createContact: (payload: Omit<Contact, 'id'>) => void
   createLead: (payload: Omit<Lead, 'id' | 'createdAt' | 'timeline'>) => void
@@ -552,8 +552,21 @@ export const useAppStore = create<AppState>()(
     })(),
   createCompany: async (payload) => {
     try {
-      await api.post('/partners/', serializeCompanyPayload(payload))
+      const res = await api.post('/partners/', serializeCompanyPayload(payload))
       await get().hydrateFromApi()
+      const companies = get().data.companies
+      const createdId = res.data?.id
+      if (createdId !== undefined && createdId !== null) {
+        return companies.find((company) => company.id === String(createdId))
+      }
+      return (
+        companies.find(
+          (company) =>
+            company.name === payload.name &&
+            (!payload.email || company.email === payload.email) &&
+            (!payload.phone || company.phone === payload.phone)
+        ) ?? companies[companies.length - 1]
+      )
     } catch (err) {
       console.error('API createCompany failed', err)
       throw err

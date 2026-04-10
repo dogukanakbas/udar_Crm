@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { Check, Download, Plus, Send, Shield, Trash2 } from 'lucide-react'
 
 import { PageHeader } from '@/components/app-shell'
+import { CompanyModal } from '@/components/company-modal'
 import { DataTable } from '@/components/data-table'
 import { RbacGuard } from '@/components/rbac'
 import { Badge } from '@/components/ui/badge'
@@ -23,7 +24,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
 import api from '@/lib/api'
 import { TemplateQuoteWizardTrigger } from '@/components/quote-template-wizard'
-import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
+import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { useAppStore } from '@/state/use-app-store'
 import type { Product, Quote, SalesDocumentType } from '@/types'
 
@@ -42,6 +43,7 @@ const DOCUMENT_TYPE_TR = {
 }
 
 const SELLER_OPTIONS = [{ value: 'ORTKA', label: 'ORTKA' }, { value: 'AYKA', label: 'AYKA' }]
+const ADD_CUSTOMER_OPTION = '__add_company__'
 
 const SECTION_OPTIONS = [
   { value: 'steel_door', label: 'Çelik Kapı' },
@@ -499,9 +501,10 @@ export function QuotesPage() {
 }
 
 function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
-  const { data, createQuote } = useAppStore()
+  const { data, createCompany, createQuote } = useAppStore()
   const { toast } = useToast()
   const [open, setOpen] = useState(false)
+  const [customerModalOpen, setCustomerModalOpen] = useState(false)
   const companies = data.companies
   const products = data.products
   const preparers = useMemo(() => data.users.filter((user) => user.canPrepareQuotes || user.permissions?.includes('quotes.prepare')), [data.users])
@@ -514,16 +517,22 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
   const selectedCustomer = companies.find((company) => company.id === form.watch('customerId'))
   const lines = form.watch('lines')
 
+  const applyCustomerToForm = (company: any, includeCustomerId = false) => {
+    if (!company) return
+    if (includeCustomerId) form.setValue('customerId', company.id, { shouldDirty: true, shouldValidate: true })
+    form.setValue('customerName', company.name || '')
+    form.setValue('customerTaxOffice', company.taxOffice || '')
+    form.setValue('customerTaxNumber', company.taxNumber || '')
+    form.setValue('customerAddress', company.address || '')
+    form.setValue('customerAuthorizedPerson', company.authorizedPerson || '')
+    form.setValue('customerPhone', company.phone || '')
+    form.setValue('customerEmail', company.email || '')
+    form.setValue('signatureCustomerLabel', company.name || '')
+  }
+
   useEffect(() => {
     if (!selectedCustomer) return
-    form.setValue('customerName', selectedCustomer.name || '')
-    form.setValue('customerTaxOffice', selectedCustomer.taxOffice || '')
-    form.setValue('customerTaxNumber', selectedCustomer.taxNumber || '')
-    form.setValue('customerAddress', selectedCustomer.address || '')
-    form.setValue('customerAuthorizedPerson', selectedCustomer.authorizedPerson || '')
-    form.setValue('customerPhone', selectedCustomer.phone || '')
-    form.setValue('customerEmail', selectedCustomer.email || '')
-    form.setValue('signatureCustomerLabel', selectedCustomer.name || '')
+    applyCustomerToForm(selectedCustomer)
   }, [selectedCustomer, form])
 
   const subtotal = lines.reduce((sum, line) => sum + getLineBase(line), 0)
@@ -541,6 +550,22 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
   const getDiscountValidationMessage = (nextLines: any[]) => {
     const invalidLineIndex = nextLines.findIndex((line) => getEffectiveDiscountRate(line) > 50)
     return invalidLineIndex >= 0 ? `${invalidLineIndex + 1}. kalemde iki iskonto birlikte en fazla %50 etkin iskonto oluşturabilir.` : null
+  }
+  const handleCustomerCreate = async (values: any) => {
+    const createdCompany = await createCompany(values as any)
+    const nextCompany =
+      createdCompany ??
+      useAppStore
+        .getState()
+        .data.companies.find(
+          (company) =>
+            company.name === values.name &&
+            (!values.email || company.email === values.email) &&
+            (!values.phone || company.phone === values.phone)
+        )
+
+    if (nextCompany) applyCustomerToForm(nextCompany, true)
+    toast({ title: 'Müşteri eklendi' })
   }
 
   const handleSave = form.handleSubmit(async (values) => {
@@ -606,14 +631,16 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
   })
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <>
+      <CompanyModal open={customerModalOpen} onOpenChange={setCustomerModalOpen} onSubmit={handleCustomerCreate} />
+      <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm" variant={mode === 'Contract' ? 'default' : 'outline'}>
           <Plus className="mr-2 h-4 w-4" />
           {mode === 'Contract' ? 'Yeni sözleşme' : 'Yeni teklif'}
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[92vh] max-w-[82rem] overflow-y-auto">
+      <DialogContent className={cn('max-h-[92vh] max-w-[82rem] overflow-y-auto', customerModalOpen && 'pointer-events-none opacity-0')}>
         <DialogHeader><DialogTitle>{mode === 'Contract' ? 'Sözleşme oluştur' : 'Teklif oluştur'}</DialogTitle></DialogHeader>
         <Tabs defaultValue="customer">
           <TabsList className="mb-3 grid grid-cols-4">
@@ -623,12 +650,31 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
             <TabsTrigger value="review">Özet</TabsTrigger>
           </TabsList>
           <TabsContent value="customer" className="space-y-4">
-            <div>
-              <Label>Müşteri</Label>
-              <Select value={form.watch('customerId')} onValueChange={(value) => form.setValue('customerId', value)}>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label>Müşteri</Label>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setCustomerModalOpen(true)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Müşteri ekle
+                </Button>
+              </div>
+              <Select
+                value={form.watch('customerId')}
+                onValueChange={(value) => {
+                  if (value === ADD_CUSTOMER_OPTION) {
+                    setCustomerModalOpen(true)
+                    return
+                  }
+                  form.setValue('customerId', value, { shouldDirty: true, shouldValidate: true })
+                }}
+              >
                 <SelectTrigger><SelectValue placeholder="Müşteri seçin" /></SelectTrigger>
-                <SelectContent>{companies.map((company) => <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>)}</SelectContent>
+                <SelectContent>
+                  <SelectItem value={ADD_CUSTOMER_OPTION}>Yeni müşteri / firma ekle</SelectItem>
+                  {companies.map((company) => <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>)}
+                </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">Listeden ayrılmadan yeni firma ekleyebilir ve eklediğiniz müşteriyi anında seçebilirsiniz.</p>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               <div><Label>Cari ünvanı</Label><Input value={form.watch('customerName') || ''} onChange={(event) => form.setValue('customerName', event.target.value)} /></div>
@@ -708,6 +754,7 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
         <DialogFooter><Button onClick={handleSave}>Kaydet</Button></DialogFooter>
       </DialogContent>
     </Dialog>
+    </>
   )
 }
 
