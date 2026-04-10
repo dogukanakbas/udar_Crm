@@ -376,7 +376,7 @@ export function QuotesPage() {
     <div className="space-y-4">
       <PageHeader
         title="Teklif ve Sözleşme Yönetimi"
-        description="Teklifler, sözleşmeler ve ayrı XLSX dışa aktarma"
+        description="Teklif ve sözleşme oluşturma, durum takibi, detay görüntüleme ve belge indirme"
         actions={
           <div className="flex gap-2">
             <RbacGuard perm="quotes.edit">
