@@ -23,7 +23,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
 import api from '@/lib/api'
 import { TemplateQuoteWizardTrigger } from '@/components/quote-template-wizard'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { useAppStore } from '@/state/use-app-store'
 import type { Product, Quote, SalesDocumentType } from '@/types'
 
@@ -215,7 +215,21 @@ const getLineDiscountedBase = (line: any) => {
 const getLineDiscountTotal = (line: any) => getLineBase(line) - getLineDiscountedBase(line)
 const getEffectiveDiscountRate = (line: any) => 100 - ((100 - Number(line.discount || 0)) * (100 - Number(line.discountSecondary || 0))) / 100
 
-const buildCsv = (quotes: Quote[]) => quotes.map((quote) => [DOCUMENT_TYPE_TR[quote.documentType], quote.number, quote.customerName || quote.customerId, quote.preparedByName || quote.owner, quoteStatusTr(quote.status), quote.validUntil, quote.total].join(',')).join('\n')
+const buildCsv = (quotes: Quote[]) =>
+  quotes
+    .map((quote) =>
+      [
+        DOCUMENT_TYPE_TR[quote.documentType],
+        quote.number,
+        quote.customerName || quote.customerId,
+        quote.preparedByName || quote.owner,
+        formatDateTime(quote.createdAt),
+        quoteStatusTr(quote.status),
+        quote.validUntil,
+        quote.total,
+      ].join(',')
+    )
+    .join('\n')
 
 async function downloadDocument(quoteId: string) {
   const manifestResponse = await api.get(`/quotes/${quoteId}/export-files/`)
@@ -322,6 +336,7 @@ export function QuotesPage() {
   const columns: ColumnDef<Quote>[] = [
     { accessorKey: 'documentType', header: 'Tür', cell: ({ row }) => <Badge variant="outline">{DOCUMENT_TYPE_TR[row.original.documentType]}</Badge> },
     { accessorKey: 'number', header: 'No' },
+    { accessorKey: 'createdAt', header: 'Oluşturulma', cell: ({ row }) => formatDateTime(row.original.createdAt) },
     { accessorKey: 'customerId', header: 'Müşteri', cell: ({ row }) => row.original.customerName || companies.find((company) => company.id === row.original.customerId)?.name || '' },
     { accessorKey: 'preparedByName', header: 'Hazırlayan', cell: ({ row }) => row.original.preparedByName || row.original.owner },
     { accessorKey: 'total', header: 'Tutar', cell: ({ row }) => formatCurrency(row.original.total) },
@@ -542,7 +557,7 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
           {mode === 'Contract' ? 'Yeni sözleşme' : 'Yeni teklif'}
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[92vh] max-w-6xl overflow-y-auto">
+      <DialogContent className="max-h-[92vh] max-w-[82rem] overflow-y-auto">
         <DialogHeader><DialogTitle>{mode === 'Contract' ? 'Sözleşme oluştur' : 'Teklif oluştur'}</DialogTitle></DialogHeader>
         <Tabs defaultValue="customer">
           <TabsList className="mb-3 grid grid-cols-4">
@@ -694,7 +709,7 @@ export function QuoteDetailPage() {
           <TabsTrigger value="history">Geçmiş</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview"><Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Müşteri: {quote.customerName || company?.name}</p><p>Sahip: {quote.owner}</p><p>Hazırlayan: {quote.preparedByName || '-'}</p><p>Geçerlilik: {formatDate(quote.validUntil)}</p><p>Ödeme: {quote.terms.payment || '-'}</p><p>Teslim: {quote.terms.delivery || '-'}</p><p>KDV oranı: %{quote.vatRate ?? 20}</p><p>Toplam: {formatCurrency(quote.total)}</p></CardContent></Card></TabsContent>
+        <TabsContent value="overview"><Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Müşteri: {quote.customerName || company?.name}</p><p>Sahip: {quote.owner}</p><p>Hazırlayan: {quote.preparedByName || '-'}</p><p>Oluşturulma: {formatDateTime(quote.createdAt)}</p><p>Geçerlilik: {formatDate(quote.validUntil)}</p><p>Ödeme: {quote.terms.payment || '-'}</p><p>Teslim: {quote.terms.delivery || '-'}</p><p>KDV oranı: %{quote.vatRate ?? 20}</p><p>Toplam: {formatCurrency(quote.total)}</p></CardContent></Card></TabsContent>
         <TabsContent value="lines"><Card><CardContent className="space-y-3 pt-4">{quote.lines.map((line, index) => <div key={`${line.name}-${index}`} className="rounded-md border p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold">{line.name}</p><p className="text-muted-foreground">{sectionLabel(line.sectionKey)} - Kod: {line.details?.code || line.sku || '-'}</p></div><p>{formatCurrency(line.unitPrice)} / {line.unit || 'Adet'}</p></div><div className="mt-2 grid gap-1 md:grid-cols-3"><span>Detay 1: {line.details?.primary || '-'}</span><span>Detay 2: {line.details?.secondary || '-'}</span><span>Miktar: {line.qty}</span><span>İskonto 1: %{line.discount || 0}</span><span>İskonto 2: %{line.discountSecondary || 0}</span><span>KDV: %{line.tax || 0}</span><span>Etkin iskonto: %{getEffectiveDiscountRate(line).toFixed(2)}</span><span>Net tutar: {formatCurrency(getLineDiscountedBase(line))}</span><span>Tutar: {formatCurrency(getLineBase(line))}</span></div>{line.details?.attributes && Object.keys(line.details.attributes).length > 0 && <div className="mt-3 grid gap-2 rounded-md bg-muted/30 p-3 md:grid-cols-2">{Object.entries(line.details.attributes).map(([key, value]) => <span key={key}>{key}: {String(value)}</span>)}</div>}</div>)}</CardContent></Card></TabsContent>
         <TabsContent value="document"><Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Satıcı firma: {quote.sellerCompanyKey || '-'}</p><p>Şablon: {templateLabel(quote.documentType, quote.contractConfig?.templateKey || quote.contractConfig?.template_key)}</p><p>Cari ünvanı: {customerSnapshot.name || quote.customerName || company?.name || '-'}</p><p>Vergi bilgisi: {[customerSnapshot.tax_office || customerSnapshot.taxOffice, customerSnapshot.tax_number || customerSnapshot.taxNumber].filter(Boolean).join(' / ') || '-'}</p><p>Yetkili: {customerSnapshot.authorized_person || customerSnapshot.authorizedPerson || '-'}</p><p>Telefon / mail: {[customerSnapshot.phone, customerSnapshot.email].filter(Boolean).join(' / ') || '-'}</p><p>Adres: {customerSnapshot.address || '-'}</p>{termsLines.length > 0 && <div className="space-y-2 pt-2"><p className="font-medium">Maddeler</p>{termsLines.map((term, index) => <p key={`term-${index}`}>{term}</p>)}</div>}{contractNotesLines.length > 0 && <div className="space-y-2 pt-2"><p className="font-medium">Sözleşme notları</p>{contractNotesLines.map((term, index) => <p key={`contract-note-${index}`}>{term}</p>)}</div>}</CardContent></Card></TabsContent>
         <TabsContent value="pricing"><Card><CardContent className="pt-4 space-y-2 text-sm"><p>Fiyatlama kuralları müşteri, ürün kategorisi ve hacim bazlı uygulanır.</p><div className="flex gap-2"><Badge>VIP müşteri %8</Badge><Badge>Donanım %5</Badge><Badge>50k+ %3</Badge></div></CardContent></Card></TabsContent>
