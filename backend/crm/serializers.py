@@ -9,6 +9,31 @@ from erp.models import Product
 from .contracts import DEFAULT_CONTRACT_NOTES_TEXT, DEFAULT_GENERAL_TERMS, DEFAULT_TERMS_TEXT, parse_terms_text
 from .models import BusinessPartner, Contact, Lead, Opportunity, PricingRule, Quote, QuoteLine
 
+SUPPORTED_CURRENCIES = {'TRY', 'USD', 'EUR'}
+TURKEY_ALIASES = {'turkiye', 'türkiye', 'turkey', 'turk', 'türk', 'tr', 'tur'}
+
+
+def normalize_currency_code(value, default='TRY'):
+    normalized = str(value or default or 'TRY').strip().upper()
+    return normalized if normalized in SUPPORTED_CURRENCIES else default
+
+
+def is_turkey_country(value):
+    normalized = str(value or '').strip().lower()
+    return normalized in TURKEY_ALIASES
+
+
+def allowed_partner_currencies(country):
+    if not str(country or '').strip():
+        return {'TRY', 'USD', 'EUR'}
+    return {'TRY', 'USD', 'EUR'} if is_turkey_country(country) else {'USD', 'EUR'}
+
+
+def default_partner_currency(country):
+    if not str(country or '').strip():
+        return 'TRY'
+    return 'TRY' if is_turkey_country(country) else 'USD'
+
 
 class BusinessPartnerSerializer(serializers.ModelSerializer):
     class Meta:
@@ -20,6 +45,8 @@ class BusinessPartnerSerializer(serializers.ModelSerializer):
             'group': {'required': False, 'allow_blank': True},
             'city': {'required': False, 'allow_blank': True},
             'country': {'required': False, 'allow_blank': True},
+            'currency': {'required': False, 'allow_blank': True},
+            'size': {'required': False, 'allow_blank': True},
             'address': {'required': False, 'allow_blank': True},
             'tax_office': {'required': False, 'allow_blank': True},
             'tax_number': {'required': False, 'allow_blank': True},
@@ -29,6 +56,14 @@ class BusinessPartnerSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         org = attrs.get('organization') or (self.context.get('request').user.organization if self.context.get('request') else None)
         email = (attrs.get('email') or '').strip().lower()
+        country = attrs.get('country', getattr(self.instance, 'country', ''))
+        requested_currency = attrs.get('currency', getattr(self.instance, 'currency', ''))
+        normalized_currency = normalize_currency_code(requested_currency, default_partner_currency(country))
+
+        if normalized_currency not in allowed_partner_currencies(country):
+            raise serializers.ValidationError({'currency': 'Yurt disi sirketlerde para birimi USD veya EUR olmalidir.'})
+
+        attrs['currency'] = normalized_currency
         if email and org:
             qs = BusinessPartner.objects.filter(organization=org, email__iexact=email)
             if self.instance:
@@ -287,6 +322,23 @@ class QuoteSerializer(serializers.ModelSerializer):
         self._recalc(quote)
         return quote
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        customer = attrs.get('customer') or (self.instance.customer if self.instance else None)
+        country = getattr(customer, 'country', '')
+        preferred_currency = normalize_currency_code(
+            getattr(customer, 'currency', ''),
+            default_partner_currency(country),
+        )
+        requested_currency = attrs.get('currency', getattr(self.instance, 'currency', preferred_currency))
+        normalized_currency = normalize_currency_code(requested_currency, preferred_currency)
+
+        if normalized_currency not in allowed_partner_currencies(country):
+            raise serializers.ValidationError({'currency': 'Yurt disi musteriler icin TL kullanilamaz.'})
+
+        attrs['currency'] = normalized_currency
+        return attrs
+
     def update(self, instance, validated_data):
         lines_data = validated_data.pop('lines', None)
         contract_config = validated_data.pop('contract_config', None)
@@ -368,6 +420,7 @@ class QuoteSerializer(serializers.ModelSerializer):
                 'email': customer.email or '',
                 'city': customer.city or '',
                 'country': customer.country or '',
+                'currency': normalize_currency_code(customer.currency, default_partner_currency(customer.country)),
             }
         snapshot.update(dict(config.get('customer_snapshot') or {}))
         config['customer_snapshot'] = snapshot

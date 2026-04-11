@@ -33,7 +33,11 @@ class Command(BaseCommand):
                 user.set_password(pwd)
                 user.save()
 
-        partner, _ = BusinessPartner.objects.get_or_create(organization=org, name="ACME Corp", defaults={"city": "Istanbul"})
+        partner, _ = BusinessPartner.objects.get_or_create(
+            organization=org,
+            name="ACME Corp",
+            defaults={"city": "Istanbul", "country": "Türkiye", "currency": "TRY"},
+        )
         cat, _ = Category.objects.get_or_create(organization=org, name="Software")
         prod, _ = Product.objects.get_or_create(organization=org, sku="SKU-1001", defaults={"name": "Udar Seat", "price": Decimal("1200"), "category": cat})
         PricingRule.objects.get_or_create(organization=org, name="VIP %8", type="customer", target="VIP", value=Decimal("8.0"))

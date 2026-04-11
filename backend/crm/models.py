@@ -14,6 +14,8 @@ class BusinessPartner(models.Model):
     address = models.TextField(blank=True)
     city = models.CharField(max_length=100, blank=True)
     country = models.CharField(max_length=50, blank=True)
+    currency = models.CharField(max_length=10, blank=True, default='TRY')
+    size = models.CharField(max_length=50, blank=True, default='')
     tax_office = models.CharField(max_length=100, blank=True)
     tax_number = models.CharField(max_length=64, blank=True)
     authorized_person = models.CharField(max_length=255, blank=True)

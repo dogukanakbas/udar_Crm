@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -10,8 +10,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useToast } from '@/components/ui/use-toast'
 import { useAppStore } from '@/state/use-app-store'
-import { formatCurrency, cn } from '@/lib/utils'
-import type { Quote } from '@/types'
+import { getCompanyCurrencyOptions, resolveCompanyCurrency, type SupportedCurrencyCode } from '@/lib/location-data'
+import { formatCurrency, formatExchangeRate, getCurrencySymbol, normalizeCurrency, cn } from '@/lib/utils'
+import type { Company, Quote } from '@/types'
 import {
   type QuoteTemplateId,
   type MobilyaSubListId,
@@ -65,7 +66,7 @@ function emptyLines(count: number, factory?: (i: number) => Partial<TemplateLine
 export function TemplateQuoteWizardTrigger({
   companies,
 }: {
-  companies: { id: string; name: string; region: string; industry: string }[]
+  companies: Company[]
 }) {
   const createQuote = useAppStore((s) => s.createQuote)
   const { toast } = useToast()
@@ -75,6 +76,12 @@ export function TemplateQuoteWizardTrigger({
   const template = quoteTemplateById(templateId)
 
   const [customerId, setCustomerId] = useState(companies[0]?.id ?? '')
+  const [currency, setCurrency] = useState<SupportedCurrencyCode>(() =>
+    resolveCompanyCurrency(companies[0]?.currency, companies[0]?.country)
+  )
+  const [exchangeRate, setExchangeRate] = useState(() =>
+    resolveCompanyCurrency(companies[0]?.currency, companies[0]?.country) === 'TRY' ? 1 : 1
+  )
   const [validUntil, setValidUntil] = useState(() => new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10))
   const [priceListRef, setPriceListRef] = useState('2026/1. LİSTE')
   const [validityWorkDays, setValidityWorkDays] = useState<'3' | '7' | '10'>('7')
@@ -105,6 +112,12 @@ export function TemplateQuoteWizardTrigger({
   const [codePickerRow, setCodePickerRow] = useState<number | null>(null)
   /** cmdk Dialog içinde güvenilir değil; manuel liste + bu filtre. */
   const [codePickerFilter, setCodePickerFilter] = useState('')
+  const selectedCompany = useMemo(() => companies.find((company) => company.id === customerId), [companies, customerId])
+  const selectedCompanyCurrencyOptions = useMemo(
+    () => getCompanyCurrencyOptions(selectedCompany?.country),
+    [selectedCompany?.country]
+  )
+  const effectiveCurrency = normalizeCurrency(currency)
 
   const syncTemplate = (id: QuoteTemplateId) => {
     setTemplateId(id)
@@ -121,6 +134,14 @@ export function TemplateQuoteWizardTrigger({
     }
     if (!teslimSekli.trim()) setTeslimSekli(t.defaultDeliveryGroupLabel)
   }
+
+  useEffect(() => {
+    if (!selectedCompany) return
+
+    const preferredCurrency = resolveCompanyCurrency(selectedCompany.currency, selectedCompany.country)
+    setCurrency(preferredCurrency)
+    setExchangeRate((currentRate) => (preferredCurrency === 'TRY' ? 1 : currentRate > 0 ? currentRate : 1))
+  }, [selectedCompany?.country, selectedCompany?.currency, selectedCompany?.id])
 
   const computed = useMemo(() => computeTemplateLines(template, lines), [template, lines])
   const subEx = sumLinesExVat(computed)
@@ -232,9 +253,11 @@ export function TemplateQuoteWizardTrigger({
       `=== İBAN (Excel satır 77–83, seçime göre) ===`,
       ibanSection,
       `---`,
-      `Ara toplam (KDV hariç): ${totals.subtotalExVat.toFixed(2)} TRY`,
-      `KDV %${template.vatPercent}: ${totals.vat.toFixed(2)} TRY`,
-      `Yekün: ${totals.grand.toFixed(2)} TRY`
+      `Para birimi: ${getCurrencySymbol(effectiveCurrency)}`,
+      `Kur: ${formatExchangeRate(exchangeRate, effectiveCurrency)}`,
+      `Ara toplam (KDV hariç): ${formatCurrency(totals.subtotalExVat, effectiveCurrency)}`,
+      `KDV %${template.vatPercent}: ${formatCurrency(totals.vat, effectiveCurrency)}`,
+      `Yekün: ${formatCurrency(totals.grand, effectiveCurrency)}`
     )
 
     const lineLabel = (l: (typeof activeLines)[0]) => {
@@ -255,7 +278,10 @@ export function TemplateQuoteWizardTrigger({
       delivery: teslimSekli || '—',
       notes: notesParts.join('\n'),
       status: 'Draft' as const,
-      currency: 'TRY',
+      currency: effectiveCurrency,
+      contractConfig: {
+        exchangeRate: effectiveCurrency === 'TRY' ? 1 : exchangeRate,
+      },
       vatRate: template.vatPercent,
       lines: activeLines.map((l) => ({
         name: lineLabel(l),
@@ -269,7 +295,7 @@ export function TemplateQuoteWizardTrigger({
     createQuote(payload as unknown as Quote)
     toast({
       title: 'Teklif kaydedildi',
-      description: `${template.label} • KDV %${template.vatPercent} • Yekün ${formatCurrency(totals.grand, 'TRY')}`,
+      description: `${template.label} • KDV %${template.vatPercent} • Yekün ${formatCurrency(totals.grand, effectiveCurrency)}`,
     })
     setOpen(false)
   }
@@ -356,6 +382,48 @@ export function TemplateQuoteWizardTrigger({
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div>
+                <Label>Para birimi</Label>
+                <Select
+                  value={effectiveCurrency}
+                  onValueChange={(nextCurrency) => {
+                    const normalizedCurrency = normalizeCurrency(nextCurrency)
+                    setCurrency(normalizedCurrency as SupportedCurrencyCode)
+                    if (normalizedCurrency === 'TRY') {
+                      setExchangeRate(1)
+                    } else if (!Number.isFinite(exchangeRate) || exchangeRate <= 0) {
+                      setExchangeRate(1)
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selectedCompanyCurrencyOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>{`Kur (${getCurrencySymbol(effectiveCurrency)} -> ₺)`}</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  step="0.0001"
+                  disabled={effectiveCurrency === 'TRY'}
+                  value={effectiveCurrency === 'TRY' ? 1 : exchangeRate}
+                  onChange={(event) => setExchangeRate(Number(event.target.value || 1))}
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {effectiveCurrency === 'TRY'
+                    ? 'Türk Lirası seçildiğinde kur 1 kabul edilir.'
+                    : formatExchangeRate(exchangeRate, effectiveCurrency)}
+                </p>
               </div>
               <div>
                 <Label>Geçerlilik (takvim)</Label>
@@ -456,7 +524,10 @@ export function TemplateQuoteWizardTrigger({
                     const c = companies.find((x) => x.id === customerId)
                     if (c) {
                       setBuyerUnvan(c.name)
-                      if (!buyerAdres.trim()) setBuyerAdres(`${c.region || ''} • ${c.industry || ''}`.trim())
+                      setBuyerVergi([c.taxOffice, c.taxNumber].filter(Boolean).join(' / '))
+                      setBuyerAdres(c.address || `${c.region || ''} • ${c.industry || ''}`.trim())
+                      setBuyerYetkili(c.authorizedPerson || '')
+                      setBuyerIletisim([c.phone, c.email].filter(Boolean).join(' / '))
                     }
                   }}
                 >
@@ -721,10 +792,10 @@ export function TemplateQuoteWizardTrigger({
                             onChange={(e) => updateLine(idx, { manualListPrice: Number(e.target.value) || 0 })}
                           />
                         )}
-                        Net: {c.netUnit ? formatCurrency(c.netUnit, 'TRY') : '—'}
+                        Net: {c.netUnit ? formatCurrency(c.netUnit, effectiveCurrency) : '—'}
                         <br />
                         <span className="text-foreground font-medium">
-                          {c.lineTotalExVat ? formatCurrency(c.lineTotalExVat, 'TRY') : '—'}
+                          {c.lineTotalExVat ? formatCurrency(c.lineTotalExVat, effectiveCurrency) : '—'}
                         </span>
                       </div>
                     </div>
@@ -804,14 +875,20 @@ export function TemplateQuoteWizardTrigger({
                 {companies.find((c) => c.id === customerId)?.name ?? '—'}
               </p>
               <p>
-                <span className="text-muted-foreground">Ara toplam (KDV hariç):</span>{' '}
-                {formatCurrency(totals.subtotalExVat, 'TRY')}
+                <span className="text-muted-foreground">Para birimi:</span> {getCurrencySymbol(effectiveCurrency)}
               </p>
               <p>
-                <span className="text-muted-foreground">KDV %{template.vatPercent}:</span> {formatCurrency(totals.vat, 'TRY')}
+                <span className="text-muted-foreground">Kur:</span> {formatExchangeRate(exchangeRate, effectiveCurrency)}
+              </p>
+              <p>
+                <span className="text-muted-foreground">Ara toplam (KDV hariç):</span>{' '}
+                {formatCurrency(totals.subtotalExVat, effectiveCurrency)}
+              </p>
+              <p>
+                <span className="text-muted-foreground">KDV %{template.vatPercent}:</span> {formatCurrency(totals.vat, effectiveCurrency)}
               </p>
               <p className="font-semibold text-base">
-                <span className="text-muted-foreground font-normal">Yekün:</span> {formatCurrency(totals.grand, 'TRY')}
+                <span className="text-muted-foreground font-normal">Yekün:</span> {formatCurrency(totals.grand, effectiveCurrency)}
               </p>
             </div>
             <ul className="text-xs text-muted-foreground space-y-1 max-h-40 overflow-y-auto">
@@ -824,7 +901,7 @@ export function TemplateQuoteWizardTrigger({
                 .map((l, li) => (
                   <li key={`${l.mobilyaSubList ?? ''}-${l.code}-${l.manualLineName}-${li}-${l.measure}`}>
                     {(l.code || l.manualLineName || '—') + ` × ${l.qty} ${l.unit}`} →{' '}
-                    {formatCurrency(l.lineTotalExVat, 'TRY')} (KDV hariç)
+                    {formatCurrency(l.lineTotalExVat, effectiveCurrency)} (KDV hariç)
                   </li>
                 ))}
             </ul>
@@ -837,7 +914,7 @@ export function TemplateQuoteWizardTrigger({
           </Button>
           <Button type="button" onClick={handleSubmit}>
             <Plus className="mr-2 h-4 w-4" />
-            Teklifi kaydet (TRY)
+            Teklifi kaydet
           </Button>
         </DialogFooter>
       </DialogContent>

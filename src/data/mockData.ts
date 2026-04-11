@@ -42,7 +42,7 @@ const makeCompanies = (): Company[] =>
     name: `Company ${i + 1}`,
     industry: industries[i % industries.length],
     region: regions[i % regions.length],
-    size: i % 3 === 0 ? 'Enterprise' : i % 3 === 1 ? 'Mid-Market' : 'SMB',
+    size: i % 3 === 0 ? 'Kurumsal' : i % 3 === 1 ? 'Orta' : 'Küçük',
     owner: owners[i % owners.length],
     rating: 3 + (i % 3),
     currency: i % 5 === 0 ? 'EUR' : 'USD',
