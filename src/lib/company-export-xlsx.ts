@@ -78,6 +78,11 @@ export function downloadCompaniesAsXlsx(companies: Company[]) {
       'Ölçeğe göre dağılım',
       companies.map((company) => company.size || '')
     ),
+    [],
+    ...buildCountRows(
+      'Para birimine göre dağılım',
+      companies.map((company) => company.currency || '')
+    ),
   ])
   breakdownSheet['!cols'] = [{ wch: 28 }, { wch: 10 }]
   XLSX.utils.book_append_sheet(workbook, breakdownSheet, 'Kırılımlar')

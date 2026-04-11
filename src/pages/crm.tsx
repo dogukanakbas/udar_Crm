@@ -835,6 +835,11 @@ export function CompaniesPage() {
       cell: ({ row }) => [row.original.phone, row.original.email].filter(Boolean).join(' / ') || '—',
     },
     {
+      accessorKey: 'currency',
+      header: 'Para birimi',
+      cell: ({ row }) => row.original.currency || '—',
+    },
+    {
       accessorKey: 'location',
       header: 'Konum',
       cell: ({ row }) => [row.original.region, row.original.country].filter(Boolean).join(' / ') || '—',
