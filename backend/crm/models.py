@@ -4,9 +4,6 @@ from django.db import models
 from organizations.models import Organization
 from accounts.models import User
 from erp.models import Product
-from django.db.models.signals import post_save
-from django.dispatch import receiver
-from audit.utils import log_change
 
 
 class BusinessPartner(models.Model):
@@ -148,16 +145,3 @@ class QuoteLine(models.Model):
         discounted_total = first_discounted * (Decimal('1') - (self.discount_secondary / Decimal('100')))
         tax_val = discounted_total * (self.tax / Decimal('100'))
         return discounted_total + tax_val
-
-
-@receiver(post_save, sender=Quote)
-def audit_quote(sender, instance, created, **kwargs):
-    action = 'created' if created else 'updated'
-    log_change(
-        organization=instance.organization,
-        entity='Quote',
-        entity_id=instance.id,
-        action=action,
-        user=instance.owner,
-        new_value=instance.status,
-    )

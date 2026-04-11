@@ -5,12 +5,39 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export const formatCurrency = (value: number, currency = 'USD', locale = 'tr-TR') =>
+export const normalizeCurrency = (currency?: string) => (['TRY', 'USD', 'EUR'].includes(String(currency || '').toUpperCase()) ? String(currency).toUpperCase() : 'TRY')
+
+export const getCurrencySymbol = (currency?: string) =>
+  ({
+    TRY: '₺',
+    USD: '$',
+    EUR: '€',
+  }[normalizeCurrency(currency)])
+
+export const getCurrencyLabel = (currency?: string) =>
+  ({
+    TRY: 'Türk Lirası',
+    USD: 'Dolar',
+    EUR: 'Euro',
+  }[normalizeCurrency(currency)])
+
+export const formatCurrency = (value: number, currency = 'TRY', locale = 'tr-TR') =>
   new Intl.NumberFormat(locale, {
     style: 'currency',
-    currency,
+    currency: normalizeCurrency(currency),
     maximumFractionDigits: 0,
   }).format(value)
+
+export const formatExchangeRate = (rate: number | string, currency?: string) => {
+  const normalizedRate = Number(rate)
+  const normalizedCurrency = normalizeCurrency(currency)
+  if (normalizedCurrency === 'TRY') return '1 ₺ = 1 ₺'
+  if (!Number.isFinite(normalizedRate)) return '-'
+  return `1 ${getCurrencySymbol(normalizedCurrency)} = ${new Intl.NumberFormat('tr-TR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  }).format(normalizedRate)} ₺`
+}
 
 export const formatNumber = (value: number) =>
   new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 1 }).format(value)

@@ -3,6 +3,7 @@ from decimal import Decimal, InvalidOperation
 from django.utils import timezone
 from rest_framework import serializers
 
+from audit.utils import log_entity_action
 from erp.models import Product
 
 from .contracts import DEFAULT_CONTRACT_NOTES_TEXT, DEFAULT_GENERAL_TERMS, DEFAULT_TERMS_TEXT, parse_terms_text
@@ -281,6 +282,7 @@ class QuoteSerializer(serializers.ModelSerializer):
             validated_data.setdefault('organization', org)
         validated_data['contract_config'] = self._prepare_contract_config(validated_data, validated_data.get('contract_config') or {})
         quote = Quote.objects.create(**validated_data)
+        quote._audit_user = self.context.get('request').user if self.context.get('request') else None
         self._create_lines(quote, lines_data)
         self._recalc(quote)
         return quote
@@ -288,18 +290,64 @@ class QuoteSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         lines_data = validated_data.pop('lines', None)
         contract_config = validated_data.pop('contract_config', None)
+        request_user = self.context.get('request').user if self.context.get('request') else None
+        previous_lines_snapshot = self._serialize_quote_lines(instance.lines.all()) if lines_data is not None else None
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         if contract_config is not None:
             instance.contract_config = self._prepare_contract_config(validated_data, contract_config, instance=instance)
         else:
             instance.contract_config = self._prepare_contract_config(validated_data, instance.contract_config or {}, instance=instance)
+        instance._audit_user = request_user
         instance.save()
         if lines_data is not None:
             instance.lines.all().delete()
             self._create_lines(instance, lines_data)
+            next_lines_snapshot = self._serialize_quote_lines(instance.lines.all())
+            if previous_lines_snapshot != next_lines_snapshot:
+                log_entity_action(instance, 'updated', user=request_user, field='lines', old_value=previous_lines_snapshot, new_value=next_lines_snapshot)
         self._recalc(instance)
         return instance
+
+    def _serialize_quote_lines(self, lines):
+        snapshots = []
+        for index, line in enumerate(lines):
+            if isinstance(line, dict):
+                details = dict(line.get('details') or {})
+                snapshots.append(
+                    {
+                        'index': int(line.get('sort_order', line.get('sortOrder', index))),
+                        'name': line.get('name') or 'Satır',
+                        'section_key': line.get('section_key') or line.get('sectionKey') or '',
+                        'unit': line.get('unit') or '',
+                        'qty': str(line.get('qty') or line.get('quantity') or 0),
+                        'unit_price': str(line.get('unit_price') or line.get('unitPrice') or 0),
+                        'discount': str(line.get('discount') or 0),
+                        'discount_secondary': str(line.get('discount_secondary') or line.get('discountSecondary') or 0),
+                        'tax': str(line.get('tax') or 0),
+                        'code': details.get('code') or line.get('sku') or '',
+                        'details': details,
+                    }
+                )
+                continue
+
+            snapshots.append(
+                {
+                    'index': int(getattr(line, 'sort_order', index)),
+                    'name': getattr(line, 'name', 'Satır'),
+                    'section_key': getattr(line, 'section_key', ''),
+                    'unit': getattr(line, 'unit', ''),
+                    'qty': str(getattr(line, 'qty', 0)),
+                    'unit_price': str(getattr(line, 'unit_price', 0)),
+                    'discount': str(getattr(line, 'discount', 0)),
+                    'discount_secondary': str(getattr(line, 'discount_secondary', 0)),
+                    'tax': str(getattr(line, 'tax', 0)),
+                    'code': (getattr(line, 'details', {}) or {}).get('code') or getattr(getattr(line, 'product', None), 'sku', '') or '',
+                    'details': getattr(line, 'details', {}) or {},
+                }
+            )
+
+        return sorted(snapshots, key=lambda item: item.get('index', 0))
 
     def _prepare_contract_config(self, validated_data, incoming_config, instance=None):
         config = self._normalize_contract_config(incoming_config or {})
@@ -338,6 +386,12 @@ class QuoteSerializer(serializers.ModelSerializer):
         config.setdefault('template_key', '')
         config.setdefault('price_list_label', '2026/1. LİSTE')
         config.setdefault('validity_label', '')
+        currency_code = str(validated_data.get('currency') or (instance.currency if instance else 'TRY') or 'TRY').upper()
+        try:
+            exchange_rate = float(config.get('exchange_rate') or 1)
+        except (TypeError, ValueError):
+            exchange_rate = 1
+        config['exchange_rate'] = 1 if currency_code == 'TRY' else (exchange_rate if exchange_rate > 0 else 1)
         config.setdefault('delivery_type', validated_data.get('delivery_terms') or (instance.delivery_terms if instance else ''))
         config.setdefault('payment_option', validated_data.get('payment_terms') or (instance.payment_terms if instance else ''))
         config.setdefault('signature_customer_label', snapshot.get('name') or 'CARİ ÜNVANI')
@@ -366,6 +420,7 @@ class QuoteSerializer(serializers.ModelSerializer):
             'contractNotesText': 'contract_notes_text',
             'templateMode': 'template_mode',
             'templateKey': 'template_key',
+            'exchangeRate': 'exchange_rate',
         }
         for source_key, target_key in key_map.items():
             if source_key in config and target_key not in config:
@@ -387,6 +442,10 @@ class QuoteSerializer(serializers.ModelSerializer):
         if 'contract_notes_text' not in config:
             config['contract_notes_text'] = '\n'.join(config.get('contract_notes') or parse_terms_text(DEFAULT_CONTRACT_NOTES_TEXT))
         config['contract_notes'] = parse_terms_text(config.get('contract_notes_text'))
+        try:
+            config['exchange_rate'] = float(config.get('exchange_rate') or 1)
+        except (TypeError, ValueError):
+            config['exchange_rate'] = 1
         return config
 
     def _create_lines(self, quote, lines_data):

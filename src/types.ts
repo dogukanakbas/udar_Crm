@@ -426,12 +426,15 @@ export interface Quote {
     validityLabel?: string
     validity_label?: string
     priceListLabel?: string
+    price_list_label?: string
     deliveryType?: string
     delivery_type?: string
     paymentOption?: string
     payment_option?: string
     contractDate?: string
     contract_date?: string
+    exchangeRate?: number
+    exchange_rate?: number
     customerSnapshot?: Record<string, string>
     customer_snapshot?: Record<string, string>
     preparedBySnapshot?: Record<string, string>

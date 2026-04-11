@@ -1,11 +1,11 @@
 // @ts-nocheck
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from '@tanstack/react-router'
+import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { type ColumnDef } from '@tanstack/react-table'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
-import { Check, Download, Plus, Send, Shield, Trash2 } from 'lucide-react'
+import { Check, Download, Pencil, Plus, Send, Shield, Trash2 } from 'lucide-react'
 
 import { PageHeader } from '@/components/app-shell'
 import { CompanyModal } from '@/components/company-modal'
@@ -24,7 +24,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
 import api from '@/lib/api'
 import { TemplateQuoteWizardTrigger } from '@/components/quote-template-wizard'
-import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
+import { cn, formatCurrency, formatDate, formatDateTime, formatExchangeRate, getCurrencyLabel, getCurrencySymbol, normalizeCurrency } from '@/lib/utils'
 import { useAppStore } from '@/state/use-app-store'
 import type { Product, Quote, SalesDocumentType } from '@/types'
 
@@ -44,6 +44,11 @@ const DOCUMENT_TYPE_TR = {
 
 const SELLER_OPTIONS = [{ value: 'ORTKA', label: 'ORTKA' }, { value: 'AYKA', label: 'AYKA' }]
 const ADD_CUSTOMER_OPTION = '__add_company__'
+const DOCUMENT_CURRENCY_OPTIONS = [
+  { value: 'TRY', label: '₺ Türk Lirası' },
+  { value: 'USD', label: '$ Dolar' },
+  { value: 'EUR', label: '€ Euro' },
+]
 
 const SECTION_OPTIONS = [
   { value: 'steel_door', label: 'Çelik Kapı' },
@@ -120,6 +125,8 @@ const documentSchema = z.object({
   customerId: z.string().min(1),
   preparedById: z.string().optional(),
   sellerCompanyKey: z.string().optional(),
+  currency: z.enum(['TRY', 'USD', 'EUR']).default('TRY'),
+  exchangeRate: z.coerce.number().positive().optional(),
   templateKey: z.string().optional(),
   contractDate: z.string().optional(),
   validUntil: z.string().optional(),
@@ -149,6 +156,14 @@ const templateLabel = (documentType: SalesDocumentType, templateKey?: string) =>
 const getResolvedSchema = (product?: Product) => product?.resolvedAttributeSchema || product?.categoryAttributeSchema || []
 const getTermsText = (config?: any) => config?.termsText || config?.terms_text || (config?.generalTerms || config?.general_terms || []).join('\n') || ''
 const getContractNotesText = (config?: any) => config?.contractNotesText || config?.contract_notes_text || (config?.contractNotes || config?.contract_notes || []).join('\n') || ''
+const getDocumentCurrency = (currency?: string) => normalizeCurrency(currency)
+const getDocumentExchangeRate = (currency?: string, exchangeRate?: number | string | null) => {
+  const normalizedCurrency = getDocumentCurrency(currency)
+  const normalizedRate = Number(exchangeRate)
+  if (normalizedCurrency === 'TRY') return 1
+  return Number.isFinite(normalizedRate) && normalizedRate > 0 ? normalizedRate : 1
+}
+const formatDocumentAmount = (value: number, currency?: string) => formatCurrency(value, getDocumentCurrency(currency))
 
 const buildLineFromProduct = (product?: Product, previousLine?: any) => {
   const defaults = product?.templateDefaults || {}
@@ -178,34 +193,410 @@ const buildLineFromProduct = (product?: Product, previousLine?: any) => {
 
 const createEmptyLine = () => buildLineFromProduct(undefined, { mode: 'manual', name: 'Yeni kalem', sectionKey: 'steel_door', unit: 'Adet', qty: 1, unitPrice: 0, discount: 0, discountSecondary: 0, tax: 20, details: { code: '', primary: '', secondary: '', attributes: {} } })
 
-const getInitialValues = (mode: SalesDocumentType, companies: any[], preparers: any[], products: Product[]) => {
-  const company = companies[0]
+const getInitialValues = (mode: SalesDocumentType, companies: any[], preparers: any[], products: Product[], quote?: Quote) => {
+  const customerSnapshot = quote?.contractConfig?.customerSnapshot || quote?.contractConfig?.customer_snapshot || {}
+  const company = companies.find((item) => item.id === quote?.customerId) || companies[0]
+
   return {
-    customerId: company?.id ?? '',
-    preparedById: preparers[0]?.id ?? '',
-    sellerCompanyKey: 'AYKA',
-    templateKey: '',
-    contractDate: new Date().toISOString().slice(0, 10),
-    validUntil: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
-    validityLabel: '',
-    priceListLabel: '2026/1. LİSTE',
-    payment: '',
-    paymentOption: '',
-    delivery: '',
-    deliveryType: '',
-    notes: '',
-    customerName: company?.name ?? '',
-    customerTaxOffice: company?.taxOffice ?? '',
-    customerTaxNumber: company?.taxNumber ?? '',
-    customerAddress: company?.address ?? '',
-    customerAuthorizedPerson: company?.authorizedPerson ?? '',
-    customerPhone: company?.phone ?? '',
-    customerEmail: company?.email ?? '',
-    signatureCustomerLabel: company?.name ?? '',
-    termsText: DEFAULT_TERMS_TEXT,
-    contractNotesText: DEFAULT_CONTRACT_NOTES_TEXT,
-    lines: [products[0] ? buildLineFromProduct(products[0]) : createEmptyLine()],
+    customerId: quote?.customerId || company?.id || '',
+    preparedById: quote?.preparedById ?? preparers[0]?.id ?? '',
+    sellerCompanyKey: quote?.sellerCompanyKey || 'AYKA',
+    currency: getDocumentCurrency(quote?.currency),
+    exchangeRate: getDocumentExchangeRate(quote?.currency, quote?.contractConfig?.exchangeRate || quote?.contractConfig?.exchange_rate),
+    templateKey: quote?.contractConfig?.templateKey || quote?.contractConfig?.template_key || '',
+    contractDate: quote?.contractConfig?.contractDate || quote?.contractConfig?.contract_date || new Date().toISOString().slice(0, 10),
+    validUntil: quote?.validUntil || new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+    validityLabel: quote?.contractConfig?.validityLabel || quote?.contractConfig?.validity_label || '',
+    priceListLabel: quote?.contractConfig?.priceListLabel || quote?.contractConfig?.price_list_label || '2026/1. LİSTE',
+    payment: quote?.terms?.payment || '',
+    paymentOption: quote?.contractConfig?.paymentOption || quote?.contractConfig?.payment_option || '',
+    delivery: quote?.terms?.delivery || '',
+    deliveryType: quote?.contractConfig?.deliveryType || quote?.contractConfig?.delivery_type || '',
+    notes: quote?.terms?.notes || '',
+    customerName: customerSnapshot.name || company?.name || '',
+    customerTaxOffice: customerSnapshot.tax_office || customerSnapshot.taxOffice || company?.taxOffice || '',
+    customerTaxNumber: customerSnapshot.tax_number || customerSnapshot.taxNumber || company?.taxNumber || '',
+    customerAddress: customerSnapshot.address || company?.address || '',
+    customerAuthorizedPerson: customerSnapshot.authorized_person || customerSnapshot.authorizedPerson || company?.authorizedPerson || '',
+    customerPhone: customerSnapshot.phone || company?.phone || '',
+    customerEmail: customerSnapshot.email || company?.email || '',
+    signatureCustomerLabel: quote?.contractConfig?.signatureCustomerLabel || quote?.contractConfig?.signature_customer_label || customerSnapshot.name || company?.name || '',
+    termsText: getTermsText(quote?.contractConfig) || DEFAULT_TERMS_TEXT,
+    contractNotesText: getContractNotesText(quote?.contractConfig) || DEFAULT_CONTRACT_NOTES_TEXT,
+    lines:
+      quote?.lines?.length
+        ? quote.lines.map((line) => ({
+            mode: line.productId ? 'product' : 'manual',
+            productId: line.productId,
+            sku: line.sku || line.details?.code || '',
+            name: line.name || 'Yeni kalem',
+            sectionKey: line.sectionKey || 'steel_door',
+            unit: line.unit || 'Adet',
+            qty: Number(line.qty ?? 0),
+            unitPrice: Number(line.unitPrice ?? 0),
+            discount: Number(line.discount ?? 0),
+            discountSecondary: Number(line.discountSecondary ?? 0),
+            tax: Number(line.tax ?? 0),
+            details: {
+              code: line.details?.code || line.sku || '',
+              primary: line.details?.primary || '',
+              secondary: line.details?.secondary || '',
+              attributes: line.details?.attributes || {},
+            },
+          }))
+        : [products[0] ? buildLineFromProduct(products[0]) : createEmptyLine()],
   }
+}
+
+const buildDocumentPayload = (values: any, mode: SalesDocumentType, status = 'Draft') => ({
+  documentType: mode,
+  customerId: values.customerId,
+  preparedById: values.preparedById,
+  sellerCompanyKey: values.sellerCompanyKey,
+  currency: getDocumentCurrency(values.currency),
+  status,
+  validUntil: values.validUntil || '',
+  payment: values.payment || '',
+  delivery: values.delivery || '',
+  notes: values.notes || '',
+  contractConfig: {
+    templateMode: values.templateKey ? 'manual' : 'auto',
+    templateKey: values.templateKey || '',
+    contractDate: values.contractDate,
+    validityLabel: values.validityLabel,
+    priceListLabel: values.priceListLabel,
+    exchangeRate: getDocumentExchangeRate(values.currency, values.exchangeRate),
+    deliveryType: values.deliveryType,
+    paymentOption: values.paymentOption,
+    signatureCustomerLabel: values.signatureCustomerLabel,
+    customerSnapshot: {
+      name: values.customerName || '',
+      tax_office: values.customerTaxOffice || '',
+      tax_number: values.customerTaxNumber || '',
+      address: values.customerAddress || '',
+      authorized_person: values.customerAuthorizedPerson || '',
+      phone: values.customerPhone || '',
+      email: values.customerEmail || '',
+    },
+    termsText: values.termsText || '',
+    contractNotesText: values.contractNotesText || '',
+  },
+  lines: values.lines.map((line: any, index: number) => ({
+    productId: line.mode === 'product' ? line.productId : undefined,
+    sku: line.details?.code || line.sku,
+    name: line.name,
+    sectionKey: line.sectionKey,
+    unit: line.unit,
+    qty: Number(line.qty || 0),
+    unitPrice: Number(line.unitPrice || 0),
+    discount: Number(line.discount || 0),
+    discountSecondary: Number(line.discountSecondary || 0),
+    tax: Number(line.tax || 0),
+    sortOrder: index,
+    details: line.details,
+  })),
+})
+
+type QuoteAuditLogItem = {
+  id: string
+  action: string
+  field: string
+  old_value: string
+  new_value: string
+  created_at: string
+  user?: string | number
+  user_name?: string
+}
+
+type AuditChangeDetail = {
+  id: string
+  label: string
+  fieldKey: string
+  oldValue: any
+  newValue: any
+  kind: 'scalar' | 'array' | 'object' | 'lines'
+}
+
+type AuditChangeGroup = {
+  id: string
+  action: string
+  createdAt: string
+  userLabel: string
+  details: AuditChangeDetail[]
+}
+
+const AUDIT_FIELD_LABELS: Record<string, string> = {
+  action: 'İşlem',
+  address: 'Adres',
+  authorized_person: 'Yetkili',
+  code: 'Ürün kodu',
+  contract_config: 'Belge ayarları',
+  contract_date: 'Belge tarihi',
+  contract_notes: 'Sözleşme notları',
+  contract_notes_text: 'Sözleşme notları',
+  country: 'Ülke',
+  created_at: 'Oluşturulma',
+  currency: 'Para birimi',
+  customer: 'Müşteri',
+  customer_snapshot: 'Müşteri bilgisi',
+  delivery_terms: 'Teslim metni',
+  delivery_type: 'Teslim tipi',
+  details: 'Detaylar',
+  discount: 'İskonto 1',
+  discount_secondary: 'İskonto 2',
+  document_type: 'Belge türü',
+  email: 'E-posta',
+  exchange_rate: 'Kur',
+  general_terms: 'Maddeler',
+  lines: 'Kalemler',
+  name: 'Ad',
+  notes: 'Notlar',
+  payment_option: 'Ödeme tipi',
+  payment_terms: 'Ödeme metni',
+  phone: 'Telefon',
+  prepared_by: 'Hazırlayan',
+  prepared_by_snapshot: 'Hazırlayan bilgisi',
+  price_list_label: 'Fiyat listesi etiketi',
+  primary: 'Detay 1',
+  qty: 'Miktar',
+  section_key: 'Grup',
+  seller_company_key: 'Satıcı firma',
+  secondary: 'Detay 2',
+  signature_customer_label: 'İmza etiketi',
+  status: 'Durum',
+  subtotal: 'Ara toplam',
+  tax: 'KDV',
+  tax_number: 'Vergi no',
+  tax_office: 'Vergi dairesi',
+  tax_total: 'Vergi toplamı',
+  template_key: 'Şablon',
+  template_mode: 'Şablon modu',
+  terms_text: 'Maddeler',
+  total: 'Genel toplam',
+  unit: 'Birim',
+  unit_price: 'Birim fiyat',
+  valid_until: 'Geçerlilik tarihi',
+  validity_label: 'Geçerlilik etiketi',
+  vat_rate: 'KDV oranı',
+}
+
+const IGNORED_AUDIT_FIELDS = new Set(['updated_at', 'organization'])
+
+const isPlainObject = (value: unknown): value is Record<string, any> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+
+const tryParseAuditValue = (raw: unknown) => {
+  if (raw === undefined || raw === null || raw === '') return null
+  if (typeof raw !== 'string') return raw
+
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+
+  const candidates = [trimmed]
+  if ((trimmed.startsWith('{') || trimmed.startsWith('[')) && trimmed.includes("'")) {
+    candidates.push(trimmed.replace(/\bNone\b/g, 'null').replace(/\bTrue\b/g, 'true').replace(/\bFalse\b/g, 'false').replace(/'/g, '"'))
+  }
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate)
+    } catch {
+      // noop
+    }
+  }
+
+  if (trimmed === 'None') return null
+  if (trimmed === 'True') return true
+  if (trimmed === 'False') return false
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) return Number(trimmed)
+  return raw
+}
+
+const areAuditValuesEqual = (left: unknown, right: unknown) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null)
+
+const getAuditFieldLabel = (key: string) => AUDIT_FIELD_LABELS[key] || key.replaceAll('_', ' ')
+
+const resolveAuditUserLabel = (item: QuoteAuditLogItem, users: any[]) => {
+  if (item.user_name) return item.user_name
+  const matchedUser = users.find((user) => String(user.id) === String(item.user))
+  return matchedUser?.fullName || matchedUser?.username || 'Sistem'
+}
+
+const flattenAuditObjectEntries = (rootField: string, oldValue: any, newValue: any, path: string[] = []): AuditChangeDetail[] => {
+  const oldSource = isPlainObject(oldValue) ? oldValue : {}
+  const newSource = isPlainObject(newValue) ? newValue : {}
+  const keys = Array.from(new Set([...Object.keys(oldSource), ...Object.keys(newSource)]))
+  const details: AuditChangeDetail[] = []
+
+  keys.forEach((key) => {
+    const previousValue = oldSource[key]
+    const nextValue = newSource[key]
+    if (areAuditValuesEqual(previousValue, nextValue)) return
+
+    const nextPath = [...path, key]
+    if (isPlainObject(previousValue) || isPlainObject(nextValue)) {
+      const nestedEntries = flattenAuditObjectEntries(rootField, previousValue, nextValue, nextPath)
+      if (nestedEntries.length) {
+        details.push(...nestedEntries)
+        return
+      }
+    }
+
+    details.push({
+      id: `${rootField}-${nextPath.join('.')}`,
+      label: nextPath.map((segment) => getAuditFieldLabel(segment)).join(' / '),
+      fieldKey: `${rootField}.${nextPath.join('.')}`,
+      oldValue: previousValue,
+      newValue: nextValue,
+      kind: Array.isArray(previousValue) || Array.isArray(nextValue) ? 'array' : isPlainObject(previousValue) || isPlainObject(nextValue) ? 'object' : 'scalar',
+    })
+  })
+
+  return details
+}
+
+const buildAuditChangeDetails = (items: QuoteAuditLogItem[]) =>
+  items.flatMap((item) => {
+    if (!item.field || IGNORED_AUDIT_FIELDS.has(item.field)) return []
+
+    const oldValue = tryParseAuditValue(item.old_value)
+    const newValue = tryParseAuditValue(item.new_value)
+
+    if (item.field === 'lines') {
+      return [
+        {
+          id: item.id,
+          label: getAuditFieldLabel(item.field),
+          fieldKey: item.field,
+          oldValue,
+          newValue,
+          kind: 'lines' as const,
+        },
+      ]
+    }
+
+    if (isPlainObject(oldValue) || isPlainObject(newValue)) {
+      const flattenedEntries = flattenAuditObjectEntries(item.field, oldValue, newValue)
+      if (flattenedEntries.length) return flattenedEntries
+    }
+
+    return [
+      {
+        id: item.id,
+        label: getAuditFieldLabel(item.field),
+        fieldKey: item.field,
+        oldValue,
+        newValue,
+        kind: Array.isArray(oldValue) || Array.isArray(newValue) ? 'array' : isPlainObject(oldValue) || isPlainObject(newValue) ? 'object' : 'scalar',
+      },
+    ]
+  })
+
+const isSameAuditEvent = (left: QuoteAuditLogItem, right: QuoteAuditLogItem, leftUserLabel: string, rightUserLabel: string) =>
+  left.action === right.action &&
+  leftUserLabel === rightUserLabel &&
+  Math.abs(new Date(left.created_at).getTime() - new Date(right.created_at).getTime()) < 2000
+
+const buildAuditChangeGroups = (logs: QuoteAuditLogItem[], users: any[]): AuditChangeGroup[] => {
+  const sortedLogs = [...logs]
+    .map((item) => ({ ...item, userLabel: resolveAuditUserLabel(item, users) }))
+    .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
+
+  const dedupedLogs = sortedLogs.filter((item, index, collection) =>
+    collection.findIndex((candidate) =>
+      candidate.action === item.action &&
+      candidate.field === item.field &&
+      candidate.old_value === item.old_value &&
+      candidate.new_value === item.new_value &&
+      candidate.userLabel === item.userLabel &&
+      Math.abs(new Date(candidate.created_at).getTime() - new Date(item.created_at).getTime()) < 2000
+    ) === index
+  )
+
+  const groups: { id: string; action: string; createdAt: string; userLabel: string; items: QuoteAuditLogItem[] }[] = []
+
+  dedupedLogs.forEach((item) => {
+    const previousGroup = groups.at(-1)
+    if (previousGroup && isSameAuditEvent(previousGroup.items[0], item, previousGroup.userLabel, item.userLabel)) {
+      previousGroup.items.push(item)
+      return
+    }
+
+    groups.push({
+      id: item.id,
+      action: item.action,
+      createdAt: item.created_at,
+      userLabel: item.userLabel,
+      items: [item],
+    })
+  })
+
+  return groups.map((group) => ({
+    id: group.id,
+    action: group.action,
+    createdAt: group.createdAt,
+    userLabel: group.userLabel,
+    details: buildAuditChangeDetails(group.items),
+  }))
+}
+
+const getAuditActionMeta = (action: string) => {
+  if (action === 'created') return { label: 'Belge oluşturuldu', variant: 'success', description: 'Belge ilk kez oluşturuldu.' }
+  if (action === 'updated') return { label: 'Belge güncellendi', variant: 'outline', description: 'Belge üzerinde alan bazlı değişiklik yapıldı.' }
+  if (action === 'deleted') return { label: 'Belge silindi', variant: 'destructive', description: 'Belge kalıcı olarak silindi.' }
+  if (action === 'sent') return { label: 'Gönderildi', variant: 'secondary', description: 'Belge gönderildi olarak işaretlendi.' }
+  if (action === 'converted') return { label: 'Satış siparişine dönüştürüldü', variant: 'warning', description: 'Belge satış siparişine çevrildi.' }
+  if (action === 'request_approval') return { label: 'Onaya gönderildi', variant: 'warning', description: 'Belge onay sürecine alındı.' }
+  if (action === 'resubmitted') return { label: 'Yeniden gönderildi', variant: 'warning', description: 'Belge onay sürecine yeniden gönderildi.' }
+  if (action.startsWith('approved_')) return { label: `${action.replace('approved_', '')} onayı verildi`, variant: 'success', description: 'Belge için onay adımı tamamlandı.' }
+  if (action.startsWith('rejected_')) return { label: `${action.replace('rejected_', '')} tarafından reddedildi`, variant: 'destructive', description: 'Belge onay sürecinde reddedildi.' }
+  return { label: action.replaceAll('_', ' '), variant: 'muted', description: 'Bu kayıt için audit girdisi oluşturuldu.' }
+}
+
+const getAuditSummaryText = (details: AuditChangeDetail[], companies: any[], users: any[], currency = 'TRY') => {
+  if (details.length === 0) return ''
+
+  const summaryItems = details.slice(0, 3).map((detail) => {
+    const previous = formatAuditValue(detail.fieldKey, detail.oldValue, companies, users, currency)
+    const next = formatAuditValue(detail.fieldKey, detail.newValue, companies, users, currency)
+    return `${detail.label}: ${previous} -> ${next}`
+  })
+
+  if (details.length > 3) summaryItems.push(`+${details.length - 3} değişiklik daha`)
+  return summaryItems.join(' • ')
+}
+
+const getQuoteStatusBadgeVariant = (status: string) => {
+  if (status === 'Approved' || status === 'Converted') return 'success'
+  if (status === 'Rejected') return 'destructive'
+  if (status === 'Under Review') return 'warning'
+  return 'secondary'
+}
+
+const isEmptyAuditValue = (value: any) =>
+  value === undefined ||
+  value === null ||
+  value === '' ||
+  (Array.isArray(value) && value.length === 0) ||
+  (isPlainObject(value) && Object.keys(value).length === 0)
+
+const formatAuditValue = (fieldKey: string, value: any, companies: any[], users: any[], currency = 'TRY') => {
+  if (value === undefined || value === null || value === '') return 'Boş'
+
+  const normalizedFieldKey = fieldKey.split('.').at(-1) || fieldKey
+
+  if (normalizedFieldKey === 'status') return quoteStatusTr(String(value))
+  if (normalizedFieldKey === 'document_type') return DOCUMENT_TYPE_TR[String(value) as SalesDocumentType] || String(value)
+  if (normalizedFieldKey === 'currency') return `${getCurrencySymbol(String(value))} ${getCurrencyLabel(String(value))}`
+  if (normalizedFieldKey === 'customer') return companies.find((company) => String(company.id) === String(value))?.name || String(value)
+  if (normalizedFieldKey === 'prepared_by') return users.find((user) => String(user.id) === String(value))?.fullName || users.find((user) => String(user.id) === String(value))?.username || String(value)
+  if (normalizedFieldKey === 'exchange_rate' && !Number.isNaN(Number(value))) return new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(Number(value))
+  if (['valid_until', 'contract_date', 'created_at'].includes(normalizedFieldKey) && typeof value === 'string') return normalizedFieldKey === 'created_at' ? formatDateTime(value) : formatDate(value)
+  if (['subtotal', 'discount_total', 'tax_total', 'total', 'unit_price'].includes(normalizedFieldKey) && !Number.isNaN(Number(value))) return formatCurrency(Number(value), currency)
+  if (['discount', 'discount_secondary', 'tax', 'vat_rate'].includes(normalizedFieldKey) && !Number.isNaN(Number(value))) return `%${Number(value)}`
+  if (typeof value === 'boolean') return value ? 'Evet' : 'Hayır'
+  if (Array.isArray(value)) return `${value.length} kayıt`
+  if (isPlainObject(value)) return 'Detaylı içerik'
+  return String(value)
 }
 
 const getLineBase = (line: any) => Number(line.qty || 0) * Number(line.unitPrice || 0)
@@ -228,6 +619,8 @@ const buildCsv = (quotes: Quote[]) =>
         formatDateTime(quote.createdAt),
         quoteStatusTr(quote.status),
         quote.validUntil,
+        getCurrencySymbol(quote.currency),
+        quote.contractConfig?.exchangeRate || quote.contractConfig?.exchange_rate || '',
         quote.total,
       ].join(',')
     )
@@ -236,7 +629,7 @@ const buildCsv = (quotes: Quote[]) =>
 async function downloadDocument(quoteId: string) {
   const manifestResponse = await api.get(`/quotes/${quoteId}/export-files/`)
   const files = manifestResponse.data?.files || []
-  if (!files.length) throw new Error('Bu belge için uygun XLSX şablonu bulunamadı')
+  if (!files.length) throw new Error('Bu belge için uygun indirme şablonu bulunamadı')
 
   for (const file of files) {
     const response = await api.get(`/quotes/${quoteId}/export-xlsx/`, {
@@ -311,13 +704,14 @@ function NumericEditor({ value, onValueChange, min = 0, max }: { value?: number;
 }
 
 export function QuotesPage() {
-  const { data } = useAppStore()
+  const { data, deleteQuotes } = useAppStore()
   const { toast } = useToast()
   const [status, setStatus] = useState('all')
   const [customer, setCustomer] = useState('all')
   const [documentType, setDocumentType] = useState<'all' | SalesDocumentType>('all')
   const [minAmount, setMinAmount] = useState('')
   const [maxAmount, setMaxAmount] = useState('')
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const quotes = data.quotes ?? []
   const companies = data.companies
@@ -337,13 +731,36 @@ export function QuotesPage() {
 
   const hasActiveFilters = documentType !== 'all' || status !== 'all' || customer !== 'all' || Boolean(minAmount) || Boolean(maxAmount)
 
+  const handleDownload = async (quote: Quote) => {
+    try {
+      await downloadDocument(quote.id)
+      toast({ title: `${DOCUMENT_TYPE_TR[quote.documentType]} dosyaları indirildi` })
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || error?.message || 'Dosya oluşturulamadı', variant: 'destructive' })
+    }
+  }
+
+  const handleDelete = async (quote: Quote) => {
+    if (!confirm(`${DOCUMENT_TYPE_TR[quote.documentType]} ${quote.number} kaydı kalıcı olarak silinsin mi? Bu işlem geri alınamaz.`)) return
+
+    setDeletingId(quote.id)
+    try {
+      await deleteQuotes([quote.id])
+      toast({ title: `${DOCUMENT_TYPE_TR[quote.documentType]} silindi` })
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Silme sırasında hata oluştu', variant: 'destructive' })
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   const columns: ColumnDef<Quote>[] = [
     { accessorKey: 'documentType', header: 'Tür', cell: ({ row }) => <Badge variant="outline">{DOCUMENT_TYPE_TR[row.original.documentType]}</Badge> },
     { accessorKey: 'number', header: 'No' },
     { accessorKey: 'createdAt', header: 'Oluşturulma', cell: ({ row }) => formatDateTime(row.original.createdAt) },
     { accessorKey: 'customerId', header: 'Müşteri', cell: ({ row }) => row.original.customerName || companies.find((company) => company.id === row.original.customerId)?.name || '' },
     { accessorKey: 'preparedByName', header: 'Hazırlayan', cell: ({ row }) => row.original.preparedByName || row.original.owner },
-    { accessorKey: 'total', header: 'Tutar', cell: ({ row }) => formatCurrency(row.original.total) },
+    { accessorKey: 'total', header: 'Tutar', cell: ({ row }) => formatCurrency(row.original.total, row.original.currency) },
     { accessorKey: 'status', header: 'Durum', cell: ({ row }) => <Badge variant="secondary">{quoteStatusTr(row.original.status)}</Badge> },
     { accessorKey: 'validUntil', header: 'Geçerlilik', cell: ({ row }) => formatDate(row.original.validUntil) },
     {
@@ -351,24 +768,36 @@ export function QuotesPage() {
       header: '',
       cell: ({ row }) => (
         <div className="flex items-center justify-end gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={async () => {
-              try {
-                await downloadDocument(row.original.id)
-                toast({ title: `${DOCUMENT_TYPE_TR[row.original.documentType]} dosyaları indirildi` })
-              } catch (error: any) {
-                toast({ title: error?.response?.data?.detail || error?.message || 'Dosya oluşturulamadı', variant: 'destructive' })
-              }
-            }}
-          >
-            <Download className="mr-2 h-4 w-4" />
-            XLSX indir
-          </Button>
           <Link to="/crm/quotes/$quoteId" params={{ quoteId: row.original.id }} className="text-xs text-primary underline">
             Görüntüle
           </Link>
+          <RbacGuard perm="quotes.edit">
+            <DocumentWizardTrigger
+              quote={row.original}
+              trigger={
+                <Button variant="ghost" size="sm">
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Düzenle
+                </Button>
+              }
+            />
+          </RbacGuard>
+          <Button variant="ghost" size="sm" onClick={() => handleDownload(row.original)}>
+            <Download className="mr-2 h-4 w-4" />
+            İndir
+          </Button>
+          <RbacGuard perm="quotes.edit">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              disabled={deletingId === row.original.id}
+              onClick={() => handleDelete(row.original)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Sil
+            </Button>
+          </RbacGuard>
         </div>
       ),
     },
@@ -500,22 +929,27 @@ export function QuotesPage() {
   )
 }
 
-function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
-  const { data, createCompany, createQuote } = useAppStore()
+function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: SalesDocumentType; quote?: Quote; trigger?: React.ReactNode }) {
+  const { data, createCompany, createQuote, updateQuote } = useAppStore()
   const { toast } = useToast()
   const [open, setOpen] = useState(false)
   const [customerModalOpen, setCustomerModalOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
   const companies = data.companies
   const products = data.products
   const preparers = useMemo(() => data.users.filter((user) => user.canPrepareQuotes || user.permissions?.includes('quotes.prepare')), [data.users])
-  const form = useForm({ resolver: zodResolver(documentSchema) as any, defaultValues: getInitialValues(mode, companies, preparers, products) })
+  const documentMode = quote?.documentType ?? mode
+  const isEditing = Boolean(quote)
+  const getFormDefaults = () => getInitialValues(documentMode, companies, preparers, products, quote)
+  const form = useForm({ resolver: zodResolver(documentSchema) as any, defaultValues: getFormDefaults() })
 
-  useEffect(() => {
-    if (!open) form.reset(getInitialValues(mode, companies, preparers, products))
-  }, [open, mode, companies, preparers, products, form])
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen)
+    if (nextOpen) form.reset(getFormDefaults())
+  }
 
   const selectedCustomer = companies.find((company) => company.id === form.watch('customerId'))
-  const lines = form.watch('lines')
+  const lines = form.watch('lines') || []
 
   const applyCustomerToForm = (company: any, includeCustomerId = false) => {
     if (!company) return
@@ -533,7 +967,7 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
   useEffect(() => {
     if (!selectedCustomer) return
     applyCustomerToForm(selectedCustomer)
-  }, [selectedCustomer, form])
+  }, [selectedCustomer?.id])
 
   const subtotal = lines.reduce((sum, line) => sum + getLineBase(line), 0)
   const discountTotal = lines.reduce((sum, line) => sum + getLineDiscountTotal(line), 0)
@@ -575,73 +1009,37 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
       return
     }
 
+    setSaving(true)
     try {
-      await createQuote({
-        documentType: mode,
-        customerId: values.customerId,
-        preparedById: values.preparedById,
-        sellerCompanyKey: values.sellerCompanyKey,
-        status: 'Draft',
-        validUntil: values.validUntil || '',
-        payment: values.payment || '',
-        delivery: values.delivery || '',
-        notes: values.notes || '',
-        contractConfig: {
-          templateMode: values.templateKey ? 'manual' : 'auto',
-          templateKey: values.templateKey || '',
-          contractDate: values.contractDate,
-          validityLabel: values.validityLabel,
-          priceListLabel: values.priceListLabel,
-          deliveryType: values.deliveryType,
-          paymentOption: values.paymentOption,
-          signatureCustomerLabel: values.signatureCustomerLabel,
-          customerSnapshot: {
-            name: values.customerName || '',
-            tax_office: values.customerTaxOffice || '',
-            tax_number: values.customerTaxNumber || '',
-            address: values.customerAddress || '',
-            authorized_person: values.customerAuthorizedPerson || '',
-            phone: values.customerPhone || '',
-            email: values.customerEmail || '',
-          },
-          termsText: values.termsText || '',
-          contractNotesText: values.contractNotesText || '',
-        },
-        lines: values.lines.map((line, index) => ({
-          productId: line.mode === 'product' ? line.productId : undefined,
-          sku: line.details?.code || line.sku,
-          name: line.name,
-          sectionKey: line.sectionKey,
-          unit: line.unit,
-          qty: Number(line.qty || 0),
-          unitPrice: Number(line.unitPrice || 0),
-          discount: Number(line.discount || 0),
-          discountSecondary: Number(line.discountSecondary || 0),
-          tax: Number(line.tax || 0),
-          sortOrder: index,
-          details: line.details,
-        })),
-      } as any)
-      toast({ title: `${DOCUMENT_TYPE_TR[mode]} kaydedildi` })
-      form.reset(getInitialValues(mode, companies, preparers, products))
+      const payload = buildDocumentPayload(values, documentMode, quote?.status || 'Draft')
+      if (quote) {
+        await updateQuote(quote.id, payload as any)
+      } else {
+        await createQuote(payload as any)
+      }
+      toast({ title: quote ? `${DOCUMENT_TYPE_TR[documentMode]} güncellendi` : `${DOCUMENT_TYPE_TR[documentMode]} kaydedildi` })
       setOpen(false)
     } catch (error: any) {
       toast({ title: error?.response?.data?.detail || 'Kayıt sırasında hata oluştu', variant: 'destructive' })
+    } finally {
+      setSaving(false)
     }
   })
 
   return (
     <>
       <CompanyModal open={customerModalOpen} onOpenChange={setCustomerModalOpen} onSubmit={handleCustomerCreate} />
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button size="sm" variant={mode === 'Contract' ? 'default' : 'outline'}>
-          <Plus className="mr-2 h-4 w-4" />
-          {mode === 'Contract' ? 'Yeni sözleşme' : 'Yeni teklif'}
-        </Button>
+        {trigger ?? (
+          <Button size="sm" variant={documentMode === 'Contract' ? 'default' : 'outline'}>
+            {isEditing ? <Pencil className="mr-2 h-4 w-4" /> : <Plus className="mr-2 h-4 w-4" />}
+            {isEditing ? `${DOCUMENT_TYPE_TR[documentMode]} düzenle` : documentMode === 'Contract' ? 'Yeni sözleşme' : 'Yeni teklif'}
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className={cn('max-h-[92vh] max-w-[82rem] overflow-y-auto', customerModalOpen && 'pointer-events-none opacity-0')}>
-        <DialogHeader><DialogTitle>{mode === 'Contract' ? 'Sözleşme oluştur' : 'Teklif oluştur'}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{isEditing ? `${DOCUMENT_TYPE_TR[documentMode]} düzenle` : documentMode === 'Contract' ? 'Sözleşme oluştur' : 'Teklif oluştur'}</DialogTitle></DialogHeader>
         <Tabs defaultValue="customer">
           <TabsList className="mb-3 grid grid-cols-4">
             <TabsTrigger value="customer">Müşteri</TabsTrigger>
@@ -691,7 +1089,9 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
             <div className="grid gap-3 md:grid-cols-2">
               <div><Label>Hazırlayan</Label><Select value={form.watch('preparedById') || '__none__'} onValueChange={(value) => form.setValue('preparedById', value === '__none__' ? '' : value)}><SelectTrigger><SelectValue placeholder="Hazırlayan seçin" /></SelectTrigger><SelectContent><SelectItem value="__none__">Seçili değil</SelectItem>{preparers.map((user) => <SelectItem key={user.id} value={user.id}>{user.fullName || user.username}</SelectItem>)}</SelectContent></Select></div>
               <div><Label>Satıcı firma</Label><Select value={form.watch('sellerCompanyKey') || 'AYKA'} onValueChange={(value) => form.setValue('sellerCompanyKey', value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{SELLER_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
-              <div><Label>Şablon</Label><Select value={form.watch('templateKey') || '__auto__'} onValueChange={(value) => form.setValue('templateKey', value === '__auto__' ? '' : value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{TEMPLATE_OPTIONS[mode].map((option) => <SelectItem key={option.value || '__auto__'} value={option.value || '__auto__'}>{option.label}</SelectItem>)}</SelectContent></Select></div>
+              <div><Label>Para birimi</Label><Select value={form.watch('currency') || 'TRY'} onValueChange={(value) => { form.setValue('currency', value as any, { shouldDirty: true }); if (value === 'TRY') form.setValue('exchangeRate', 1, { shouldDirty: true }) }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{DOCUMENT_CURRENCY_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
+              <div><Label>{`Kur (${getCurrencySymbol(form.watch('currency'))} -> ₺)`}</Label><Input type="number" step="0.0001" min="1" disabled={(form.watch('currency') || 'TRY') === 'TRY'} value={form.watch('exchangeRate') ?? 1} onChange={(event) => form.setValue('exchangeRate', Number(event.target.value || 1), { shouldDirty: true })} /><p className="mt-1 text-xs text-muted-foreground">{(form.watch('currency') || 'TRY') === 'TRY' ? 'Türk Lirası seçildiğinde kur 1 kabul edilir.' : formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p></div>
+              <div><Label>Şablon</Label><Select value={form.watch('templateKey') || '__auto__'} onValueChange={(value) => form.setValue('templateKey', value === '__auto__' ? '' : value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{TEMPLATE_OPTIONS[documentMode].map((option) => <SelectItem key={option.value || '__auto__'} value={option.value || '__auto__'}>{option.label}</SelectItem>)}</SelectContent></Select></div>
               <div><Label>Belge tarihi</Label><Input type="date" value={form.watch('contractDate') || ''} onChange={(event) => form.setValue('contractDate', event.target.value)} /></div>
               <div><Label>Geçerlilik tarihi</Label><Input type="date" value={form.watch('validUntil') || ''} onChange={(event) => form.setValue('validUntil', event.target.value)} /></div>
               <div><Label>Geçerlilik etiketi</Label><Input value={form.watch('validityLabel') || ''} onChange={(event) => form.setValue('validityLabel', event.target.value)} /></div>
@@ -734,7 +1134,7 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
                       <div><Label>Detay 1</Label><Input value={line.details?.primary || ''} onChange={(event) => form.setValue(`lines.${index}.details.primary`, event.target.value)} /></div>
                       <div><Label>Detay 2</Label><Input value={line.details?.secondary || ''} onChange={(event) => form.setValue(`lines.${index}.details.secondary`, event.target.value)} /></div>
                       <div><Label>Miktar</Label><NumericEditor value={Number(line.qty || 0)} onValueChange={(value) => form.setValue(`lines.${index}.qty`, value)} /></div>
-                      <div><Label>Birim fiyat</Label><NumericEditor value={Number(line.unitPrice || 0)} onValueChange={(value) => form.setValue(`lines.${index}.unitPrice`, value)} /></div>
+                      <div><Label>{`Birim fiyat (${getCurrencySymbol(form.watch('currency'))})`}</Label><NumericEditor value={Number(line.unitPrice || 0)} onValueChange={(value) => form.setValue(`lines.${index}.unitPrice`, value)} /></div>
                       <div><Label>İskonto 1 %</Label><NumericEditor value={Number(line.discount || 0)} max={50} onValueChange={(value) => form.setValue(`lines.${index}.discount`, value)} /></div>
                       <div><Label>İskonto 2 %</Label><NumericEditor value={Number(line.discountSecondary || 0)} max={50} onValueChange={(value) => form.setValue(`lines.${index}.discountSecondary`, value)} /></div>
                       <div><Label>KDV %</Label><NumericEditor value={Number(line.tax || 0)} onValueChange={(value) => form.setValue(`lines.${index}.tax`, value)} /></div>
@@ -748,10 +1148,10 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
           </TabsContent>
 
           <TabsContent value="review" className="space-y-3">
-            <Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Belge türü: {DOCUMENT_TYPE_TR[mode]}</p><p>Müşteri: {form.watch('customerName') || selectedCustomer?.name || '-'}</p><p>Hazırlayan: {preparers.find((user) => user.id === form.watch('preparedById'))?.fullName || '-'}</p><p>Satıcı firma: {form.watch('sellerCompanyKey') || '-'}</p><p>Şablon: {templateLabel(mode, form.watch('templateKey'))}</p><p>Satır sayısı: {lines.length}</p><p>Ara toplam: {formatCurrency(subtotal)}</p><p>Toplam iskonto: {formatCurrency(discountTotal)}</p><p>KDV: {formatCurrency(taxTotal)}</p><p>Genel toplam: {formatCurrency(total)}</p></CardContent></Card>
+            <Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Belge türü: {DOCUMENT_TYPE_TR[documentMode]}</p><p>Müşteri: {form.watch('customerName') || selectedCustomer?.name || '-'}</p><p>Hazırlayan: {preparers.find((user) => user.id === form.watch('preparedById'))?.fullName || '-'}</p><p>Satıcı firma: {form.watch('sellerCompanyKey') || '-'}</p><p>Para birimi: {getCurrencySymbol(form.watch('currency'))} {getCurrencyLabel(form.watch('currency'))}</p><p>Kur: {formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p><p>Şablon: {templateLabel(documentMode, form.watch('templateKey'))}</p><p>Satır sayısı: {lines.length}</p><p>Ara toplam: {formatDocumentAmount(subtotal, form.watch('currency'))}</p><p>Toplam iskonto: {formatDocumentAmount(discountTotal, form.watch('currency'))}</p><p>KDV: {formatDocumentAmount(taxTotal, form.watch('currency'))}</p><p>Genel toplam: {formatDocumentAmount(total, form.watch('currency'))}</p></CardContent></Card>
           </TabsContent>
         </Tabs>
-        <DialogFooter><Button onClick={handleSave}>Kaydet</Button></DialogFooter>
+        <DialogFooter><Button onClick={handleSave} disabled={saving}>{saving ? 'Kaydediliyor...' : isEditing ? 'Değişiklikleri kaydet' : 'Kaydet'}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
     </>
@@ -760,11 +1160,13 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
 
 export function QuoteDetailPage() {
   const params = useParams({ from: '/crm/quotes/$quoteId' })
-  const { data, updateQuote, convertQuote } = useAppStore()
+  const navigate = useNavigate()
+  const { data, updateQuote, convertQuote, deleteQuotes } = useAppStore()
   const { toast } = useToast()
-  const [auditLogs, setAuditLogs] = useState<{ id: string; action: string; field: string; old_value: string; new_value: string; created_at: string; user?: string }[]>([])
+  const [auditLogs, setAuditLogs] = useState<QuoteAuditLogItem[]>([])
   const [approvalSteps, setApprovalSteps] = useState<{ id: string; role: string; status: string; comment?: string; acted_by?: string; updated_at?: string }[]>([])
   const [busyStep, setBusyStep] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const quote = data.quotes.find((item) => item.id === params.quoteId) ?? data.quotes[0]
   const company = data.companies.find((item) => item.id === quote?.customerId)
   if (!quote) return <p className="text-muted-foreground">Belge bulunamadı</p>
@@ -779,25 +1181,65 @@ export function QuoteDetailPage() {
   const termsLines = getTermsText(quote.contractConfig).split('\n').map((line) => line.trim()).filter(Boolean)
   const contractNotesLines = getContractNotesText(quote.contractConfig).split('\n').map((line) => line.trim()).filter(Boolean)
 
-  const approve = (role: any) => {
-    updateQuote(quote.id, {
-      approval: (quote.approval || []).map((step) => (step.role === role ? { ...step, status: 'Approved', updatedAt: new Date().toISOString() } : step)),
-      status: role === 'Finance' ? 'Approved' : quote.status,
-    })
-    toast({ title: `${role} onayı alındı` })
+  const approve = async (role: any) => {
+    try {
+      await updateQuote(quote.id, {
+        approval: (quote.approval || []).map((step) => (step.role === role ? { ...step, status: 'Approved', updatedAt: new Date().toISOString() } : step)),
+        status: role === 'Finance' ? 'Approved' : quote.status,
+      })
+      toast({ title: `${role} onayı alındı` })
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Onay durumu güncellenemedi', variant: 'destructive' })
+    }
+  }
+
+  const handleDownload = async () => {
+    try {
+      await downloadDocument(quote.id)
+      toast({ title: `${DOCUMENT_TYPE_TR[quote.documentType]} dosyaları indirildi` })
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || error?.message || 'Dosya oluşturulamadı', variant: 'destructive' })
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!confirm(`${DOCUMENT_TYPE_TR[quote.documentType]} ${quote.number} kaydı kalıcı olarak silinsin mi? Bu işlem geri alınamaz.`)) return
+
+    setDeleting(true)
+    try {
+      await deleteQuotes([quote.id])
+      toast({ title: `${DOCUMENT_TYPE_TR[quote.documentType]} silindi` })
+      navigate({ to: '/crm/quotes' })
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Silme sırasında hata oluştu', variant: 'destructive' })
+    } finally {
+      setDeleting(false)
+    }
   }
 
   return (
     <div className="space-y-4">
       <PageHeader
         title={`${quote.number} - ${quote.customerName || company?.name || ''}`}
-        description={`${DOCUMENT_TYPE_TR[quote.documentType]} - ${quoteStatusTr(quote.status)} - ${formatCurrency(quote.total)}`}
+        description={`${DOCUMENT_TYPE_TR[quote.documentType]} - ${quoteStatusTr(quote.status)} - ${formatCurrency(quote.total, quote.currency)}`}
         actions={
           <div className="flex gap-2">
-            <RbacGuard perm="quotes.edit"><Button size="sm" variant="outline" onClick={() => updateQuote(quote.id, { status: 'Sent' })}><Send className="mr-2 h-4 w-4" />Gönder</Button></RbacGuard>
-            <Button onClick={async () => { try { await downloadDocument(quote.id); toast({ title: `${DOCUMENT_TYPE_TR[quote.documentType]} dosyaları indirildi` }) } catch (error: any) { toast({ title: error?.response?.data?.detail || error?.message || 'Dosya oluşturulamadı', variant: 'destructive' }) } }}><Download className="mr-2 h-4 w-4" />XLSX indir</Button>
+            <RbacGuard perm="quotes.edit">
+              <DocumentWizardTrigger
+                quote={quote}
+                trigger={
+                  <Button size="sm" variant="outline">
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Düzenle
+                  </Button>
+                }
+              />
+            </RbacGuard>
+            <RbacGuard perm="quotes.edit"><Button size="sm" variant="outline" onClick={async () => { try { await updateQuote(quote.id, { status: 'Sent' }); toast({ title: 'Belge gönderildi olarak işaretlendi' }) } catch (error: any) { toast({ title: error?.response?.data?.detail || 'Durum güncellenemedi', variant: 'destructive' }) } }}><Send className="mr-2 h-4 w-4" />Gönder</Button></RbacGuard>
+            <Button onClick={handleDownload}><Download className="mr-2 h-4 w-4" />İndir</Button>
             <RbacGuard perm="quotes.edit"><Button size="sm" variant="outline" onClick={() => approve('Manager')}><Shield className="mr-2 h-4 w-4" />Onay iste</Button></RbacGuard>
             <RbacGuard perm="quotes.approve"><Button size="sm" onClick={() => { convertQuote(quote.id); toast({ title: 'Satış siparişine dönüştürüldü' }) }}><Check className="mr-2 h-4 w-4" />Satış siparişi</Button></RbacGuard>
+            <RbacGuard perm="quotes.edit"><Button size="sm" variant="destructive" disabled={deleting} onClick={handleDelete}><Trash2 className="mr-2 h-4 w-4" />Sil</Button></RbacGuard>
           </div>
         }
       />
@@ -812,13 +1254,152 @@ export function QuoteDetailPage() {
           <TabsTrigger value="history">Geçmiş</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview"><Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Müşteri: {quote.customerName || company?.name}</p><p>Sahip: {quote.owner}</p><p>Hazırlayan: {quote.preparedByName || '-'}</p><p>Oluşturulma: {formatDateTime(quote.createdAt)}</p><p>Geçerlilik: {formatDate(quote.validUntil)}</p><p>Ödeme: {quote.terms.payment || '-'}</p><p>Teslim: {quote.terms.delivery || '-'}</p><p>KDV oranı: %{quote.vatRate ?? 20}</p><p>Toplam: {formatCurrency(quote.total)}</p></CardContent></Card></TabsContent>
-        <TabsContent value="lines"><Card><CardContent className="space-y-3 pt-4">{quote.lines.map((line, index) => <div key={`${line.name}-${index}`} className="rounded-md border p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold">{line.name}</p><p className="text-muted-foreground">{sectionLabel(line.sectionKey)} - Kod: {line.details?.code || line.sku || '-'}</p></div><p>{formatCurrency(line.unitPrice)} / {line.unit || 'Adet'}</p></div><div className="mt-2 grid gap-1 md:grid-cols-3"><span>Detay 1: {line.details?.primary || '-'}</span><span>Detay 2: {line.details?.secondary || '-'}</span><span>Miktar: {line.qty}</span><span>İskonto 1: %{line.discount || 0}</span><span>İskonto 2: %{line.discountSecondary || 0}</span><span>KDV: %{line.tax || 0}</span><span>Etkin iskonto: %{getEffectiveDiscountRate(line).toFixed(2)}</span><span>Net tutar: {formatCurrency(getLineDiscountedBase(line))}</span><span>Tutar: {formatCurrency(getLineBase(line))}</span></div>{line.details?.attributes && Object.keys(line.details.attributes).length > 0 && <div className="mt-3 grid gap-2 rounded-md bg-muted/30 p-3 md:grid-cols-2">{Object.entries(line.details.attributes).map(([key, value]) => <span key={key}>{key}: {String(value)}</span>)}</div>}</div>)}</CardContent></Card></TabsContent>
+        <TabsContent value="overview"><Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Müşteri: {quote.customerName || company?.name}</p><p>Sahip: {quote.owner}</p><p>Hazırlayan: {quote.preparedByName || '-'}</p><p>Oluşturulma: {formatDateTime(quote.createdAt)}</p><p>Geçerlilik: {formatDate(quote.validUntil)}</p><p>Para birimi: {getCurrencySymbol(quote.currency)} {getCurrencyLabel(quote.currency)}</p><p>Kur: {formatExchangeRate(quote.contractConfig?.exchangeRate || quote.contractConfig?.exchange_rate, quote.currency)}</p><p>Ödeme: {quote.terms.payment || '-'}</p><p>Teslim: {quote.terms.delivery || '-'}</p><p>KDV oranı: %{quote.vatRate ?? 20}</p><p>Toplam: {formatCurrency(quote.total, quote.currency)}</p></CardContent></Card></TabsContent>
+        <TabsContent value="lines"><Card><CardContent className="space-y-3 pt-4">{quote.lines.map((line, index) => <div key={`${line.name}-${index}`} className="rounded-md border p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold">{line.name}</p><p className="text-muted-foreground">{sectionLabel(line.sectionKey)} - Kod: {line.details?.code || line.sku || '-'}</p></div><p>{formatCurrency(line.unitPrice, quote.currency)} / {line.unit || 'Adet'}</p></div><div className="mt-2 grid gap-1 md:grid-cols-3"><span>Detay 1: {line.details?.primary || '-'}</span><span>Detay 2: {line.details?.secondary || '-'}</span><span>Miktar: {line.qty}</span><span>İskonto 1: %{line.discount || 0}</span><span>İskonto 2: %{line.discountSecondary || 0}</span><span>KDV: %{line.tax || 0}</span><span>Etkin iskonto: %{getEffectiveDiscountRate(line).toFixed(2)}</span><span>Net tutar: {formatCurrency(getLineDiscountedBase(line), quote.currency)}</span><span>Tutar: {formatCurrency(getLineBase(line), quote.currency)}</span></div>{line.details?.attributes && Object.keys(line.details.attributes).length > 0 && <div className="mt-3 grid gap-2 rounded-md bg-muted/30 p-3 md:grid-cols-2">{Object.entries(line.details.attributes).map(([key, value]) => <span key={key}>{key}: {String(value)}</span>)}</div>}</div>)}</CardContent></Card></TabsContent>
         <TabsContent value="document"><Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Satıcı firma: {quote.sellerCompanyKey || '-'}</p><p>Şablon: {templateLabel(quote.documentType, quote.contractConfig?.templateKey || quote.contractConfig?.template_key)}</p><p>Cari ünvanı: {customerSnapshot.name || quote.customerName || company?.name || '-'}</p><p>Vergi bilgisi: {[customerSnapshot.tax_office || customerSnapshot.taxOffice, customerSnapshot.tax_number || customerSnapshot.taxNumber].filter(Boolean).join(' / ') || '-'}</p><p>Yetkili: {customerSnapshot.authorized_person || customerSnapshot.authorizedPerson || '-'}</p><p>Telefon / mail: {[customerSnapshot.phone, customerSnapshot.email].filter(Boolean).join(' / ') || '-'}</p><p>Adres: {customerSnapshot.address || '-'}</p>{termsLines.length > 0 && <div className="space-y-2 pt-2"><p className="font-medium">Maddeler</p>{termsLines.map((term, index) => <p key={`term-${index}`}>{term}</p>)}</div>}{contractNotesLines.length > 0 && <div className="space-y-2 pt-2"><p className="font-medium">Sözleşme notları</p>{contractNotesLines.map((term, index) => <p key={`contract-note-${index}`}>{term}</p>)}</div>}</CardContent></Card></TabsContent>
         <TabsContent value="pricing"><Card><CardContent className="pt-4 space-y-2 text-sm"><p>Fiyatlama kuralları müşteri, ürün kategorisi ve hacim bazlı uygulanır.</p><div className="flex gap-2"><Badge>VIP müşteri %8</Badge><Badge>Donanım %5</Badge><Badge>50k+ %3</Badge></div></CardContent></Card></TabsContent>
         <TabsContent value="approval"><Card><CardContent className="pt-4 space-y-2"><CardDescription>Satır içi onay akışı</CardDescription>{approvalSteps.length === 0 && <p className="text-sm text-muted-foreground">Onay kaydı yok</p>}{approvalSteps.map((step) => <div key={step.id} className="flex items-center justify-between rounded-md border p-2"><div><p className="font-semibold">{step.role}</p><p className="text-xs text-muted-foreground">Durum: {step.status}</p>{step.comment && <p className="text-xs text-muted-foreground">Not: {step.comment}</p>}</div>{step.status === 'Waiting' && <div className="flex gap-2"><RbacGuard perm="quotes.approve"><Button size="sm" disabled={busyStep === step.id} onClick={async () => { setBusyStep(step.id); await api.post(`/approvals/step/${step.id}/action/`, { action: 'approve' }); const refreshed = await api.get('/approvals/', { params: { quote_id: quote.id } }); setApprovalSteps(refreshed.data?.[0]?.steps || []); setBusyStep(null) }}>Onayla</Button></RbacGuard><RbacGuard perm="quotes.approve"><Button size="sm" variant="outline" disabled={busyStep === step.id} onClick={async () => { const reason = prompt('Ret nedeni:'); setBusyStep(step.id); await api.post(`/approvals/step/${step.id}/action/`, { action: 'reject', comment: reason || '' }); const refreshed = await api.get('/approvals/', { params: { quote_id: quote.id } }); setApprovalSteps(refreshed.data?.[0]?.steps || []); setBusyStep(null) }}>Reddet</Button></RbacGuard></div>}</div>)}<RbacGuard perm="quotes.edit"><Button size="sm" variant="ghost" disabled={busyStep !== null} onClick={async () => { setBusyStep('resubmit'); if (approvalSteps[0]) { await api.post(`/approvals/step/${approvalSteps[0].id}/action/`, { action: 'resubmit' }); const refreshed = await api.get('/approvals/', { params: { quote_id: quote.id } }); setApprovalSteps(refreshed.data?.[0]?.steps || []) } setBusyStep(null) }}>Yeniden gönder</Button></RbacGuard></CardContent></Card></TabsContent>
-        <TabsContent value="history"><Card><CardContent className="pt-4 space-y-2 text-sm">{auditLogs.length === 0 && <p className="text-muted-foreground text-sm">Audit kaydı bulunamadı</p>}{auditLogs.map((item) => <div key={item.id} className="rounded-md border p-2"><p className="font-semibold">{item.field || item.action}</p><p>{item.old_value ?? '-'} → {item.new_value ?? '-'}</p><p className="text-xs text-muted-foreground">{item.user || '—'} • {formatDate(item.created_at)}</p></div>)}</CardContent></Card></TabsContent>
+        <TabsContent value="history"><AuditHistoryList logs={auditLogs} companies={data.companies} users={data.users} currency={quote.currency} /></TabsContent>
       </Tabs>
     </div>
   )
+}
+
+function AuditHistoryList({ logs, companies, users, currency = 'TRY' }: { logs: QuoteAuditLogItem[]; companies: any[]; users: any[]; currency?: string }) {
+  const groups = useMemo(() => buildAuditChangeGroups(logs, users), [logs, users])
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle>Değişiklik Geçmişi</CardTitle>
+        <CardDescription>Tarih, saat, kullanıcı ve değişiklik detayları olay bazlı gruplandırılır.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {groups.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Henüz değişiklik kaydı bulunamadı.</p>
+        ) : (
+          <div className="space-y-4">
+            {groups.map((group) => {
+              const actionMeta = getAuditActionMeta(group.action)
+              const summaryText = getAuditSummaryText(group.details, companies, users, currency)
+
+              return (
+                <section key={group.id} className="rounded-xl border border-border/70 bg-card/30 p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant={actionMeta.variant as any}>{actionMeta.label}</Badge>
+                        {group.details.length > 0 && <Badge variant="muted">{group.details.length} değişiklik</Badge>}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                        <span>{group.userLabel}</span>
+                        <span>{formatDateTime(group.createdAt)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {group.details.length > 0 ? (
+                    <div className="mt-4 space-y-3">
+                      {summaryText && (
+                        <div className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+                          {summaryText}
+                        </div>
+                      )}
+                      {group.details.map((detail) => (
+                        <div key={detail.id} className="rounded-xl border border-border/70 bg-background/70 p-3">
+                          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-sm font-semibold">{detail.label}</p>
+                            <Badge variant="outline">
+                              {isEmptyAuditValue(detail.oldValue) ? 'Eklendi' : isEmptyAuditValue(detail.newValue) ? 'Kaldırıldı' : 'Güncellendi'}
+                            </Badge>
+                          </div>
+                          <div className="grid gap-3 lg:grid-cols-2">
+                            <div className="rounded-lg border border-border/70 bg-muted/20 p-3">
+                              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Önce</p>
+                              <AuditValueBlock fieldKey={detail.fieldKey} value={detail.oldValue} kind={detail.kind} companies={companies} users={users} currency={currency} />
+                            </div>
+                            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
+                              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Sonra</p>
+                              <AuditValueBlock fieldKey={detail.fieldKey} value={detail.newValue} kind={detail.kind} companies={companies} users={users} currency={currency} />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-4 text-sm text-muted-foreground">
+                      {group.action === 'updated'
+                        ? 'Bu kayıt eski audit formatında tutulduğu için alan bazlı fark bilgisi yok. Bu güncellemeden sonra yapılan değişikliklerde önce/sonra farkları burada görünecek.'
+                        : actionMeta.description}
+                    </p>
+                  )}
+                </section>
+              )
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function AuditValueBlock({ fieldKey, value, kind, companies, users, currency = 'TRY' }: { fieldKey: string; value: any; kind: AuditChangeDetail['kind']; companies: any[]; users: any[]; currency?: string }) {
+  if (value === undefined || value === null || value === '') {
+    return <p className="text-sm text-muted-foreground">Boş</p>
+  }
+
+  if (kind === 'lines' && Array.isArray(value)) {
+    return (
+      <div className="space-y-2">
+        {value.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Kalem yok</p>
+        ) : (
+          value.map((line, index) => {
+            const lineDetails = [
+              line.code ? `Kod: ${line.code}` : null,
+              line.section_key ? `Grup: ${sectionLabel(line.section_key)}` : null,
+              `Miktar: ${line.qty || 0} ${line.unit || 'Adet'}`,
+              `Birim fiyat: ${formatCurrency(Number(line.unit_price || 0), currency)}`,
+              `İskonto: %${Number(line.discount || 0)} + %${Number(line.discount_secondary || 0)}`,
+              `KDV: %${Number(line.tax || 0)}`,
+            ].filter(Boolean)
+
+            return (
+              <div key={`${line.code || line.name || 'line'}-${index}`} className="rounded-lg border border-border/60 bg-background/70 p-3">
+                <p className="text-sm font-semibold">{index + 1}. kalem - {line.name || 'Adsız kalem'}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{lineDetails.join(' • ')}</p>
+              </div>
+            )
+          })
+        )}
+      </div>
+    )
+  }
+
+  if (kind === 'array' && Array.isArray(value)) {
+    return (
+      <div className="space-y-1">
+        {value.length === 0 ? <p className="text-sm text-muted-foreground">Kayıt yok</p> : value.map((item, index) => <p key={`${fieldKey}-${index}`} className="text-sm">{formatAuditValue(fieldKey, item, companies, users, currency)}</p>)}
+      </div>
+    )
+  }
+
+  if (kind === 'object' && isPlainObject(value)) {
+    return (
+      <div className="space-y-1">
+        {Object.entries(value).map(([key, nestedValue]) => (
+          <div key={`${fieldKey}-${key}`} className="grid gap-1 text-sm md:grid-cols-[160px_1fr]">
+            <span className="text-muted-foreground">{getAuditFieldLabel(key)}</span>
+            <span>{formatAuditValue(key, nestedValue, companies, users, currency)}</span>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  if (fieldKey.split('.').at(-1) === 'status') {
+    return <Badge variant={getQuoteStatusBadgeVariant(String(value)) as any}>{formatAuditValue(fieldKey, value, companies, users, currency)}</Badge>
+  }
+
+  return <p className="text-sm leading-6 whitespace-pre-wrap break-words">{formatAuditValue(fieldKey, value, companies, users, currency)}</p>
 }

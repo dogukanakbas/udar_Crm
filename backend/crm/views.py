@@ -48,6 +48,10 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'total']
     queryset = Quote.objects.all().select_related('customer', 'owner', 'prepared_by').prefetch_related('lines__product__category')
 
+    def _attach_audit_user(self, quote):
+        quote._audit_user = self.request.user
+        return quote
+
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
@@ -67,9 +71,17 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         number = number_range.next_number()
         serializer.save(organization=org, number=number, owner=self.request.user)
 
+    def perform_update(self, serializer):
+        serializer.instance._audit_user = self.request.user
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._attach_audit_user(instance)
+        instance.delete()
+
     @action(detail=True, methods=['post'])
     def send(self, request, pk=None):
-        quote = self.get_object()
+        quote = self._attach_audit_user(self.get_object())
         quote.status = 'Sent'
         quote.save(update_fields=['status'])
         log_entity_action(quote, 'sent', user=request.user)
@@ -77,7 +89,7 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def convert(self, request, pk=None):
-        quote = self.get_object()
+        quote = self._attach_audit_user(self.get_object())
         quote.status = 'Converted'
         quote.save(update_fields=['status'])
         log_entity_action(quote, 'converted', user=request.user)
@@ -85,7 +97,7 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def request_approval(self, request, pk=None):
-        quote = self.get_object()
+        quote = self._attach_audit_user(self.get_object())
         approval, _ = ApprovalInstance.objects.get_or_create(organization=quote.organization, quote=quote)
         # reset steps
         approval.steps.all().delete()
@@ -100,7 +112,7 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
-        quote = self.get_object()
+        quote = self._attach_audit_user(self.get_object())
         role = request.data.get('role', getattr(request.user, 'role', 'Manager'))
         if getattr(request.user, 'role', None) not in ['Admin', role]:
             return Response({'error': 'Role mismatch'}, status=403)
@@ -136,7 +148,7 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):
-        quote = self.get_object()
+        quote = self._attach_audit_user(self.get_object())
         role = request.data.get('role', getattr(request.user, 'role', 'Manager'))
         if getattr(request.user, 'role', None) not in ['Admin', role]:
             return Response({'error': 'Role mismatch'}, status=403)
@@ -161,7 +173,7 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def resubmit(self, request, pk=None):
-        quote = self.get_object()
+        quote = self._attach_audit_user(self.get_object())
         approval = ApprovalInstance.objects.filter(quote=quote).first()
         if not approval:
             return Response({'error': 'Approval not started'}, status=400)
