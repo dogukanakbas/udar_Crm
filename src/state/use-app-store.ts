@@ -117,7 +117,7 @@ const mapQuote = (q: any, idx = 0) => ({
   subtotal: Number(q.subtotal ?? 0),
   discountTotal: Number(q.discount_total ?? 0),
   taxTotal: Number(q.tax_total ?? 0),
-  currency: q.currency || 'USD',
+  currency: q.currency || 'TRY',
   vatRate: Number(q.vat_rate ?? 20),
   createdAt: q.created_at,
   updatedAt: q.updated_at,
@@ -172,17 +172,29 @@ export const useAppStore = create<AppState>()(
   startSse: () => {
     let timer: any
     const stop = startSseClient((ev) => {
-      const t = ev?.type
+      const t = ev?.type || ''
+      if (timer) clearTimeout(timer)
+
+      if (t.startsWith('quote.')) {
+        timer = setTimeout(async () => {
+          try {
+            const quotesRes = await api.get('/quotes/')
+            const quotes = (quotesRes.data || []).map((q: any, idx: number) => mapQuote(q, idx))
+            set((state) => ({ data: { ...state.data, quotes } }))
+          } catch (err) {
+            console.error('SSE quote refresh failed', err)
+          }
+        }, 300)
+        return
+      }
       // Mention / SLA / automation olaylarında sadece ilgili listeleri tazele
       const shouldHydrate =
         !t ||
         t.startsWith('task.') ||
         t.startsWith('notification.') ||
         t.startsWith('ticket.') ||
-        t.startsWith('quote.') ||
         t.startsWith('orders.')
       if (shouldHydrate) {
-        if (timer) clearTimeout(timer)
         timer = setTimeout(() => {
           get().hydrateFromApi()
         }, 500)
@@ -1036,10 +1048,14 @@ export const useAppStore = create<AppState>()(
     })(),
   createQuote: async (payload) => {
     try {
-      await api.post('/quotes/', payload)
-      const quotesRes = await api.get('/quotes/')
-      const quotes = (quotesRes.data || []).map((q: any, idx: number) => mapQuote(q, idx))
-      set((state) => ({ data: { ...state.data, quotes } }))
+      const response = await api.post('/quotes/', payload)
+      const createdQuote = mapQuote(response.data)
+      set((state) => ({
+        data: {
+          ...state.data,
+          quotes: [createdQuote, ...state.data.quotes.filter((quote) => quote.id !== createdQuote.id)],
+        },
+      }))
     } catch (err) {
       console.error('API createQuote failed', err)
       throw err
@@ -1047,10 +1063,14 @@ export const useAppStore = create<AppState>()(
   },
   updateQuote: async (id, patch) => {
     try {
-      await api.patch(`/quotes/${id}/`, patch)
-      const quotesRes = await api.get('/quotes/')
-      const quotes = (quotesRes.data || []).map((q: any, idx: number) => mapQuote(q, idx))
-      set((state) => ({ data: { ...state.data, quotes } }))
+      const response = await api.patch(`/quotes/${id}/`, patch)
+      const updatedQuote = mapQuote(response.data)
+      set((state) => ({
+        data: {
+          ...state.data,
+          quotes: state.data.quotes.map((quote) => (quote.id === id ? updatedQuote : quote)),
+        },
+      }))
     } catch (err) {
       console.error('API updateQuote failed', err)
       throw err
@@ -1059,9 +1079,12 @@ export const useAppStore = create<AppState>()(
   deleteQuotes: async (ids) => {
     try {
       await Promise.all(ids.map((id) => api.delete(`/quotes/${id}/`)))
-      const quotesRes = await api.get('/quotes/')
-      const quotes = (quotesRes.data || []).map((q: any, idx: number) => mapQuote(q, idx))
-      set((state) => ({ data: { ...state.data, quotes } }))
+      set((state) => ({
+        data: {
+          ...state.data,
+          quotes: state.data.quotes.filter((quote) => !ids.includes(quote.id)),
+        },
+      }))
     } catch (err) {
       console.error('API deleteQuotes failed', err)
       throw err

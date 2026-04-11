@@ -72,6 +72,12 @@ DEFAULT_SELLER_PROFILES = [
     },
 ]
 
+CURRENCY_SYMBOLS = {
+    'TRY': '₺',
+    'USD': '$',
+    'EUR': '€',
+}
+
 ASSETS_DIR = Path(__file__).resolve().parent / 'assets'
 
 
@@ -378,6 +384,8 @@ def _fill_shared_header(ws, quote):
     config = quote.contract_config or {}
     customer = _customer_snapshot(config)
     prepared_by = (config.get('prepared_by_snapshot') or {}).get('name') or ''
+    currency_code = _quote_currency(quote)
+    currency_note = _currency_note(quote)
     seller_key = (quote.seller_company_key or 'AYKA').strip().upper()
     profiles = {profile['key'].upper(): profile for profile in get_seller_profiles(quote.organization)}
     ortka = profiles.get('ORTKA', DEFAULT_SELLER_PROFILES[0])
@@ -393,7 +401,7 @@ def _fill_shared_header(ws, quote):
     _set_cell_value(ws, 'D30', quote.number)
     _set_cell_value(ws, 'D31', prepared_by)
     _set_cell_value(ws, 'D32', config.get('validity_label') or format_validity_text(quote.valid_until))
-    _set_cell_value(ws, 'D33', config.get('price_list_label') or '')
+    _set_cell_value(ws, 'D33', ' • '.join(part for part in [config.get('price_list_label') or '', currency_note] if part))
     _set_cell_value(ws, 'C16', _choice_text(_normalize_display_name(ortka.get('display_name', '')), seller_key == 'ORTKA'))
     _set_cell_value(ws, 'J16', _choice_text(_normalize_display_name(ayka.get('display_name', '')), seller_key == 'AYKA'))
     _set_cell_value(ws, 'C17', f"VERGİ DAİRESİ: {ortka.get('tax_office', '')}")
@@ -406,6 +414,8 @@ def _fill_shared_header(ws, quote):
 
 def _fill_line_blocks(ws, quote, template):
     ordered_lines = list(quote.lines.select_related('product__category').order_by('sort_order', 'id'))
+    currency_code = _quote_currency(quote)
+    currency_symbol = _currency_symbol(currency_code)
     for block in template['line_blocks']:
         lines = [line for line in ordered_lines if (line.section_key or _category_section_key(line)).strip() in block['section_keys']]
         visible = bool(lines)
@@ -429,23 +439,26 @@ def _fill_line_blocks(ws, quote, template):
             _set_cell_value(ws, f'E{row_number}', primary)
             _set_cell_value(ws, f'F{row_number}', secondary)
             _set_cell_value(ws, f'G{row_number}', float(line.qty))
-            _set_cell_value(ws, f'H{row_number}', float(line.unit_price))
+            _set_currency_value(ws, f'H{row_number}', float(line.unit_price), currency_code)
             _set_cell_value(ws, f'I{row_number}', float(Decimal(line.discount or 0)))
             _set_cell_value(ws, f'J{row_number}', float(Decimal(getattr(line, 'discount_secondary', 0) or 0)))
             _set_cell_value(ws, f'K{row_number}', line.unit or 'Adet')
-            _set_cell_value(ws, f'L{row_number}', float(net_unit))
-            _set_cell_value(ws, f'M{row_number}', float(line_total))
+            _set_currency_value(ws, f'L{row_number}', float(net_unit), currency_code)
+            _set_currency_value(ws, f'M{row_number}', float(line_total), currency_code)
 
         subtotal_value = sum((_line_subtotal(line) for line in lines), Decimal('0'))
         tax_value = sum((_line_tax(line) for line in lines), Decimal('0'))
         grand_value = subtotal_value + tax_value
-        _set_cell_value(ws, f'M{block["subtotal_row"]}', float(subtotal_value) if visible else '')
-        _set_cell_value(ws, f'M{block["tax_row"]}', float(tax_value) if visible else '')
-        _set_cell_value(ws, f'M{block["grand_row"]}', float(grand_value) if visible else '')
+        _set_cell_value(ws, f'L{block["subtotal_row"]}', f'Tutar Toplam ({currency_symbol})' if visible else '')
+        _set_cell_value(ws, f'L{block["grand_row"]}', f'Yekün ({currency_symbol})' if visible else '')
+        _set_currency_value(ws, f'M{block["subtotal_row"]}', float(subtotal_value) if visible else '', currency_code)
+        _set_currency_value(ws, f'M{block["tax_row"]}', float(tax_value) if visible else '', currency_code)
+        _set_currency_value(ws, f'M{block["grand_row"]}', float(grand_value) if visible else '', currency_code)
 
 
 def _fill_commercial_rows(ws, quote, template):
     config = quote.contract_config or {}
+    currency_code = _quote_currency(quote)
     commercial_values = [
         quote.number,
         (config.get('prepared_by_snapshot') or {}).get('name') or '',
@@ -457,6 +470,10 @@ def _fill_commercial_rows(ws, quote, template):
     ]
     for row, value in zip(template['commercial_rows'], commercial_values, strict=False):
         _set_cell_value(ws, f'D{row}', value)
+        for column in ['L', 'M']:
+            cell = _resolve_cell(ws, f'{column}{row}')
+            if cell.value not in [None, '']:
+                cell.number_format = _currency_number_format(currency_code)
 
 
 def _fill_terms(ws, quote, template):
@@ -487,12 +504,13 @@ def _fill_contract_notes(ws, quote, template):
 
 
 def _fill_bank_accounts(ws, quote, template):
+    currency_symbol = _currency_symbol(_quote_currency(quote))
     profiles = {profile['key'].upper(): profile for profile in get_seller_profiles(quote.organization)}
     ortka = profiles.get('ORTKA', DEFAULT_SELLER_PROFILES[0])
     ayka = profiles.get('AYKA', DEFAULT_SELLER_PROFILES[1])
     header_row = template['bank_header_row']
-    _set_cell_value(ws, f'C{header_row}', f"{_normalize_display_name(ortka.get('display_name', ''))} TL")
-    _set_cell_value(ws, f'K{header_row}', f"{_normalize_display_name(ayka.get('display_name', ''))} TL")
+    _set_cell_value(ws, f'C{header_row}', f"{_normalize_display_name(ortka.get('display_name', ''))} {currency_symbol}")
+    _set_cell_value(ws, f'K{header_row}', f"{_normalize_display_name(ayka.get('display_name', ''))} {currency_symbol}")
     ortka_accounts = ortka.get('bank_accounts') or []
     ayka_accounts = ayka.get('bank_accounts') or []
     for index, row in enumerate(template['bank_rows']):
@@ -553,18 +571,67 @@ def _normalize_display_name(value):
     return normalized.get(text, text)
 
 
+def _normalize_currency_code(currency):
+    normalized = str(currency or 'TRY').strip().upper()
+    return normalized if normalized in CURRENCY_SYMBOLS else 'TRY'
+
+
+def _quote_currency(quote):
+    return _normalize_currency_code(getattr(quote, 'currency', 'TRY'))
+
+
+def _currency_symbol(currency):
+    return CURRENCY_SYMBOLS.get(_normalize_currency_code(currency), '₺')
+
+
+def _quote_exchange_rate(quote):
+    config = quote.contract_config or {}
+    try:
+        rate = Decimal(str(config.get('exchange_rate') or 1))
+    except Exception:
+        rate = Decimal('1')
+    return rate if rate > 0 else Decimal('1')
+
+
+def _format_exchange_rate(rate: Decimal):
+    return format(rate.normalize(), 'f').rstrip('0').rstrip('.') or '1'
+
+
+def _currency_note(quote):
+    currency_code = _quote_currency(quote)
+    currency_symbol = _currency_symbol(currency_code)
+    if currency_code == 'TRY':
+        return f'Para Birimi: {currency_symbol}'
+    return f'Para Birimi: {currency_symbol} | Kur: 1 {currency_symbol} = {_format_exchange_rate(_quote_exchange_rate(quote))} ₺'
+
+
+def _currency_number_format(currency):
+    return f'"{_currency_symbol(currency)}" #,##0.00'
+
+
+def _resolve_cell(ws, coordinate):
+    cell = ws[coordinate]
+    if cell.__class__.__name__ == 'MergedCell':
+        for merged_range in ws.merged_cells.ranges:
+            if coordinate in merged_range:
+                return ws.cell(merged_range.min_row, merged_range.min_col)
+    return cell
+
+
+def _set_currency_value(ws, coordinate, value, currency):
+    cell = _resolve_cell(ws, coordinate)
+    cell.value = value
+    if value not in [None, '']:
+        cell.number_format = _currency_number_format(currency)
+
+
 def _clear_line_row(ws, row_number):
     for column in ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']:
         _set_cell_value(ws, f'{column}{row_number}', '')
 
 
 def _set_cell_value(ws, coordinate, value):
-    cell = ws[coordinate]
-    if cell.__class__.__name__ == 'MergedCell':
-        for merged_range in ws.merged_cells.ranges:
-            if coordinate in merged_range:
-                cell = ws.cell(merged_range.min_row, merged_range.min_col)
-                break
+    cell = _resolve_cell(ws, coordinate)
     cell.value = value
 
 

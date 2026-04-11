@@ -1,8 +1,11 @@
 import * as XLSX from 'xlsx'
 import type { Quote, QuoteLine } from '@/types'
+import { formatExchangeRate, getCurrencySymbol, normalizeCurrency } from '@/lib/utils'
 
 export function downloadQuoteAsXlsx(quote: Quote, customerName: string) {
   const vatPct = (quote as Quote & { vatRate?: number }).vatRate ?? 20
+  const currency = normalizeCurrency(quote.currency)
+  const exchangeRate = Number(quote.contractConfig?.exchangeRate || quote.contractConfig?.exchange_rate || 1)
   const subtotal = quote.lines.reduce((s, l) => s + l.qty * l.unitPrice, 0)
   const disc = quote.lines.reduce((s, l) => {
     const lineSub = l.qty * l.unitPrice
@@ -19,7 +22,8 @@ export function downloadQuoteAsXlsx(quote: Quote, customerName: string) {
     ['Müşteri', customerName],
     ['Durum', quote.status],
     ['Geçerlilik', quote.validUntil ?? ''],
-    ['Para birimi', quote.currency],
+    ['Para birimi', `${getCurrencySymbol(currency)} ${currency}`],
+    ['Kur', formatExchangeRate(exchangeRate, currency)],
     ['KDV oranı (%)', vatPct],
     [],
   ]
