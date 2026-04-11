@@ -1,9 +1,11 @@
-from rest_framework import filters, permissions, viewsets
+from django.db import transaction
+from rest_framework import filters, permissions, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from permissions import IsOrgMember, HasAPIPermission
-from audit.utils import log_entity_action
 from organizations.models import Organization, NumberRange
 from .models import Invoice, Product, Category, SalesOrder, PurchaseOrder, StockMovement, Vehicle
+from .template_catalog_import import upsert_product_catalog, upsert_template_catalog
 from .serializers import (
     InvoiceSerializer,
     ProductSerializer,
@@ -63,8 +65,46 @@ class ProductViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         'update': 'products.edit',
         'partial_update': 'products.edit',
         'destroy': 'products.edit',
+        'import_template_catalog': 'products.edit',
+        'bulk_upsert': 'products.edit',
     }
     queryset = Product.objects.all()
+
+    @action(detail=False, methods=['post'], url_path='import-template-catalog')
+    def import_template_catalog(self, request):
+        data = request.data if isinstance(request.data, dict) else {}
+        categories_data = data.get('categories') or []
+        products_data = data.get('products') or []
+        if not isinstance(categories_data, list) or not isinstance(products_data, list):
+            return Response({'detail': 'categories ve products liste olmalidir'}, status=status.HTTP_400_BAD_REQUEST)
+
+        org = _ensure_org(request)
+
+        with transaction.atomic():
+            result = upsert_template_catalog(org, categories_data, products_data, user=request.user)
+        return Response(result)
+
+    @action(detail=False, methods=['post'], url_path='bulk-upsert')
+    def bulk_upsert(self, request):
+        data = request.data if isinstance(request.data, dict) else {}
+        categories_data = data.get('categories') or []
+        products_data = data.get('products') or []
+        if not isinstance(categories_data, list) or not isinstance(products_data, list):
+            return Response({'detail': 'categories ve products liste olmalidir'}, status=status.HTTP_400_BAD_REQUEST)
+
+        org = _ensure_org(request)
+        with transaction.atomic():
+            result = upsert_product_catalog(
+                org,
+                categories_data,
+                products_data,
+                user=request.user,
+                audit_entity='BulkProductImport',
+                audit_entity_id='bulk-product-import',
+                audit_action='imported',
+                audit_field='bulk_product_import',
+            )
+        return Response(result)
 
 
 class CategoryViewSet(OrgScopedMixin, viewsets.ModelViewSet):

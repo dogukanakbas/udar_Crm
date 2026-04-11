@@ -13,6 +13,7 @@ import { ChevronLeft, ChevronRight, Download } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
 type DataTableProps<TData> = {
@@ -21,15 +22,38 @@ type DataTableProps<TData> = {
   searchKey?: string
   onExport?: (rows: TData[]) => void
   renderToolbar?: React.ReactNode
+  pageSizeOptions?: number[]
+  initialPageSize?: number
 }
 
-export function DataTable<TData>({ columns, data, searchKey, onExport, renderToolbar }: DataTableProps<TData>) {
+export function DataTable<TData>({
+  columns,
+  data,
+  searchKey,
+  onExport,
+  renderToolbar,
+  pageSizeOptions,
+  initialPageSize,
+}: DataTableProps<TData>) {
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = React.useState('')
+  const resolvedPageSizeOptions = React.useMemo(
+    () => (pageSizeOptions?.length ? pageSizeOptions : [10, 25, 50, 100]),
+    [pageSizeOptions]
+  )
+  const resolvedInitialPageSize =
+    initialPageSize && resolvedPageSizeOptions.includes(initialPageSize)
+      ? initialPageSize
+      : resolvedPageSizeOptions[0]
 
   const table = useReactTable({
     data,
     columns,
+    initialState: {
+      pagination: {
+        pageSize: resolvedInitialPageSize,
+      },
+    },
     state: {
       sorting,
       globalFilter,
@@ -60,12 +84,36 @@ export function DataTable<TData>({ columns, data, searchKey, onExport, renderToo
         )}
         {renderToolbar}
         <div className="ml-auto flex items-center gap-2">
+          <div className="w-[110px]">
+            <Select
+              value={String(table.getState().pagination.pageSize)}
+              onValueChange={(value) => table.setPageSize(Number(value))}
+            >
+              <SelectTrigger className="h-9">
+                <SelectValue placeholder="Sayfa boyutu" />
+              </SelectTrigger>
+              <SelectContent>
+                {resolvedPageSizeOptions.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size} / sayfa
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           {onExport && (
-            <Button variant="outline" size="sm" onClick={() => onExport(table.getFilteredRowModel().rows.map((row) => row.original))}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onExport(table.getFilteredRowModel().rows.map((row) => row.original))}
+            >
               <Download className="mr-2 h-4 w-4" />
               Dışa aktar (CSV)
             </Button>
           )}
+          <span className="hidden text-xs text-muted-foreground md:inline">
+            {table.getState().pagination.pageIndex + 1} / {Math.max(table.getPageCount(), 1)}
+          </span>
           <Button
             variant="ghost"
             size="sm"
@@ -128,4 +176,3 @@ export function DataTable<TData>({ columns, data, searchKey, onExport, renderToo
     </div>
   )
 }
-
