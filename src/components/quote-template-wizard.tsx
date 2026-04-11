@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -10,8 +10,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useToast } from '@/components/ui/use-toast'
 import { useAppStore } from '@/state/use-app-store'
-import { formatCurrency, cn } from '@/lib/utils'
-import type { Quote } from '@/types'
+import { getAllowedCurrencyCodesForCountry, getCompanyCurrencyOptions, resolveCompanyCurrency } from '@/lib/location-data'
+import { formatCurrency, formatExchangeRate, getCurrencySymbol, normalizeCurrency, cn } from '@/lib/utils'
+import type { Company, Quote } from '@/types'
 import {
   type QuoteTemplateId,
   type MobilyaSubListId,
@@ -65,7 +66,7 @@ function emptyLines(count: number, factory?: (i: number) => Partial<TemplateLine
 export function TemplateQuoteWizardTrigger({
   companies,
 }: {
-  companies: { id: string; name: string; region: string; industry: string }[]
+  companies: Company[]
 }) {
   const createQuote = useAppStore((s) => s.createQuote)
   const { toast } = useToast()
@@ -75,6 +76,10 @@ export function TemplateQuoteWizardTrigger({
   const template = quoteTemplateById(templateId)
 
   const [customerId, setCustomerId] = useState(companies[0]?.id ?? '')
+  const [currency, setCurrency] = useState(() => resolveCompanyCurrency(companies[0]?.currency, companies[0]?.country))
+  const [exchangeRate, setExchangeRate] = useState(() =>
+    resolveCompanyCurrency(companies[0]?.currency, companies[0]?.country) === 'TRY' ? 1 : 1
+  )
   const [validUntil, setValidUntil] = useState(() => new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10))
   const [priceListRef, setPriceListRef] = useState('2026/1. LİSTE')
   const [validityWorkDays, setValidityWorkDays] = useState<'3' | '7' | '10'>('7')

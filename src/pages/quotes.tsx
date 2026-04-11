@@ -24,6 +24,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
 import api from '@/lib/api'
 import { TemplateQuoteWizardTrigger } from '@/components/quote-template-wizard'
+import {
+  DEFAULT_COMPANY_COUNTRY_LABEL,
+  getAllowedCurrencyCodesForCountry,
+  getCompanyCurrencyOptions,
+  resolveCompanyCurrency,
+} from '@/lib/location-data'
 import { cn, formatCurrency, formatDate, formatDateTime, formatExchangeRate, getCurrencyLabel, getCurrencySymbol, normalizeCurrency } from '@/lib/utils'
 import { useAppStore } from '@/state/use-app-store'
 import type { Product, Quote, SalesDocumentType } from '@/types'
@@ -44,11 +50,7 @@ const DOCUMENT_TYPE_TR = {
 
 const SELLER_OPTIONS = [{ value: 'ORTKA', label: 'ORTKA' }, { value: 'AYKA', label: 'AYKA' }]
 const ADD_CUSTOMER_OPTION = '__add_company__'
-const DOCUMENT_CURRENCY_OPTIONS = [
-  { value: 'TRY', label: '₺ Türk Lirası' },
-  { value: 'USD', label: '$ Dolar' },
-  { value: 'EUR', label: '€ Euro' },
-]
+const DOCUMENT_CURRENCY_OPTIONS = getCompanyCurrencyOptions(DEFAULT_COMPANY_COUNTRY_LABEL)
 
 const SECTION_OPTIONS = [
   { value: 'steel_door', label: 'Çelik Kapı' },
@@ -196,13 +198,15 @@ const createEmptyLine = () => buildLineFromProduct(undefined, { mode: 'manual', 
 const getInitialValues = (mode: SalesDocumentType, companies: any[], preparers: any[], products: Product[], quote?: Quote) => {
   const customerSnapshot = quote?.contractConfig?.customerSnapshot || quote?.contractConfig?.customer_snapshot || {}
   const company = companies.find((item) => item.id === quote?.customerId) || companies[0]
+  const preferredCurrency = resolveCompanyCurrency(company?.currency, company?.country)
+  const initialCurrency = getDocumentCurrency(quote?.currency || preferredCurrency)
 
   return {
     customerId: quote?.customerId || company?.id || '',
     preparedById: quote?.preparedById ?? preparers[0]?.id ?? '',
     sellerCompanyKey: quote?.sellerCompanyKey || 'AYKA',
-    currency: getDocumentCurrency(quote?.currency),
-    exchangeRate: getDocumentExchangeRate(quote?.currency, quote?.contractConfig?.exchangeRate || quote?.contractConfig?.exchange_rate),
+    currency: initialCurrency,
+    exchangeRate: getDocumentExchangeRate(initialCurrency, quote?.contractConfig?.exchangeRate || quote?.contractConfig?.exchange_rate),
     templateKey: quote?.contractConfig?.templateKey || quote?.contractConfig?.template_key || '',
     contractDate: quote?.contractConfig?.contractDate || quote?.contractConfig?.contract_date || new Date().toISOString().slice(0, 10),
     validUntil: quote?.validUntil || new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
@@ -949,11 +953,40 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   }
 
   const selectedCustomer = companies.find((company) => company.id === form.watch('customerId'))
+  const selectedCustomerCurrencyOptions = useMemo(
+    () => (selectedCustomer ? getCompanyCurrencyOptions(selectedCustomer.country) : DOCUMENT_CURRENCY_OPTIONS),
+    [selectedCustomer?.country]
+  )
+  const selectedCustomerAllowedCurrencies = useMemo(
+    () => (selectedCustomer ? getAllowedCurrencyCodesForCountry(selectedCustomer.country) : DOCUMENT_CURRENCY_OPTIONS.map((option) => option.value)),
+    [selectedCustomer?.country]
+  )
   const lines = form.watch('lines') || []
 
-  const applyCustomerToForm = (company: any, includeCustomerId = false) => {
+  const setDocumentCurrency = (nextCurrency: string, options?: { forceExchangeRate?: boolean }) => {
+    const normalizedCurrency = normalizeCurrency(nextCurrency)
+    const currentRate = Number(form.getValues('exchangeRate') ?? 1)
+    form.setValue('currency', normalizedCurrency as any, { shouldDirty: true, shouldValidate: true })
+
+    if (normalizedCurrency === 'TRY') {
+      form.setValue('exchangeRate', 1, { shouldDirty: true, shouldValidate: true })
+      return
+    }
+
+    if (options?.forceExchangeRate || !Number.isFinite(currentRate) || currentRate <= 0) {
+      form.setValue('exchangeRate', 1, { shouldDirty: true, shouldValidate: true })
+    }
+  }
+
+  const applyCustomerToForm = (
+    company: any,
+    options?: {
+      includeCustomerId?: boolean
+      forcePreferredCurrency?: boolean
+    }
+  ) => {
     if (!company) return
-    if (includeCustomerId) form.setValue('customerId', company.id, { shouldDirty: true, shouldValidate: true })
+    if (options?.includeCustomerId) form.setValue('customerId', company.id, { shouldDirty: true, shouldValidate: true })
     form.setValue('customerName', company.name || '')
     form.setValue('customerTaxOffice', company.taxOffice || '')
     form.setValue('customerTaxNumber', company.taxNumber || '')
@@ -962,12 +995,28 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
     form.setValue('customerPhone', company.phone || '')
     form.setValue('customerEmail', company.email || '')
     form.setValue('signatureCustomerLabel', company.name || '')
+
+    const preferredCurrency = resolveCompanyCurrency(company.currency, company.country)
+    const currentCurrency = getDocumentCurrency(form.getValues('currency'))
+    const allowedCurrencies = getAllowedCurrencyCodesForCountry(company.country)
+    const nextCurrency =
+      options?.forcePreferredCurrency || !allowedCurrencies.includes(currentCurrency)
+        ? preferredCurrency
+        : currentCurrency
+
+    setDocumentCurrency(nextCurrency, { forceExchangeRate: options?.forcePreferredCurrency })
   }
 
   useEffect(() => {
     if (!selectedCustomer) return
-    applyCustomerToForm(selectedCustomer)
-  }, [selectedCustomer?.id])
+    const currentCurrency = getDocumentCurrency(form.getValues('currency'))
+    const hasQuoteCustomerChanged = quote ? selectedCustomer.id !== quote.customerId : true
+    const needsCurrencyCorrection = !selectedCustomerAllowedCurrencies.includes(currentCurrency)
+
+    applyCustomerToForm(selectedCustomer, {
+      forcePreferredCurrency: hasQuoteCustomerChanged || needsCurrencyCorrection,
+    })
+  }, [quote?.customerId, selectedCustomer?.country, selectedCustomer?.currency, selectedCustomer?.id, selectedCustomerAllowedCurrencies])
 
   const subtotal = lines.reduce((sum, line) => sum + getLineBase(line), 0)
   const discountTotal = lines.reduce((sum, line) => sum + getLineDiscountTotal(line), 0)
@@ -998,7 +1047,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
             (!values.phone || company.phone === values.phone)
         )
 
-    if (nextCompany) applyCustomerToForm(nextCompany, true)
+    if (nextCompany) applyCustomerToForm(nextCompany, { includeCustomerId: true, forcePreferredCurrency: true })
     toast({ title: 'Müşteri eklendi' })
   }
 
@@ -1073,6 +1122,12 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">Listeden ayrılmadan yeni firma ekleyebilir ve eklediğiniz müşteriyi anında seçebilirsiniz.</p>
+              {selectedCustomer ? (
+                <p className="text-xs text-muted-foreground">
+                  Varsayılan para birimi: {getCurrencySymbol(resolveCompanyCurrency(selectedCustomer.currency, selectedCustomer.country))}{' '}
+                  {getCurrencyLabel(resolveCompanyCurrency(selectedCustomer.currency, selectedCustomer.country))}
+                </p>
+              ) : null}
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               <div><Label>Cari ünvanı</Label><Input value={form.watch('customerName') || ''} onChange={(event) => form.setValue('customerName', event.target.value)} /></div>
@@ -1089,7 +1144,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
             <div className="grid gap-3 md:grid-cols-2">
               <div><Label>Hazırlayan</Label><Select value={form.watch('preparedById') || '__none__'} onValueChange={(value) => form.setValue('preparedById', value === '__none__' ? '' : value)}><SelectTrigger><SelectValue placeholder="Hazırlayan seçin" /></SelectTrigger><SelectContent><SelectItem value="__none__">Seçili değil</SelectItem>{preparers.map((user) => <SelectItem key={user.id} value={user.id}>{user.fullName || user.username}</SelectItem>)}</SelectContent></Select></div>
               <div><Label>Satıcı firma</Label><Select value={form.watch('sellerCompanyKey') || 'AYKA'} onValueChange={(value) => form.setValue('sellerCompanyKey', value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{SELLER_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
-              <div><Label>Para birimi</Label><Select value={form.watch('currency') || 'TRY'} onValueChange={(value) => { form.setValue('currency', value as any, { shouldDirty: true }); if (value === 'TRY') form.setValue('exchangeRate', 1, { shouldDirty: true }) }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{DOCUMENT_CURRENCY_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
+              <div><Label>Para birimi</Label><Select value={form.watch('currency') || 'TRY'} onValueChange={(value) => setDocumentCurrency(value, { forceExchangeRate: value !== form.getValues('currency') })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{selectedCustomerCurrencyOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select><p className="mt-1 text-xs text-muted-foreground">{selectedCustomer && !selectedCustomerAllowedCurrencies.includes('TRY') ? 'Yurt dışı müşterilerde yalnızca dolar veya euro kullanılır.' : 'Seçili müşterinin varsayılan para birimi otomatik doldurulur, isterseniz değiştirebilirsiniz.'}</p></div>
               <div><Label>{`Kur (${getCurrencySymbol(form.watch('currency'))} -> ₺)`}</Label><Input type="number" step="0.0001" min="1" disabled={(form.watch('currency') || 'TRY') === 'TRY'} value={form.watch('exchangeRate') ?? 1} onChange={(event) => form.setValue('exchangeRate', Number(event.target.value || 1), { shouldDirty: true })} /><p className="mt-1 text-xs text-muted-foreground">{(form.watch('currency') || 'TRY') === 'TRY' ? 'Türk Lirası seçildiğinde kur 1 kabul edilir.' : formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p></div>
               <div><Label>Şablon</Label><Select value={form.watch('templateKey') || '__auto__'} onValueChange={(value) => form.setValue('templateKey', value === '__auto__' ? '' : value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{TEMPLATE_OPTIONS[documentMode].map((option) => <SelectItem key={option.value || '__auto__'} value={option.value || '__auto__'}>{option.label}</SelectItem>)}</SelectContent></Select></div>
               <div><Label>Belge tarihi</Label><Input type="date" value={form.watch('contractDate') || ''} onChange={(event) => form.setValue('contractDate', event.target.value)} /></div>

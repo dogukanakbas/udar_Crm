@@ -21,10 +21,11 @@ import { PageHeader } from '@/components/app-shell'
 import { useToast } from '@/components/ui/use-toast'
 import { Checkbox } from '@/components/ui/checkbox'
 import { normalizeCompanySize, normalizeCountryLabel } from '@/lib/location-data'
+import { downloadCompaniesAsXlsx } from '@/lib/company-export-xlsx'
 import { useAppStore } from '@/state/use-app-store'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import type { Lead, Opportunity, Contact as ContactType, Company as CompanyType } from '@/types'
-import { BadgeCheck, HandCoins, Plus, Timer } from 'lucide-react'
+import { BadgeCheck, Download, HandCoins, Plus, Timer } from 'lucide-react'
 
 const leadSchema = z.object({
   name: z.string().min(2),
@@ -867,17 +868,31 @@ export function CompaniesPage() {
         title="Şirketler"
         description="Cari bilgiler, vergi detayları ve sözleşmede kullanılacak alıcı alanları"
         actions={
-          <CompanyModal
-            onSubmit={async (values) => {
-              await createCompany(values as any)
-              toast({ title: 'Şirket oluşturuldu' })
-            }}
-          >
-            <Button size="sm">
-              <Plus className="mr-2 h-4 w-4" />
-              Yeni şirket
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={filteredCompanies.length === 0}
+              onClick={() => {
+                downloadCompaniesAsXlsx(filteredCompanies)
+                toast({ title: 'Dışa aktarma hazır', description: `${filteredCompanies.length} şirket dışa aktarıldı.` })
+              }}
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Dışa aktar
             </Button>
-          </CompanyModal>
+            <CompanyModal
+              onSubmit={async (values) => {
+                await createCompany(values as any)
+                toast({ title: 'Şirket oluşturuldu' })
+              }}
+            >
+              <Button size="sm">
+                <Plus className="mr-2 h-4 w-4" />
+                Yeni şirket
+              </Button>
+            </CompanyModal>
+          </div>
         }
       />
       <div className="grid gap-3 md:grid-cols-3">

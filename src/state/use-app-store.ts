@@ -3,7 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 
 import api from '@/lib/api'
 import { clearTokens, getTokens } from '@/lib/auth'
-import { normalizeCompanySize, normalizeCountryLabel } from '@/lib/location-data'
+import { normalizeCompanySize, normalizeCountryLabel, resolveCompanyCurrency } from '@/lib/location-data'
 import type {
   Category,
   Invoice,
@@ -148,6 +148,7 @@ const serializeCompanyPayload = (payload: Partial<Company>) => ({
   group: payload.industry || '',
   city: payload.region || '',
   country: normalizeCountryLabel(payload.country),
+  currency: resolveCompanyCurrency(payload.currency, payload.country),
   size: normalizeCompanySize(payload.size),
   address: payload.address || '',
   tax_office: payload.taxOffice || '',
@@ -295,7 +296,7 @@ export const useAppStore = create<AppState>()(
         size: normalizeCompanySize(c.size),
         owner: 'N/A',
         rating: 0,
-        currency: 'USD',
+        currency: resolveCompanyCurrency(c.currency, c.country),
         annualRevenue: 0,
         address: c.address || '',
         taxOffice: c.tax_office || '',

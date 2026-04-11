@@ -15,11 +15,13 @@ import {
   DEFAULT_COMPANY_COUNTRY_LABEL,
   findCountryOption,
   getCityOptionsForCountry,
+  getCompanyCurrencyOptions,
   getCountryOptions,
   includeCustomCityOption,
   isTurkeyCountry,
   normalizeCompanySize,
   normalizeCountryLabel,
+  resolveCompanyCurrency,
 } from '@/lib/location-data'
 import { normalizeSearchText } from '@/lib/utils'
 import type { Company } from '@/types'
@@ -29,6 +31,7 @@ export const companySchema = z.object({
   industry: z.string().optional().default(''),
   region: z.string().optional().default(''),
   country: z.string().optional().default(DEFAULT_COMPANY_COUNTRY_LABEL),
+  currency: z.string().optional().default('TRY'),
   size: z.string().optional().default(''),
   owner: z.string().optional().default(''),
   annualRevenue: z.coerce.number().optional().default(0),
@@ -42,13 +45,14 @@ export const companySchema = z.object({
 
 export type CompanyFormValues = z.infer<typeof companySchema>
 
-const REGISTERED_SELECT_FIELDS: (keyof CompanyFormValues)[] = ['country', 'region', 'size']
+const REGISTERED_SELECT_FIELDS: (keyof CompanyFormValues)[] = ['country', 'region', 'currency', 'size']
 
 const getDefaultValues = (company?: Company): CompanyFormValues => ({
   name: company?.name ?? '',
   industry: company?.industry ?? '',
   region: company?.region ?? '',
   country: company ? normalizeCountryLabel(company.country) || company.country || '' : DEFAULT_COMPANY_COUNTRY_LABEL,
+  currency: resolveCompanyCurrency(company?.currency, company?.country),
   size: normalizeCompanySize(company?.size),
   owner: company?.owner ?? '',
   annualRevenue: company?.annualRevenue ?? 0,
@@ -85,10 +89,12 @@ export function CompanyModal({ children, company, onSubmit, open, onOpenChange }
 
   const watchedCountry = form.watch('country')
   const watchedRegion = form.watch('region')
+  const watchedCurrency = form.watch('currency')
   const watchedSize = form.watch('size')
   const countryOptions = useMemo(() => getCountryOptions(), [])
   const selectedCountry = useMemo(() => findCountryOption(watchedCountry), [watchedCountry])
   const isTurkeySelected = useMemo(() => isTurkeyCountry(watchedCountry), [watchedCountry])
+  const currencyOptions = useMemo(() => getCompanyCurrencyOptions(watchedCountry), [watchedCountry])
 
   const countrySelectOptions = useMemo(() => {
     const baseOptions = countryOptions.map((countryOption) => ({
@@ -139,6 +145,15 @@ export function CompanyModal({ children, company, onSubmit, open, onOpenChange }
     }
   }, [form, modalOpen])
 
+  useEffect(() => {
+    if (!modalOpen) return
+
+    const resolvedCurrency = resolveCompanyCurrency(form.getValues('currency'), form.getValues('country'))
+    if (resolvedCurrency !== form.getValues('currency')) {
+      form.setValue('currency', resolvedCurrency, { shouldDirty: false, shouldValidate: true })
+    }
+  }, [form, modalOpen, watchedCountry])
+
   const handleCountryChange = (countryLabel: string) => {
     const matchedCountry = countryOptions.find(
       (countryOption) => normalizeSearchText(countryOption.label) === normalizeSearchText(countryLabel)
@@ -147,6 +162,10 @@ export function CompanyModal({ children, company, onSubmit, open, onOpenChange }
 
     form.setValue('country', nextCountryLabel, { shouldDirty: true, shouldValidate: true })
     form.setValue('region', '', { shouldDirty: true, shouldValidate: true })
+    form.setValue('currency', resolveCompanyCurrency(form.getValues('currency'), nextCountryLabel), {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
   }
 
   return (
@@ -167,7 +186,7 @@ export function CompanyModal({ children, company, onSubmit, open, onOpenChange }
               <Input {...form.register('industry')} />
             </div>
           </div>
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-2">
             <div className="flex flex-col gap-2">
               <Label>Ülke</Label>
               <SearchableCombobox
@@ -203,6 +222,26 @@ export function CompanyModal({ children, company, onSubmit, open, onOpenChange }
                   }
                 />
               )}
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label>Para birimi</Label>
+              <Select
+                value={resolveCompanyCurrency(watchedCurrency, watchedCountry)}
+                onValueChange={(value) =>
+                  form.setValue('currency', value, { shouldDirty: true, shouldValidate: true })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Para birimi seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  {currencyOptions.map((currencyOption) => (
+                    <SelectItem key={currencyOption.value} value={currencyOption.value}>
+                      {currencyOption.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex flex-col gap-2">
               <Label>Ölçek</Label>

@@ -1,7 +1,7 @@
 import * as countries from 'i18n-iso-countries'
 
 import { TURKEY_CITY_NAMES } from '@/data/turkey-cities'
-import { normalizeSearchText } from '@/lib/utils'
+import { getCurrencyLabel, getCurrencySymbol, normalizeCurrency, normalizeSearchText } from '@/lib/utils'
 
 export const DEFAULT_COMPANY_COUNTRY_CODE = 'TR'
 export const DEFAULT_COMPANY_COUNTRY_LABEL = 'Türkiye'
@@ -19,6 +19,13 @@ export type CityOption = {
   value: string
   label: string
   searchText: string
+}
+
+export type SupportedCurrencyCode = 'TRY' | 'USD' | 'EUR'
+
+export type CurrencyOption = {
+  value: SupportedCurrencyCode
+  label: string
 }
 
 const countryDisplayNamesTr =
@@ -76,6 +83,13 @@ const TURKEY_CITY_OPTIONS: CityOption[] = sortByLabel(
   }))
 )
 
+const COMPANY_CURRENCY_OPTIONS: CurrencyOption[] = (['TRY', 'USD', 'EUR'] as SupportedCurrencyCode[]).map(
+  (currencyCode) => ({
+    value: currencyCode,
+    label: `${getCurrencySymbol(currencyCode)} ${getCurrencyLabel(currencyCode)}`,
+  })
+)
+
 export const getCountryOptions = () => COUNTRY_OPTIONS
 
 export const findCountryOption = (value?: string) => {
@@ -98,6 +112,28 @@ export const normalizeCountryLabel = (value?: string) => {
 }
 
 export const isTurkeyCountry = (value?: string) => findCountryOption(value)?.code === DEFAULT_COMPANY_COUNTRY_CODE
+
+export const getAllowedCurrencyCodesForCountry = (countryValue?: string): SupportedCurrencyCode[] => {
+  const trimmedCountry = (countryValue || '').trim()
+  if (!trimmedCountry) return ['TRY', 'USD', 'EUR']
+  return isTurkeyCountry(countryValue) ? ['TRY', 'USD', 'EUR'] : ['USD', 'EUR']
+}
+
+export const getDefaultCurrencyForCountry = (countryValue?: string): SupportedCurrencyCode =>
+  isTurkeyCountry(countryValue) ? 'TRY' : 'USD'
+
+export const resolveCompanyCurrency = (currency?: string, countryValue?: string): SupportedCurrencyCode => {
+  const normalizedCurrency = normalizeCurrency(currency) as SupportedCurrencyCode
+  const allowedCurrencies = getAllowedCurrencyCodesForCountry(countryValue)
+  return allowedCurrencies.includes(normalizedCurrency)
+    ? normalizedCurrency
+    : getDefaultCurrencyForCountry(countryValue)
+}
+
+export const getCompanyCurrencyOptions = (countryValue?: string): CurrencyOption[] => {
+  const allowedCurrencies = getAllowedCurrencyCodesForCountry(countryValue)
+  return COMPANY_CURRENCY_OPTIONS.filter((option) => allowedCurrencies.includes(option.value))
+}
 
 export const getCityOptionsForCountry = (countryValue?: string) =>
   isTurkeyCountry(countryValue) ? TURKEY_CITY_OPTIONS : []
