@@ -63,9 +63,9 @@ type AppState = {
   deleteAttachment: (id: string) => void
   updateAttachment: (id: string, patch: { description?: string; tags?: string[] }) => void
   addTimeEntry: (payload: { task: string; started_at: string; ended_at?: string; note?: string }) => void
-  createQuote: (payload: Omit<Quote, 'id' | 'number' | 'createdAt' | 'updatedAt'>) => void
-  updateQuote: (id: string, patch: Partial<Quote>) => void
-  deleteQuotes: (ids: string[]) => void
+  createQuote: (payload: Omit<Quote, 'id' | 'number' | 'createdAt' | 'updatedAt'>) => Promise<void>
+  updateQuote: (id: string, patch: Partial<Quote>) => Promise<void>
+  deleteQuotes: (ids: string[]) => Promise<void>
   convertQuote: (id: string) => Promise<SalesOrder | undefined>
   upsertPricingRule: (rule: PricingRule) => void
   deletePricingRule: (id: string) => void
@@ -1064,6 +1064,7 @@ export const useAppStore = create<AppState>()(
       set((state) => ({ data: { ...state.data, quotes } }))
     } catch (err) {
       console.error('API deleteQuotes failed', err)
+      throw err
     }
   },
   convertQuote: async (id) => {

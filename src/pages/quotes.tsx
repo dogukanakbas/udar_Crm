@@ -1,11 +1,11 @@
 // @ts-nocheck
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from '@tanstack/react-router'
+import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { type ColumnDef } from '@tanstack/react-table'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
-import { Check, Download, Plus, Send, Shield, Trash2 } from 'lucide-react'
+import { Check, Download, Pencil, Plus, Send, Shield, Trash2 } from 'lucide-react'
 
 import { PageHeader } from '@/components/app-shell'
 import { CompanyModal } from '@/components/company-modal'
@@ -178,35 +178,105 @@ const buildLineFromProduct = (product?: Product, previousLine?: any) => {
 
 const createEmptyLine = () => buildLineFromProduct(undefined, { mode: 'manual', name: 'Yeni kalem', sectionKey: 'steel_door', unit: 'Adet', qty: 1, unitPrice: 0, discount: 0, discountSecondary: 0, tax: 20, details: { code: '', primary: '', secondary: '', attributes: {} } })
 
-const getInitialValues = (mode: SalesDocumentType, companies: any[], preparers: any[], products: Product[]) => {
-  const company = companies[0]
+const getInitialValues = (mode: SalesDocumentType, companies: any[], preparers: any[], products: Product[], quote?: Quote) => {
+  const customerSnapshot = quote?.contractConfig?.customerSnapshot || quote?.contractConfig?.customer_snapshot || {}
+  const company = companies.find((item) => item.id === quote?.customerId) || companies[0]
+
   return {
-    customerId: company?.id ?? '',
-    preparedById: preparers[0]?.id ?? '',
-    sellerCompanyKey: 'AYKA',
-    templateKey: '',
-    contractDate: new Date().toISOString().slice(0, 10),
-    validUntil: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
-    validityLabel: '',
-    priceListLabel: '2026/1. LİSTE',
-    payment: '',
-    paymentOption: '',
-    delivery: '',
-    deliveryType: '',
-    notes: '',
-    customerName: company?.name ?? '',
-    customerTaxOffice: company?.taxOffice ?? '',
-    customerTaxNumber: company?.taxNumber ?? '',
-    customerAddress: company?.address ?? '',
-    customerAuthorizedPerson: company?.authorizedPerson ?? '',
-    customerPhone: company?.phone ?? '',
-    customerEmail: company?.email ?? '',
-    signatureCustomerLabel: company?.name ?? '',
-    termsText: DEFAULT_TERMS_TEXT,
-    contractNotesText: DEFAULT_CONTRACT_NOTES_TEXT,
-    lines: [products[0] ? buildLineFromProduct(products[0]) : createEmptyLine()],
+    customerId: quote?.customerId || company?.id || '',
+    preparedById: quote?.preparedById ?? preparers[0]?.id ?? '',
+    sellerCompanyKey: quote?.sellerCompanyKey || 'AYKA',
+    templateKey: quote?.contractConfig?.templateKey || quote?.contractConfig?.template_key || '',
+    contractDate: quote?.contractConfig?.contractDate || quote?.contractConfig?.contract_date || new Date().toISOString().slice(0, 10),
+    validUntil: quote?.validUntil || new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+    validityLabel: quote?.contractConfig?.validityLabel || quote?.contractConfig?.validity_label || '',
+    priceListLabel: quote?.contractConfig?.priceListLabel || quote?.contractConfig?.price_list_label || '2026/1. LİSTE',
+    payment: quote?.terms?.payment || '',
+    paymentOption: quote?.contractConfig?.paymentOption || quote?.contractConfig?.payment_option || '',
+    delivery: quote?.terms?.delivery || '',
+    deliveryType: quote?.contractConfig?.deliveryType || quote?.contractConfig?.delivery_type || '',
+    notes: quote?.terms?.notes || '',
+    customerName: customerSnapshot.name || company?.name || '',
+    customerTaxOffice: customerSnapshot.tax_office || customerSnapshot.taxOffice || company?.taxOffice || '',
+    customerTaxNumber: customerSnapshot.tax_number || customerSnapshot.taxNumber || company?.taxNumber || '',
+    customerAddress: customerSnapshot.address || company?.address || '',
+    customerAuthorizedPerson: customerSnapshot.authorized_person || customerSnapshot.authorizedPerson || company?.authorizedPerson || '',
+    customerPhone: customerSnapshot.phone || company?.phone || '',
+    customerEmail: customerSnapshot.email || company?.email || '',
+    signatureCustomerLabel: quote?.contractConfig?.signatureCustomerLabel || quote?.contractConfig?.signature_customer_label || customerSnapshot.name || company?.name || '',
+    termsText: getTermsText(quote?.contractConfig) || DEFAULT_TERMS_TEXT,
+    contractNotesText: getContractNotesText(quote?.contractConfig) || DEFAULT_CONTRACT_NOTES_TEXT,
+    lines:
+      quote?.lines?.length
+        ? quote.lines.map((line) => ({
+            mode: line.productId ? 'product' : 'manual',
+            productId: line.productId,
+            sku: line.sku || line.details?.code || '',
+            name: line.name || 'Yeni kalem',
+            sectionKey: line.sectionKey || 'steel_door',
+            unit: line.unit || 'Adet',
+            qty: Number(line.qty ?? 0),
+            unitPrice: Number(line.unitPrice ?? 0),
+            discount: Number(line.discount ?? 0),
+            discountSecondary: Number(line.discountSecondary ?? 0),
+            tax: Number(line.tax ?? 0),
+            details: {
+              code: line.details?.code || line.sku || '',
+              primary: line.details?.primary || '',
+              secondary: line.details?.secondary || '',
+              attributes: line.details?.attributes || {},
+            },
+          }))
+        : [products[0] ? buildLineFromProduct(products[0]) : createEmptyLine()],
   }
 }
+
+const buildDocumentPayload = (values: any, mode: SalesDocumentType, status = 'Draft') => ({
+  documentType: mode,
+  customerId: values.customerId,
+  preparedById: values.preparedById,
+  sellerCompanyKey: values.sellerCompanyKey,
+  status,
+  validUntil: values.validUntil || '',
+  payment: values.payment || '',
+  delivery: values.delivery || '',
+  notes: values.notes || '',
+  contractConfig: {
+    templateMode: values.templateKey ? 'manual' : 'auto',
+    templateKey: values.templateKey || '',
+    contractDate: values.contractDate,
+    validityLabel: values.validityLabel,
+    priceListLabel: values.priceListLabel,
+    deliveryType: values.deliveryType,
+    paymentOption: values.paymentOption,
+    signatureCustomerLabel: values.signatureCustomerLabel,
+    customerSnapshot: {
+      name: values.customerName || '',
+      tax_office: values.customerTaxOffice || '',
+      tax_number: values.customerTaxNumber || '',
+      address: values.customerAddress || '',
+      authorized_person: values.customerAuthorizedPerson || '',
+      phone: values.customerPhone || '',
+      email: values.customerEmail || '',
+    },
+    termsText: values.termsText || '',
+    contractNotesText: values.contractNotesText || '',
+  },
+  lines: values.lines.map((line: any, index: number) => ({
+    productId: line.mode === 'product' ? line.productId : undefined,
+    sku: line.details?.code || line.sku,
+    name: line.name,
+    sectionKey: line.sectionKey,
+    unit: line.unit,
+    qty: Number(line.qty || 0),
+    unitPrice: Number(line.unitPrice || 0),
+    discount: Number(line.discount || 0),
+    discountSecondary: Number(line.discountSecondary || 0),
+    tax: Number(line.tax || 0),
+    sortOrder: index,
+    details: line.details,
+  })),
+})
 
 const getLineBase = (line: any) => Number(line.qty || 0) * Number(line.unitPrice || 0)
 const getLineDiscountedBase = (line: any) => {
@@ -311,13 +381,14 @@ function NumericEditor({ value, onValueChange, min = 0, max }: { value?: number;
 }
 
 export function QuotesPage() {
-  const { data } = useAppStore()
+  const { data, deleteQuotes } = useAppStore()
   const { toast } = useToast()
   const [status, setStatus] = useState('all')
   const [customer, setCustomer] = useState('all')
   const [documentType, setDocumentType] = useState<'all' | SalesDocumentType>('all')
   const [minAmount, setMinAmount] = useState('')
   const [maxAmount, setMaxAmount] = useState('')
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const quotes = data.quotes ?? []
   const companies = data.companies
@@ -337,6 +408,29 @@ export function QuotesPage() {
 
   const hasActiveFilters = documentType !== 'all' || status !== 'all' || customer !== 'all' || Boolean(minAmount) || Boolean(maxAmount)
 
+  const handleDownload = async (quote: Quote) => {
+    try {
+      await downloadDocument(quote.id)
+      toast({ title: `${DOCUMENT_TYPE_TR[quote.documentType]} dosyaları indirildi` })
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || error?.message || 'Dosya oluşturulamadı', variant: 'destructive' })
+    }
+  }
+
+  const handleDelete = async (quote: Quote) => {
+    if (!confirm(`${DOCUMENT_TYPE_TR[quote.documentType]} ${quote.number} kaydı kalıcı olarak silinsin mi? Bu işlem geri alınamaz.`)) return
+
+    setDeletingId(quote.id)
+    try {
+      await deleteQuotes([quote.id])
+      toast({ title: `${DOCUMENT_TYPE_TR[quote.documentType]} silindi` })
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Silme sırasında hata oluştu', variant: 'destructive' })
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   const columns: ColumnDef<Quote>[] = [
     { accessorKey: 'documentType', header: 'Tür', cell: ({ row }) => <Badge variant="outline">{DOCUMENT_TYPE_TR[row.original.documentType]}</Badge> },
     { accessorKey: 'number', header: 'No' },
@@ -351,24 +445,36 @@ export function QuotesPage() {
       header: '',
       cell: ({ row }) => (
         <div className="flex items-center justify-end gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={async () => {
-              try {
-                await downloadDocument(row.original.id)
-                toast({ title: `${DOCUMENT_TYPE_TR[row.original.documentType]} dosyaları indirildi` })
-              } catch (error: any) {
-                toast({ title: error?.response?.data?.detail || error?.message || 'Dosya oluşturulamadı', variant: 'destructive' })
-              }
-            }}
-          >
-            <Download className="mr-2 h-4 w-4" />
-            XLSX indir
-          </Button>
           <Link to="/crm/quotes/$quoteId" params={{ quoteId: row.original.id }} className="text-xs text-primary underline">
             Görüntüle
           </Link>
+          <RbacGuard perm="quotes.edit">
+            <DocumentWizardTrigger
+              quote={row.original}
+              trigger={
+                <Button variant="ghost" size="sm">
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Düzenle
+                </Button>
+              }
+            />
+          </RbacGuard>
+          <Button variant="ghost" size="sm" onClick={() => handleDownload(row.original)}>
+            <Download className="mr-2 h-4 w-4" />
+            XLSX
+          </Button>
+          <RbacGuard perm="quotes.edit">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              disabled={deletingId === row.original.id}
+              onClick={() => handleDelete(row.original)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Sil
+            </Button>
+          </RbacGuard>
         </div>
       ),
     },
@@ -500,22 +606,27 @@ export function QuotesPage() {
   )
 }
 
-function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
-  const { data, createCompany, createQuote } = useAppStore()
+function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: SalesDocumentType; quote?: Quote; trigger?: React.ReactNode }) {
+  const { data, createCompany, createQuote, updateQuote } = useAppStore()
   const { toast } = useToast()
   const [open, setOpen] = useState(false)
   const [customerModalOpen, setCustomerModalOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
   const companies = data.companies
   const products = data.products
   const preparers = useMemo(() => data.users.filter((user) => user.canPrepareQuotes || user.permissions?.includes('quotes.prepare')), [data.users])
-  const form = useForm({ resolver: zodResolver(documentSchema) as any, defaultValues: getInitialValues(mode, companies, preparers, products) })
+  const documentMode = quote?.documentType ?? mode
+  const isEditing = Boolean(quote)
+  const getFormDefaults = () => getInitialValues(documentMode, companies, preparers, products, quote)
+  const form = useForm({ resolver: zodResolver(documentSchema) as any, defaultValues: getFormDefaults() })
 
-  useEffect(() => {
-    if (!open) form.reset(getInitialValues(mode, companies, preparers, products))
-  }, [open, mode, companies, preparers, products, form])
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen)
+    if (nextOpen) form.reset(getFormDefaults())
+  }
 
   const selectedCustomer = companies.find((company) => company.id === form.watch('customerId'))
-  const lines = form.watch('lines')
+  const lines = form.watch('lines') || []
 
   const applyCustomerToForm = (company: any, includeCustomerId = false) => {
     if (!company) return
@@ -533,7 +644,7 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
   useEffect(() => {
     if (!selectedCustomer) return
     applyCustomerToForm(selectedCustomer)
-  }, [selectedCustomer, form])
+  }, [selectedCustomer?.id])
 
   const subtotal = lines.reduce((sum, line) => sum + getLineBase(line), 0)
   const discountTotal = lines.reduce((sum, line) => sum + getLineDiscountTotal(line), 0)
@@ -575,73 +686,37 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
       return
     }
 
+    setSaving(true)
     try {
-      await createQuote({
-        documentType: mode,
-        customerId: values.customerId,
-        preparedById: values.preparedById,
-        sellerCompanyKey: values.sellerCompanyKey,
-        status: 'Draft',
-        validUntil: values.validUntil || '',
-        payment: values.payment || '',
-        delivery: values.delivery || '',
-        notes: values.notes || '',
-        contractConfig: {
-          templateMode: values.templateKey ? 'manual' : 'auto',
-          templateKey: values.templateKey || '',
-          contractDate: values.contractDate,
-          validityLabel: values.validityLabel,
-          priceListLabel: values.priceListLabel,
-          deliveryType: values.deliveryType,
-          paymentOption: values.paymentOption,
-          signatureCustomerLabel: values.signatureCustomerLabel,
-          customerSnapshot: {
-            name: values.customerName || '',
-            tax_office: values.customerTaxOffice || '',
-            tax_number: values.customerTaxNumber || '',
-            address: values.customerAddress || '',
-            authorized_person: values.customerAuthorizedPerson || '',
-            phone: values.customerPhone || '',
-            email: values.customerEmail || '',
-          },
-          termsText: values.termsText || '',
-          contractNotesText: values.contractNotesText || '',
-        },
-        lines: values.lines.map((line, index) => ({
-          productId: line.mode === 'product' ? line.productId : undefined,
-          sku: line.details?.code || line.sku,
-          name: line.name,
-          sectionKey: line.sectionKey,
-          unit: line.unit,
-          qty: Number(line.qty || 0),
-          unitPrice: Number(line.unitPrice || 0),
-          discount: Number(line.discount || 0),
-          discountSecondary: Number(line.discountSecondary || 0),
-          tax: Number(line.tax || 0),
-          sortOrder: index,
-          details: line.details,
-        })),
-      } as any)
-      toast({ title: `${DOCUMENT_TYPE_TR[mode]} kaydedildi` })
-      form.reset(getInitialValues(mode, companies, preparers, products))
+      const payload = buildDocumentPayload(values, documentMode, quote?.status || 'Draft')
+      if (quote) {
+        await updateQuote(quote.id, payload as any)
+      } else {
+        await createQuote(payload as any)
+      }
+      toast({ title: quote ? `${DOCUMENT_TYPE_TR[documentMode]} güncellendi` : `${DOCUMENT_TYPE_TR[documentMode]} kaydedildi` })
       setOpen(false)
     } catch (error: any) {
       toast({ title: error?.response?.data?.detail || 'Kayıt sırasında hata oluştu', variant: 'destructive' })
+    } finally {
+      setSaving(false)
     }
   })
 
   return (
     <>
       <CompanyModal open={customerModalOpen} onOpenChange={setCustomerModalOpen} onSubmit={handleCustomerCreate} />
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button size="sm" variant={mode === 'Contract' ? 'default' : 'outline'}>
-          <Plus className="mr-2 h-4 w-4" />
-          {mode === 'Contract' ? 'Yeni sözleşme' : 'Yeni teklif'}
-        </Button>
+        {trigger ?? (
+          <Button size="sm" variant={documentMode === 'Contract' ? 'default' : 'outline'}>
+            {isEditing ? <Pencil className="mr-2 h-4 w-4" /> : <Plus className="mr-2 h-4 w-4" />}
+            {isEditing ? `${DOCUMENT_TYPE_TR[documentMode]} düzenle` : documentMode === 'Contract' ? 'Yeni sözleşme' : 'Yeni teklif'}
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className={cn('max-h-[92vh] max-w-[82rem] overflow-y-auto', customerModalOpen && 'pointer-events-none opacity-0')}>
-        <DialogHeader><DialogTitle>{mode === 'Contract' ? 'Sözleşme oluştur' : 'Teklif oluştur'}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{isEditing ? `${DOCUMENT_TYPE_TR[documentMode]} düzenle` : documentMode === 'Contract' ? 'Sözleşme oluştur' : 'Teklif oluştur'}</DialogTitle></DialogHeader>
         <Tabs defaultValue="customer">
           <TabsList className="mb-3 grid grid-cols-4">
             <TabsTrigger value="customer">Müşteri</TabsTrigger>
@@ -691,7 +766,7 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
             <div className="grid gap-3 md:grid-cols-2">
               <div><Label>Hazırlayan</Label><Select value={form.watch('preparedById') || '__none__'} onValueChange={(value) => form.setValue('preparedById', value === '__none__' ? '' : value)}><SelectTrigger><SelectValue placeholder="Hazırlayan seçin" /></SelectTrigger><SelectContent><SelectItem value="__none__">Seçili değil</SelectItem>{preparers.map((user) => <SelectItem key={user.id} value={user.id}>{user.fullName || user.username}</SelectItem>)}</SelectContent></Select></div>
               <div><Label>Satıcı firma</Label><Select value={form.watch('sellerCompanyKey') || 'AYKA'} onValueChange={(value) => form.setValue('sellerCompanyKey', value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{SELLER_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
-              <div><Label>Şablon</Label><Select value={form.watch('templateKey') || '__auto__'} onValueChange={(value) => form.setValue('templateKey', value === '__auto__' ? '' : value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{TEMPLATE_OPTIONS[mode].map((option) => <SelectItem key={option.value || '__auto__'} value={option.value || '__auto__'}>{option.label}</SelectItem>)}</SelectContent></Select></div>
+              <div><Label>Şablon</Label><Select value={form.watch('templateKey') || '__auto__'} onValueChange={(value) => form.setValue('templateKey', value === '__auto__' ? '' : value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{TEMPLATE_OPTIONS[documentMode].map((option) => <SelectItem key={option.value || '__auto__'} value={option.value || '__auto__'}>{option.label}</SelectItem>)}</SelectContent></Select></div>
               <div><Label>Belge tarihi</Label><Input type="date" value={form.watch('contractDate') || ''} onChange={(event) => form.setValue('contractDate', event.target.value)} /></div>
               <div><Label>Geçerlilik tarihi</Label><Input type="date" value={form.watch('validUntil') || ''} onChange={(event) => form.setValue('validUntil', event.target.value)} /></div>
               <div><Label>Geçerlilik etiketi</Label><Input value={form.watch('validityLabel') || ''} onChange={(event) => form.setValue('validityLabel', event.target.value)} /></div>
@@ -748,10 +823,10 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
           </TabsContent>
 
           <TabsContent value="review" className="space-y-3">
-            <Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Belge türü: {DOCUMENT_TYPE_TR[mode]}</p><p>Müşteri: {form.watch('customerName') || selectedCustomer?.name || '-'}</p><p>Hazırlayan: {preparers.find((user) => user.id === form.watch('preparedById'))?.fullName || '-'}</p><p>Satıcı firma: {form.watch('sellerCompanyKey') || '-'}</p><p>Şablon: {templateLabel(mode, form.watch('templateKey'))}</p><p>Satır sayısı: {lines.length}</p><p>Ara toplam: {formatCurrency(subtotal)}</p><p>Toplam iskonto: {formatCurrency(discountTotal)}</p><p>KDV: {formatCurrency(taxTotal)}</p><p>Genel toplam: {formatCurrency(total)}</p></CardContent></Card>
+            <Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Belge türü: {DOCUMENT_TYPE_TR[documentMode]}</p><p>Müşteri: {form.watch('customerName') || selectedCustomer?.name || '-'}</p><p>Hazırlayan: {preparers.find((user) => user.id === form.watch('preparedById'))?.fullName || '-'}</p><p>Satıcı firma: {form.watch('sellerCompanyKey') || '-'}</p><p>Şablon: {templateLabel(documentMode, form.watch('templateKey'))}</p><p>Satır sayısı: {lines.length}</p><p>Ara toplam: {formatCurrency(subtotal)}</p><p>Toplam iskonto: {formatCurrency(discountTotal)}</p><p>KDV: {formatCurrency(taxTotal)}</p><p>Genel toplam: {formatCurrency(total)}</p></CardContent></Card>
           </TabsContent>
         </Tabs>
-        <DialogFooter><Button onClick={handleSave}>Kaydet</Button></DialogFooter>
+        <DialogFooter><Button onClick={handleSave} disabled={saving}>{saving ? 'Kaydediliyor...' : isEditing ? 'Değişiklikleri kaydet' : 'Kaydet'}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
     </>
@@ -760,11 +835,13 @@ function DocumentWizardTrigger({ mode }: { mode: SalesDocumentType }) {
 
 export function QuoteDetailPage() {
   const params = useParams({ from: '/crm/quotes/$quoteId' })
-  const { data, updateQuote, convertQuote } = useAppStore()
+  const navigate = useNavigate()
+  const { data, updateQuote, convertQuote, deleteQuotes } = useAppStore()
   const { toast } = useToast()
   const [auditLogs, setAuditLogs] = useState<{ id: string; action: string; field: string; old_value: string; new_value: string; created_at: string; user?: string }[]>([])
   const [approvalSteps, setApprovalSteps] = useState<{ id: string; role: string; status: string; comment?: string; acted_by?: string; updated_at?: string }[]>([])
   const [busyStep, setBusyStep] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const quote = data.quotes.find((item) => item.id === params.quoteId) ?? data.quotes[0]
   const company = data.companies.find((item) => item.id === quote?.customerId)
   if (!quote) return <p className="text-muted-foreground">Belge bulunamadı</p>
@@ -779,12 +856,40 @@ export function QuoteDetailPage() {
   const termsLines = getTermsText(quote.contractConfig).split('\n').map((line) => line.trim()).filter(Boolean)
   const contractNotesLines = getContractNotesText(quote.contractConfig).split('\n').map((line) => line.trim()).filter(Boolean)
 
-  const approve = (role: any) => {
-    updateQuote(quote.id, {
-      approval: (quote.approval || []).map((step) => (step.role === role ? { ...step, status: 'Approved', updatedAt: new Date().toISOString() } : step)),
-      status: role === 'Finance' ? 'Approved' : quote.status,
-    })
-    toast({ title: `${role} onayı alındı` })
+  const approve = async (role: any) => {
+    try {
+      await updateQuote(quote.id, {
+        approval: (quote.approval || []).map((step) => (step.role === role ? { ...step, status: 'Approved', updatedAt: new Date().toISOString() } : step)),
+        status: role === 'Finance' ? 'Approved' : quote.status,
+      })
+      toast({ title: `${role} onayı alındı` })
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Onay durumu güncellenemedi', variant: 'destructive' })
+    }
+  }
+
+  const handleDownload = async () => {
+    try {
+      await downloadDocument(quote.id)
+      toast({ title: `${DOCUMENT_TYPE_TR[quote.documentType]} dosyaları indirildi` })
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || error?.message || 'Dosya oluşturulamadı', variant: 'destructive' })
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!confirm(`${DOCUMENT_TYPE_TR[quote.documentType]} ${quote.number} kaydı kalıcı olarak silinsin mi? Bu işlem geri alınamaz.`)) return
+
+    setDeleting(true)
+    try {
+      await deleteQuotes([quote.id])
+      toast({ title: `${DOCUMENT_TYPE_TR[quote.documentType]} silindi` })
+      navigate({ to: '/crm/quotes' })
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Silme sırasında hata oluştu', variant: 'destructive' })
+    } finally {
+      setDeleting(false)
+    }
   }
 
   return (
@@ -794,10 +899,22 @@ export function QuoteDetailPage() {
         description={`${DOCUMENT_TYPE_TR[quote.documentType]} - ${quoteStatusTr(quote.status)} - ${formatCurrency(quote.total)}`}
         actions={
           <div className="flex gap-2">
-            <RbacGuard perm="quotes.edit"><Button size="sm" variant="outline" onClick={() => updateQuote(quote.id, { status: 'Sent' })}><Send className="mr-2 h-4 w-4" />Gönder</Button></RbacGuard>
-            <Button onClick={async () => { try { await downloadDocument(quote.id); toast({ title: `${DOCUMENT_TYPE_TR[quote.documentType]} dosyaları indirildi` }) } catch (error: any) { toast({ title: error?.response?.data?.detail || error?.message || 'Dosya oluşturulamadı', variant: 'destructive' }) } }}><Download className="mr-2 h-4 w-4" />XLSX indir</Button>
+            <RbacGuard perm="quotes.edit">
+              <DocumentWizardTrigger
+                quote={quote}
+                trigger={
+                  <Button size="sm" variant="outline">
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Düzenle
+                  </Button>
+                }
+              />
+            </RbacGuard>
+            <RbacGuard perm="quotes.edit"><Button size="sm" variant="outline" onClick={async () => { try { await updateQuote(quote.id, { status: 'Sent' }); toast({ title: 'Belge gönderildi olarak işaretlendi' }) } catch (error: any) { toast({ title: error?.response?.data?.detail || 'Durum güncellenemedi', variant: 'destructive' }) } }}><Send className="mr-2 h-4 w-4" />Gönder</Button></RbacGuard>
+            <Button onClick={handleDownload}><Download className="mr-2 h-4 w-4" />XLSX indir</Button>
             <RbacGuard perm="quotes.edit"><Button size="sm" variant="outline" onClick={() => approve('Manager')}><Shield className="mr-2 h-4 w-4" />Onay iste</Button></RbacGuard>
             <RbacGuard perm="quotes.approve"><Button size="sm" onClick={() => { convertQuote(quote.id); toast({ title: 'Satış siparişine dönüştürüldü' }) }}><Check className="mr-2 h-4 w-4" />Satış siparişi</Button></RbacGuard>
+            <RbacGuard perm="quotes.edit"><Button size="sm" variant="destructive" disabled={deleting} onClick={handleDelete}><Trash2 className="mr-2 h-4 w-4" />Sil</Button></RbacGuard>
           </div>
         }
       />
