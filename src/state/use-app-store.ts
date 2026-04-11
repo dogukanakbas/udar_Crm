@@ -4,6 +4,7 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import api from '@/lib/api'
 import { clearTokens, getTokens } from '@/lib/auth'
 import { normalizeCompanySize, normalizeCountryLabel, resolveCompanyCurrency } from '@/lib/location-data'
+import { buildTemplateCatalogImportPayload } from '@/lib/template-product-catalog'
 import type {
   Category,
   Invoice,
@@ -48,8 +49,28 @@ type AppState = {
   markInvoiceStatus: (id: string, status: Invoice['status']) => void
   addInvoicePayment: (id: string, payment: Invoice['payments'][number]) => void
   adjustInventory: (sku: string, delta: number) => void
-  upsertProduct: (product: Partial<Product> & { sku: string }) => void
-  upsertCategory: (category: Partial<Category>) => void
+  upsertProduct: (product: Partial<Product> & { sku: string }) => Promise<void>
+  deleteProduct: (id: string) => Promise<void>
+  upsertCategory: (category: Partial<Category>) => Promise<void>
+  bulkUpsertProducts: (payload: {
+    categories: Array<Record<string, any>>
+    products: Array<Record<string, any>>
+  }) => Promise<{
+    created_categories: number
+    updated_categories: number
+    created_products: number
+    updated_products: number
+    total_categories: number
+    total_products: number
+  }>
+  syncTemplateCatalogToInventory: () => Promise<{
+    created_categories: number
+    updated_categories: number
+    created_products: number
+    updated_products: number
+    total_categories: number
+    total_products: number
+  }>
   createVehicle: (payload: Omit<Vehicle, 'id' | 'last_update'>) => void
   createSalesOrder: (payload: Partial<SalesOrder>) => void
   createTask: (task: Omit<Task, 'id'>) => void
@@ -756,6 +777,20 @@ export const useAppStore = create<AppState>()(
       throw err
     }
   },
+  deleteProduct: async (id) => {
+    try {
+      await api.delete(`/products/${id}/`)
+      set((state) => ({
+        data: {
+          ...state.data,
+          products: state.data.products.filter((product) => product.id !== id),
+        },
+      }))
+    } catch (err) {
+      console.error('API deleteProduct failed', err)
+      throw err
+    }
+  },
   upsertCategory: async (category) => {
     try {
       const payload: any = {
@@ -771,6 +806,27 @@ export const useAppStore = create<AppState>()(
       await get().hydrateFromApi()
     } catch (err) {
       console.error('API upsertCategory failed', err)
+      throw err
+    }
+  },
+  bulkUpsertProducts: async (payload) => {
+    try {
+      const response = await api.post('/products/bulk-upsert/', payload)
+      await get().hydrateFromApi()
+      return response.data
+    } catch (err) {
+      console.error('API bulkUpsertProducts failed', err)
+      throw err
+    }
+  },
+  syncTemplateCatalogToInventory: async () => {
+    try {
+      const payload = buildTemplateCatalogImportPayload()
+      const response = await api.post('/products/import-template-catalog/', payload)
+      await get().hydrateFromApi()
+      return response.data
+    } catch (err) {
+      console.error('API syncTemplateCatalogToInventory failed', err)
       throw err
     }
   },

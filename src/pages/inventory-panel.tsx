@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
 
 import { DataTable } from '@/components/data-table'
@@ -15,6 +15,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
 import { RbacGuard } from '@/components/rbac'
 import { useAppStore } from '@/state/use-app-store'
+import {
+  downloadInventoryStateWorkbook,
+  downloadInventoryTemplateWorkbook,
+  parseInventoryWorkbook,
+} from '@/lib/inventory-bulk-xlsx'
 import { formatCurrency } from '@/lib/utils'
 import type { Category, Product } from '@/types'
 
@@ -38,17 +43,65 @@ const EMPTY_PRODUCT = {
 }
 
 export function InventoryPanel() {
-  const { data, adjustInventory, upsertCategory, upsertProduct } = useAppStore()
+  const {
+    data,
+    adjustInventory,
+    upsertCategory,
+    upsertProduct,
+    deleteProduct,
+    bulkUpsertProducts,
+    syncTemplateCatalogToInventory,
+  } = useAppStore()
   const { toast } = useToast()
+  const bulkImportInputRef = useRef<HTMLInputElement | null>(null)
   const [adjustSku, setAdjustSku] = useState<string | null>(null)
   const [openProduct, setOpenProduct] = useState(false)
   const [openCategory, setOpenCategory] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
+  const [importingTemplateCatalog, setImportingTemplateCatalog] = useState(false)
+  const [bulkImporting, setBulkImporting] = useState(false)
+  const [deletingProductId, setDeletingProductId] = useState<string | null>(null)
 
   const products = data.products || []
   const categories = data.categories || []
   const lowStock = useMemo(() => products.filter((item) => item.stock - item.reserved < item.reorderPoint), [products])
+  const importedTemplateProducts = useMemo(
+    () => products.filter((item) => item.attributeValues?.import_origin === 'excel_templates'),
+    [products]
+  )
+
+  const triggerBulkImportPicker = () => {
+    bulkImportInputRef.current?.click()
+  }
+
+  const handleBulkImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    setBulkImporting(true)
+    try {
+      const workbookPayload = await parseInventoryWorkbook(file)
+      const result = await bulkUpsertProducts(workbookPayload)
+      toast({
+        title: 'Toplu ürün içe aktarma tamamlandı',
+        description: `${result.created_products} yeni ürün, ${result.updated_products} mevcut ürün güncellendi.`,
+      })
+    } catch (error) {
+      const description =
+        error instanceof Error && error.message
+          ? error.message
+          : 'Excel dosyası işlenemedi, şablon yapısını kontrol edip tekrar deneyin.'
+      toast({
+        title: 'İçe aktarma başarısız',
+        description,
+        variant: 'destructive',
+      })
+    } finally {
+      setBulkImporting(false)
+    }
+  }
 
   const productColumns: ColumnDef<Product>[] = [
     { accessorKey: 'sku', header: 'SKU' },
@@ -80,6 +133,32 @@ export function InventoryPanel() {
               }}
             >
               Düzenle
+            </Button>
+          </RbacGuard>
+          <RbacGuard perm="products.edit">
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={deletingProductId === row.original.id}
+              onClick={async () => {
+                const confirmed = window.confirm(`${row.original.name} ürününü silmek istiyor musun?`)
+                if (!confirmed) return
+                setDeletingProductId(row.original.id)
+                try {
+                  await deleteProduct(row.original.id)
+                  toast({ title: 'Ürün silindi' })
+                } catch {
+                  toast({
+                    title: 'Ürün silinemedi',
+                    description: 'Silme işlemi tamamlanamadı, lütfen tekrar deneyin.',
+                    variant: 'destructive',
+                  })
+                } finally {
+                  setDeletingProductId(null)
+                }
+              }}
+            >
+              {deletingProductId === row.original.id ? 'Siliniyor...' : 'Sil'}
             </Button>
           </RbacGuard>
         </div>
@@ -115,51 +194,34 @@ export function InventoryPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Stok paneli</CardTitle>
-            <CardDescription>Ürünler, kategori şablonları ve dinamik teknik alanlar</CardDescription>
+      <div className="grid gap-4 xl:grid-cols-[1fr_1fr_1fr_1.5fr]">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardDescription>Toplam ürün</CardDescription>
+            <CardTitle className="text-3xl">{products.length}</CardTitle>
           </CardHeader>
           <CardContent>
-            <Tabs defaultValue="products">
-              <TabsList className="mb-4 grid w-full grid-cols-2">
-                <TabsTrigger value="products">Ürünler</TabsTrigger>
-                <TabsTrigger value="categories">Kategori şablonları</TabsTrigger>
-              </TabsList>
-              <TabsContent value="products" className="space-y-3">
-                <div className="flex justify-end">
-                  <RbacGuard perm="products.edit">
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        setEditingProduct(null)
-                        setOpenProduct(true)
-                      }}
-                    >
-                      Yeni ürün
-                    </Button>
-                  </RbacGuard>
-                </div>
-                <DataTable columns={productColumns} data={products} searchKey="sku" />
-              </TabsContent>
-              <TabsContent value="categories" className="space-y-3">
-                <div className="flex justify-end">
-                  <RbacGuard perm="products.edit">
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        setEditingCategory(null)
-                        setOpenCategory(true)
-                      }}
-                    >
-                      Yeni kategori şablonu
-                    </Button>
-                  </RbacGuard>
-                </div>
-                <DataTable columns={categoryColumns} data={categories} searchKey="name" />
-              </TabsContent>
-            </Tabs>
+            <p className="text-sm text-muted-foreground">Stokta görünen tüm ürün kartları.</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardDescription>Excel entegrasyonu</CardDescription>
+            <CardTitle className="text-3xl">{importedTemplateProducts.length}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">Şablonlardan içeri alınan ürün sayısı.</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardDescription>Kategori şablonu</CardDescription>
+            <CardTitle className="text-3xl">{categories.length}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">Belge grubu ve teknik alan tanımları.</p>
           </CardContent>
         </Card>
 
@@ -170,24 +232,131 @@ export function InventoryPanel() {
           </CardHeader>
           <CardContent className="space-y-3">
             <Badge variant="destructive">{lowStock.length} düşük stok</Badge>
-            {lowStock.slice(0, 6).map((item) => (
-              <div key={item.sku} className="rounded-lg border border-border/70 p-3">
-                <p className="font-semibold">{item.name}</p>
-                <p className="text-xs text-muted-foreground">SKU {item.sku}</p>
-                <p className="text-xs text-muted-foreground">{item.categoryName || item.category || 'Kategori yok'}</p>
-                <div className="mt-2 flex items-center justify-between text-sm">
-                  <span>Stok {item.stock - item.reserved}</span>
-                  <RbacGuard perm="inventory.edit">
-                    <Button size="sm" variant="outline" onClick={() => setAdjustSku(item.sku)}>
-                      Güncelle
-                    </Button>
-                  </RbacGuard>
+            {lowStock.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Şu an aksiyon gerektiren düşük stok görünmüyor.</p>
+            ) : (
+              lowStock.slice(0, 3).map((item) => (
+                <div key={item.sku} className="rounded-lg border border-border/70 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold">{item.name}</p>
+                      <p className="text-xs text-muted-foreground">SKU {item.sku}</p>
+                      <p className="text-xs text-muted-foreground">{item.categoryName || item.category || 'Kategori yok'}</p>
+                    </div>
+                    <Badge variant="outline">Stok {item.stock - item.reserved}</Badge>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Stok paneli</CardTitle>
+          <CardDescription>Ürünler, kategori şablonları ve dinamik teknik alanlar</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <input
+            ref={bulkImportInputRef}
+            type="file"
+            accept=".xlsx,.xls,.xlsm,.xltx"
+            className="hidden"
+            onChange={handleBulkImportFile}
+          />
+          <Tabs defaultValue="products">
+            <TabsList className="mb-4 grid w-full max-w-[720px] grid-cols-2">
+              <TabsTrigger value="products">Ürünler</TabsTrigger>
+              <TabsTrigger value="categories">Kategori şablonları</TabsTrigger>
+            </TabsList>
+            <TabsContent value="products" className="space-y-3">
+              <div className="flex flex-wrap justify-end gap-2">
+                <RbacGuard perm="products.edit">
+                  <Button size="sm" variant="outline" onClick={() => downloadInventoryTemplateWorkbook()}>
+                    Şablon indir
+                  </Button>
+                </RbacGuard>
+                <RbacGuard perm="products.view">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => downloadInventoryStateWorkbook(products, categories)}
+                  >
+                    Dışa aktar
+                  </Button>
+                </RbacGuard>
+                <RbacGuard perm="products.edit">
+                  <Button size="sm" variant="outline" disabled={bulkImporting} onClick={triggerBulkImportPicker}>
+                    {bulkImporting ? 'İçe aktarılıyor...' : 'Şablondan içe aktar'}
+                  </Button>
+                </RbacGuard>
+                <RbacGuard perm="products.edit">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={importingTemplateCatalog}
+                    onClick={async () => {
+                      setImportingTemplateCatalog(true)
+                      try {
+                        const result = await syncTemplateCatalogToInventory()
+                        toast({
+                          title: 'Şablon ürünleri stoğa eklendi',
+                          description: `${result.created_products} yeni ürün, ${result.updated_products} mevcut ürün güncellendi.`,
+                        })
+                      } catch {
+                        toast({
+                          title: 'Şablon ürünleri eklenemedi',
+                          description: 'Stok kataloğu güncellenemedi, lütfen tekrar deneyin.',
+                          variant: 'destructive',
+                        })
+                      } finally {
+                        setImportingTemplateCatalog(false)
+                      }
+                    }}
+                  >
+                    {importingTemplateCatalog ? 'Ekleniyor...' : 'Şablon ürünlerini stoğa ekle'}
+                  </Button>
+                </RbacGuard>
+                <RbacGuard perm="products.edit">
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setEditingProduct(null)
+                      setOpenProduct(true)
+                    }}
+                  >
+                    Yeni ürün
+                  </Button>
+                </RbacGuard>
+              </div>
+              <DataTable
+                columns={productColumns}
+                data={products}
+                searchKey="sku"
+                pageSizeOptions={[10, 25, 50, 100]}
+                initialPageSize={25}
+              />
+            </TabsContent>
+            <TabsContent value="categories" className="space-y-3">
+              <div className="flex justify-end">
+                <RbacGuard perm="products.edit">
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setEditingCategory(null)
+                      setOpenCategory(true)
+                    }}
+                  >
+                    Yeni kategori şablonu
+                  </Button>
+                </RbacGuard>
+              </div>
+              <DataTable columns={categoryColumns} data={categories} searchKey="name" />
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
 
       <AdjustStockDialog sku={adjustSku} onClose={() => setAdjustSku(null)} onAdjust={(sku, delta) => { adjustInventory(sku, delta); setAdjustSku(null); toast({ title: `${sku} stok güncellendi` }) }} />
       <ProductEditorDialog open={openProduct} product={editingProduct} categories={categories} onClose={() => setOpenProduct(false)} onSave={async (payload) => { await upsertProduct(payload as any); setOpenProduct(false); setEditingProduct(null); toast({ title: 'Ürün kaydedildi' }) }} />
