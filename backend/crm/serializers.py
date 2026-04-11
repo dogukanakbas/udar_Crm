@@ -20,6 +20,7 @@ class BusinessPartnerSerializer(serializers.ModelSerializer):
             'group': {'required': False, 'allow_blank': True},
             'city': {'required': False, 'allow_blank': True},
             'country': {'required': False, 'allow_blank': True},
+            'size': {'required': False, 'allow_blank': True},
             'address': {'required': False, 'allow_blank': True},
             'tax_office': {'required': False, 'allow_blank': True},
             'tax_number': {'required': False, 'allow_blank': True},

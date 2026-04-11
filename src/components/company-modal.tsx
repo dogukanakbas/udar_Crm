@@ -1,20 +1,34 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 
+import { SearchableCombobox } from '@/components/searchable-combobox'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  COMPANY_SIZE_OPTIONS,
+  DEFAULT_COMPANY_COUNTRY_LABEL,
+  findCountryOption,
+  getCityOptionsForCountry,
+  getCountryOptions,
+  includeCustomCityOption,
+  isTurkeyCountry,
+  normalizeCompanySize,
+  normalizeCountryLabel,
+} from '@/lib/location-data'
+import { normalizeSearchText } from '@/lib/utils'
 import type { Company } from '@/types'
 
 export const companySchema = z.object({
   name: z.string().min(2),
   industry: z.string().optional().default(''),
   region: z.string().optional().default(''),
-  country: z.string().optional().default(''),
+  country: z.string().optional().default(DEFAULT_COMPANY_COUNTRY_LABEL),
   size: z.string().optional().default(''),
   owner: z.string().optional().default(''),
   annualRevenue: z.coerce.number().optional().default(0),
@@ -28,12 +42,14 @@ export const companySchema = z.object({
 
 export type CompanyFormValues = z.infer<typeof companySchema>
 
+const REGISTERED_SELECT_FIELDS: (keyof CompanyFormValues)[] = ['country', 'region', 'size']
+
 const getDefaultValues = (company?: Company): CompanyFormValues => ({
   name: company?.name ?? '',
   industry: company?.industry ?? '',
   region: company?.region ?? '',
-  country: company?.country ?? '',
-  size: company?.size ?? '',
+  country: company ? normalizeCountryLabel(company.country) || company.country || '' : DEFAULT_COMPANY_COUNTRY_LABEL,
+  size: normalizeCompanySize(company?.size),
   owner: company?.owner ?? '',
   annualRevenue: company?.annualRevenue ?? 0,
   address: company?.address ?? '',
@@ -67,10 +83,71 @@ export function CompanyModal({ children, company, onSubmit, open, onOpenChange }
     onOpenChange?.(nextOpen)
   }
 
+  const watchedCountry = form.watch('country')
+  const watchedRegion = form.watch('region')
+  const watchedSize = form.watch('size')
+  const countryOptions = useMemo(() => getCountryOptions(), [])
+  const selectedCountry = useMemo(() => findCountryOption(watchedCountry), [watchedCountry])
+  const isTurkeySelected = useMemo(() => isTurkeyCountry(watchedCountry), [watchedCountry])
+
+  const countrySelectOptions = useMemo(() => {
+    const baseOptions = countryOptions.map((countryOption) => ({
+      value: countryOption.label,
+      label: countryOption.label,
+      searchText: countryOption.searchText,
+    }))
+
+    const trimmedCountry = watchedCountry?.trim()
+    if (!trimmedCountry) return baseOptions
+
+    const hasCurrentCountry = baseOptions.some(
+      (option) => normalizeSearchText(option.value) === normalizeSearchText(trimmedCountry)
+    )
+
+    if (hasCurrentCountry) return baseOptions
+
+    return [{ value: trimmedCountry, label: trimmedCountry, searchText: trimmedCountry }, ...baseOptions]
+  }, [countryOptions, watchedCountry])
+
+  const turkeyCityOptions = useMemo(
+    () =>
+      includeCustomCityOption(getCityOptionsForCountry(watchedCountry), watchedRegion).map((cityOption) => ({
+        value: cityOption.value,
+        label: cityOption.label,
+        searchText: cityOption.searchText,
+      })),
+    [watchedCountry, watchedRegion]
+  )
+
+  useEffect(() => {
+    REGISTERED_SELECT_FIELDS.forEach((fieldName) => {
+      form.register(fieldName)
+    })
+  }, [form])
+
   useEffect(() => {
     form.reset(getDefaultValues(company))
     if (!modalOpen) setSubmitError(null)
   }, [company, form, modalOpen])
+
+  useEffect(() => {
+    if (!modalOpen) return
+
+    const matchedCountry = findCountryOption(form.getValues('country'))
+    if (matchedCountry && matchedCountry.label !== form.getValues('country')) {
+      form.setValue('country', matchedCountry.label, { shouldDirty: false, shouldValidate: true })
+    }
+  }, [form, modalOpen])
+
+  const handleCountryChange = (countryLabel: string) => {
+    const matchedCountry = countryOptions.find(
+      (countryOption) => normalizeSearchText(countryOption.label) === normalizeSearchText(countryLabel)
+    )
+    const nextCountryLabel = matchedCountry?.label || countryLabel
+
+    form.setValue('country', nextCountryLabel, { shouldDirty: true, shouldValidate: true })
+    form.setValue('region', '', { shouldDirty: true, shouldValidate: true })
+  }
 
   return (
     <Dialog open={modalOpen} onOpenChange={setModalOpen}>
@@ -79,62 +156,107 @@ export function CompanyModal({ children, company, onSubmit, open, onOpenChange }
         <DialogHeader>
           <DialogTitle>{company ? 'Şirketi Düzenle' : 'Yeni Şirket'}</DialogTitle>
         </DialogHeader>
-        <div className="space-y-3">
+        <div className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-3">
-            <div>
+            <div className="flex flex-col gap-2">
               <Label>Ad</Label>
               <Input {...form.register('name')} />
             </div>
-            <div>
+            <div className="flex flex-col gap-2">
               <Label>Sektör / grup</Label>
               <Input {...form.register('industry')} />
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <Label>Şehir</Label>
-              <Input {...form.register('region')} />
-            </div>
-            <div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="flex flex-col gap-2">
               <Label>Ülke</Label>
-              <Input {...form.register('country')} />
+              <SearchableCombobox
+                value={watchedCountry}
+                options={countrySelectOptions}
+                placeholder="Ülke seçin"
+                searchPlaceholder="Ülke ara..."
+                emptyMessage="Ülke bulunamadı."
+                onValueChange={handleCountryChange}
+              />
             </div>
-            <div>
+            <div className="flex flex-col gap-2">
+              <Label>{isTurkeySelected ? 'Şehir' : 'Şehir / Bölge'}</Label>
+              {isTurkeySelected ? (
+                <SearchableCombobox
+                  value={watchedRegion}
+                  options={turkeyCityOptions}
+                  disabled={!selectedCountry}
+                  placeholder={selectedCountry ? 'Şehir seçin' : 'Önce ülke seçin'}
+                  searchPlaceholder="Şehir ara..."
+                  emptyMessage="Şehir bulunamadı."
+                  onValueChange={(cityValue) =>
+                    form.setValue('region', cityValue, { shouldDirty: true, shouldValidate: true })
+                  }
+                />
+              ) : (
+                <Input
+                  value={watchedRegion}
+                  disabled={!selectedCountry}
+                  placeholder={selectedCountry ? 'Şehir veya bölge girin' : 'Önce ülke seçin'}
+                  onChange={(event) =>
+                    form.setValue('region', event.target.value, { shouldDirty: true, shouldValidate: true })
+                  }
+                />
+              )}
+            </div>
+            <div className="flex flex-col gap-2">
               <Label>Ölçek</Label>
-              <Input {...form.register('size')} />
+              <Select
+                value={normalizeCompanySize(watchedSize) || 'unset'}
+                onValueChange={(value) =>
+                  form.setValue('size', value === 'unset' ? '' : value, { shouldDirty: true, shouldValidate: true })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Ölçek seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unset">Ölçek seçin</SelectItem>
+                  {COMPANY_SIZE_OPTIONS.map((sizeOption) => (
+                    <SelectItem key={sizeOption} value={sizeOption}>
+                      {sizeOption}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div>
+            <div className="flex flex-col gap-2">
               <Label>Yetkili</Label>
               <Input {...form.register('authorizedPerson')} />
             </div>
-            <div>
+            <div className="flex flex-col gap-2">
               <Label>Vergi dairesi</Label>
               <Input {...form.register('taxOffice')} />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div>
+            <div className="flex flex-col gap-2">
               <Label>Vergi no</Label>
               <Input {...form.register('taxNumber')} />
             </div>
-            <div>
+            <div className="flex flex-col gap-2">
               <Label>Sahip</Label>
               <Input {...form.register('owner')} />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div>
+            <div className="flex flex-col gap-2">
               <Label>Telefon</Label>
               <Input {...form.register('phone')} />
             </div>
-            <div>
+            <div className="flex flex-col gap-2">
               <Label>E-posta</Label>
               <Input type="email" {...form.register('email')} />
             </div>
           </div>
-          <div>
+          <div className="flex flex-col gap-2">
             <Label>Adres</Label>
             <Textarea rows={4} {...form.register('address')} />
           </div>
@@ -142,7 +264,7 @@ export function CompanyModal({ children, company, onSubmit, open, onOpenChange }
         <DialogFooter>
           {submitError ? <p className="text-xs text-destructive">{submitError}</p> : null}
           <Button
-            onClick={form.handleSubmit(async (values: any) => {
+            onClick={form.handleSubmit(async (values) => {
               setSubmitError(null)
               try {
                 await onSubmit(values as CompanyFormValues)

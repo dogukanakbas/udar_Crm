@@ -5,6 +5,16 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+export const normalizeSearchText = (value: string | number | null | undefined) =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[ıİ]/g, 'i')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/[^a-z0-9\s/-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
 export const normalizeCurrency = (currency?: string) => (['TRY', 'USD', 'EUR'].includes(String(currency || '').toUpperCase()) ? String(currency).toUpperCase() : 'TRY')
 
 export const getCurrencySymbol = (currency?: string) =>

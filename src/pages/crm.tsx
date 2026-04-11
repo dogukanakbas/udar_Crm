@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { CompanyModal } from '@/components/company-modal'
 import { DataTable } from '@/components/data-table'
+import { SearchableCombobox } from '@/components/searchable-combobox'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -19,6 +20,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { PageHeader } from '@/components/app-shell'
 import { useToast } from '@/components/ui/use-toast'
 import { Checkbox } from '@/components/ui/checkbox'
+import { normalizeCompanySize, normalizeCountryLabel } from '@/lib/location-data'
 import { useAppStore } from '@/state/use-app-store'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import type { Lead, Opportunity, Contact as ContactType, Company as CompanyType } from '@/types'
@@ -744,6 +746,79 @@ export function OpportunitiesPage() {
 export function CompaniesPage() {
   const { data, createCompany, updateCompany } = useAppStore()
   const { toast } = useToast()
+  const [industryFilter, setIndustryFilter] = useState('all')
+  const [countryFilter, setCountryFilter] = useState('all')
+  const [regionFilter, setRegionFilter] = useState('all')
+  const [sizeFilter, setSizeFilter] = useState('all')
+  const normalizeFilterValue = (value?: string) => value?.trim() ?? ''
+
+  const normalizedCompanies = useMemo(
+    () =>
+      data.companies.map((company) => ({
+        ...company,
+        country: normalizeCountryLabel(company.country),
+        size: normalizeCompanySize(company.size),
+      })),
+    [data.companies]
+  )
+
+  const getFilterOptions = (companies: CompanyType[], selector: (company: CompanyType) => string | undefined) =>
+    Array.from(
+      new Set(
+        companies
+          .map((company) => normalizeFilterValue(selector(company)))
+          .filter((value): value is string => Boolean(value))
+      )
+    ).sort((left, right) => left.localeCompare(right, 'tr'))
+
+  const filterOptions = useMemo(
+    () => ({
+      industries: getFilterOptions(normalizedCompanies, (company) => company.industry),
+      countries: getFilterOptions(normalizedCompanies, (company) => company.country),
+      regions: getFilterOptions(
+        countryFilter === 'all'
+          ? normalizedCompanies
+          : normalizedCompanies.filter(
+              (company) => normalizeFilterValue(company.country) === countryFilter
+            ),
+        (company) => company.region
+      ),
+      sizes: getFilterOptions(normalizedCompanies, (company) => company.size),
+    }),
+    [countryFilter, normalizedCompanies]
+  )
+
+  useEffect(() => {
+    if (regionFilter !== 'all' && !filterOptions.regions.includes(regionFilter)) {
+      setRegionFilter('all')
+    }
+  }, [filterOptions.regions, regionFilter])
+
+  const filteredCompanies = useMemo(
+    () =>
+      normalizedCompanies.filter(
+        (company) =>
+          (industryFilter === 'all' || normalizeFilterValue(company.industry) === industryFilter) &&
+          (countryFilter === 'all' || normalizeFilterValue(company.country) === countryFilter) &&
+          (regionFilter === 'all' || normalizeFilterValue(company.region) === regionFilter) &&
+          (sizeFilter === 'all' || normalizeFilterValue(company.size) === sizeFilter)
+      ),
+    [countryFilter, industryFilter, normalizedCompanies, regionFilter, sizeFilter]
+  )
+
+  const hasActiveFilters =
+    industryFilter !== 'all' ||
+    countryFilter !== 'all' ||
+    regionFilter !== 'all' ||
+    sizeFilter !== 'all'
+
+  const resetFilters = () => {
+    setIndustryFilter('all')
+    setCountryFilter('all')
+    setRegionFilter('all')
+    setSizeFilter('all')
+  }
+
   const columns: ColumnDef<(typeof data.companies)[number]>[] = [
     { accessorKey: 'name', header: 'Şirket' },
     { accessorKey: 'industry', header: 'Sektör' },
@@ -829,7 +904,75 @@ export function CompaniesPage() {
           </CardContent>
         </Card>
       </div>
-      <DataTable columns={columns} data={data.companies} searchKey="name" />
+      <div className="rounded-2xl border border-border/70 bg-card/40 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1">
+            <h3 className="text-sm font-semibold">Firma filtreleri</h3>
+            <p className="text-sm text-muted-foreground">
+              Sektör, ülke, şehir ve ölçek alanlarını seçimle daralt. Şehir seçenekleri seçilen ülkeye göre otomatik daralır.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline">{filteredCompanies.length} şirket gösteriliyor</Badge>
+            {hasActiveFilters ? (
+              <Button variant="ghost" size="sm" onClick={resetFilters}>
+                Filtreleri temizle
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <Select value={industryFilter} onValueChange={setIndustryFilter}>
+            <SelectTrigger>
+              <SelectValue placeholder="Sektör" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tüm sektörler</SelectItem>
+              {filterOptions.industries.map((industry) => (
+                <SelectItem key={industry} value={industry}>
+                  {industry}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <SearchableCombobox
+            value={countryFilter}
+            options={[
+              { value: 'all', label: 'Tüm ülkeler', searchText: 'tum ulkeler' },
+              ...filterOptions.countries.map((country) => ({ value: country, label: country, searchText: country })),
+            ]}
+            placeholder="Ülke"
+            searchPlaceholder="Ülke ara..."
+            emptyMessage="Ülke bulunamadı."
+            onValueChange={setCountryFilter}
+          />
+          <SearchableCombobox
+            value={regionFilter}
+            options={[
+              { value: 'all', label: 'Tüm şehirler', searchText: 'tum sehirler' },
+              ...filterOptions.regions.map((region) => ({ value: region, label: region, searchText: region })),
+            ]}
+            placeholder="Şehir"
+            searchPlaceholder="Şehir ara..."
+            emptyMessage="Şehir bulunamadı."
+            onValueChange={setRegionFilter}
+          />
+          <Select value={sizeFilter} onValueChange={setSizeFilter}>
+            <SelectTrigger>
+              <SelectValue placeholder="Ölçek" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tüm ölçekler</SelectItem>
+              {filterOptions.sizes.map((size) => (
+                <SelectItem key={size} value={size}>
+                  {size}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <DataTable columns={columns} data={filteredCompanies} searchKey="name" />
     </div>
   )
 }
