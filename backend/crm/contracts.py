@@ -6,8 +6,11 @@ from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 from openpyxl import load_workbook
+from openpyxl.styles import Border, PatternFill, Side
 
 XLSX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+EMPTY_BORDER = Border(left=Side(style=None), right=Side(style=None), top=Side(style=None), bottom=Side(style=None))
+EMPTY_FILL = PatternFill(fill_type=None)
 
 DEFAULT_TERMS = [
     '1- Alıcı özellikleri belirtilen ürünlerin satın alma şartlarını kabul eder.',
@@ -383,7 +386,7 @@ def _quote_families(quote):
 def _fill_shared_header(ws, quote):
     config = quote.contract_config or {}
     customer = _customer_snapshot(config)
-    prepared_by = (config.get('prepared_by_snapshot') or {}).get('name') or ''
+    prepared_by = _resolve_prepared_by_name(quote)
     currency_code = _quote_currency(quote)
     currency_note = _currency_note(quote)
     seller_key = (quote.seller_company_key or 'AYKA').strip().upper()
@@ -399,7 +402,19 @@ def _fill_shared_header(ws, quote):
     _set_cell_value(ws, 'D26', customer.get('authorized_person') or '')
     _set_cell_value(ws, 'D27', _join_contact(customer.get('phone'), customer.get('email')))
     _set_cell_value(ws, 'D30', quote.number)
+    for column in ['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']:
+        _set_cell_value(ws, f'{column}31', '')
     _set_cell_value(ws, 'D31', prepared_by)
+    for merged_range in list(ws.merged_cells.ranges):
+        if (
+            merged_range.min_row == 32
+            and merged_range.max_row == 32
+            and merged_range.min_col == 7
+            and merged_range.max_col == 11
+        ):
+            ws.unmerge_cells(start_row=32, start_column=7, end_row=32, end_column=11)
+    for column in ['E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']:
+        _clear_visual_cell(ws, f'{column}32')
     _set_cell_value(ws, 'D32', config.get('validity_label') or format_validity_text(quote.valid_until))
     _set_cell_value(ws, 'D33', ' • '.join(part for part in [config.get('price_list_label') or '', currency_note] if part))
     _set_cell_value(ws, 'C16', _choice_text(_normalize_display_name(ortka.get('display_name', '')), seller_key == 'ORTKA'))
@@ -449,6 +464,9 @@ def _fill_line_blocks(ws, quote, template):
         subtotal_value = sum((_line_subtotal(line) for line in lines), Decimal('0'))
         tax_value = sum((_line_tax(line) for line in lines), Decimal('0'))
         grand_value = subtotal_value + tax_value
+        for summary_row in [block['subtotal_row'], block['tax_row'], block['grand_row']]:
+            for column in ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K']:
+                _clear_visual_cell(ws, f'{column}{summary_row}')
         _set_cell_value(ws, f'L{block["subtotal_row"]}', f'Tutar Toplam ({currency_symbol})' if visible else '')
         _set_cell_value(ws, f'L{block["grand_row"]}', f'Yekün ({currency_symbol})' if visible else '')
         _set_currency_value(ws, f'M{block["subtotal_row"]}', float(subtotal_value) if visible else '', currency_code)
@@ -461,7 +479,7 @@ def _fill_commercial_rows(ws, quote, template):
     currency_code = _quote_currency(quote)
     commercial_values = [
         quote.number,
-        (config.get('prepared_by_snapshot') or {}).get('name') or '',
+        _resolve_prepared_by_name(quote),
         quote.payment_terms or '',
         quote.delivery_terms or '',
         config.get('validity_label') or format_validity_text(quote.valid_until),
@@ -516,13 +534,14 @@ def _fill_bank_accounts(ws, quote, template):
     for index, row in enumerate(template['bank_rows']):
         left = ortka_accounts[index] if index < len(ortka_accounts) else {}
         right = ayka_accounts[index] if index < len(ayka_accounts) else {}
-        _set_cell_value(ws, f'C{row}', _normalize_bank_name(left.get('bank', '')))
-        _set_cell_value(ws, f'D{row}', left.get('iban', ''))
-        _set_cell_value(
-            ws,
-            f'K{row}',
-            ' '.join(part for part in [_normalize_bank_name(right.get('bank', '')), right.get('iban', '')] if part),
-        )
+        left_bank = _normalize_bank_name(left.get('bank', '')) if left.get('bank') and left.get('iban') else ''
+        left_iban = left.get('iban', '') if left.get('bank') and left.get('iban') else ''
+        right_value = ''
+        if right.get('bank') and right.get('iban'):
+            right_value = ' '.join(part for part in [_normalize_bank_name(right.get('bank', '')), right.get('iban', '')] if part)
+        _set_cell_value(ws, f'C{row}', left_bank)
+        _set_cell_value(ws, f'D{row}', left_iban)
+        _set_cell_value(ws, f'K{row}', right_value)
 
 
 def _fill_signature_block(ws, quote, template):
@@ -560,6 +579,24 @@ def _normalize_bank_name(value):
     }
     text = str(value or '').strip()
     return normalized.get(text, text)
+
+
+def _user_display_name(user):
+    if not user:
+        return ''
+    full_name = f"{(getattr(user, 'first_name', '') or '').strip()} {(getattr(user, 'last_name', '') or '').strip()}".strip()
+    if not full_name and hasattr(user, 'get_full_name'):
+        full_name = str(user.get_full_name() or '').strip()
+    return full_name or str(getattr(user, 'username', '') or getattr(user, 'email', '') or '').strip()
+
+
+def _resolve_prepared_by_name(quote):
+    snapshot = dict((quote.contract_config or {}).get('prepared_by_snapshot') or {})
+    snapshot_name = str(snapshot.get('name') or '').strip()
+    related_name = _user_display_name(getattr(quote, 'prepared_by', None)) or _user_display_name(getattr(quote, 'owner', None))
+    if snapshot_name and '@' not in snapshot_name:
+        return snapshot_name
+    return related_name or snapshot_name
 
 
 def _normalize_display_name(value):
@@ -623,6 +660,13 @@ def _set_currency_value(ws, coordinate, value, currency):
     cell.value = value
     if value not in [None, '']:
         cell.number_format = _currency_number_format(currency)
+
+
+def _clear_visual_cell(ws, coordinate):
+    cell = _resolve_cell(ws, coordinate)
+    cell.value = ''
+    cell.border = EMPTY_BORDER
+    cell.fill = EMPTY_FILL
 
 
 def _clear_line_row(ws, row_number):

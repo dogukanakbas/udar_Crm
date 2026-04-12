@@ -166,6 +166,20 @@ const getDocumentExchangeRate = (currency?: string, exchangeRate?: number | stri
   return Number.isFinite(normalizedRate) && normalizedRate > 0 ? normalizedRate : 1
 }
 const formatDocumentAmount = (value: number, currency?: string) => formatCurrency(value, getDocumentCurrency(currency))
+const getCurrentUserId = () => {
+  if (typeof window === 'undefined') return ''
+  try {
+    return localStorage.getItem('current-user-id') || ''
+  } catch {
+    return ''
+  }
+}
+const getDefaultPreparerId = (preparers: any[], quote?: Quote) => {
+  if (quote?.preparedById) return quote.preparedById
+  const currentUserId = getCurrentUserId()
+  if (currentUserId && preparers.some((user) => String(user.id) === String(currentUserId))) return currentUserId
+  return preparers[0]?.id ?? ''
+}
 
 const buildLineFromProduct = (product?: Product, previousLine?: any) => {
   const defaults = product?.templateDefaults || {}
@@ -203,7 +217,7 @@ const getInitialValues = (mode: SalesDocumentType, companies: any[], preparers: 
 
   return {
     customerId: quote?.customerId || company?.id || '',
-    preparedById: quote?.preparedById ?? preparers[0]?.id ?? '',
+    preparedById: getDefaultPreparerId(preparers, quote),
     sellerCompanyKey: quote?.sellerCompanyKey || 'AYKA',
     currency: initialCurrency,
     exchangeRate: getDocumentExchangeRate(initialCurrency, quote?.contractConfig?.exchangeRate || quote?.contractConfig?.exchange_rate),
