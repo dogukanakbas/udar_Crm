@@ -23,7 +23,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
 import api from '@/lib/api'
-import { TemplateQuoteWizardTrigger } from '@/components/quote-template-wizard'
 import {
   DEFAULT_COMPANY_COUNTRY_LABEL,
   getAllowedCurrencyCodesForCountry,
@@ -131,7 +130,7 @@ const documentSchema = z.object({
   exchangeRate: z.coerce.number().positive().optional(),
   templateKey: z.string().optional(),
   contractDate: z.string().optional(),
-  validUntil: z.string().optional(),
+  validUntil: z.string().min(1, 'Geçerlilik tarihi zorunludur.'),
   validityLabel: z.string().optional(),
   priceListLabel: z.string().optional(),
   payment: z.string().optional(),
@@ -223,8 +222,8 @@ const getInitialValues = (mode: SalesDocumentType, companies: any[], preparers: 
     exchangeRate: getDocumentExchangeRate(initialCurrency, quote?.contractConfig?.exchangeRate || quote?.contractConfig?.exchange_rate),
     templateKey: quote?.contractConfig?.templateKey || quote?.contractConfig?.template_key || '',
     contractDate: quote?.contractConfig?.contractDate || quote?.contractConfig?.contract_date || new Date().toISOString().slice(0, 10),
-    validUntil: quote?.validUntil || new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
-    validityLabel: quote?.contractConfig?.validityLabel || quote?.contractConfig?.validity_label || '',
+    validUntil: quote?.validUntil || '',
+    validityLabel: '',
     priceListLabel: quote?.contractConfig?.priceListLabel || quote?.contractConfig?.price_list_label || '2026/1. LİSTE',
     payment: quote?.terms?.payment || '',
     paymentOption: quote?.contractConfig?.paymentOption || quote?.contractConfig?.payment_option || '',
@@ -281,7 +280,7 @@ const buildDocumentPayload = (values: any, mode: SalesDocumentType, status = 'Dr
     templateMode: values.templateKey ? 'manual' : 'auto',
     templateKey: values.templateKey || '',
     contractDate: values.contractDate,
-    validityLabel: values.validityLabel,
+    validityLabel: '',
     priceListLabel: values.priceListLabel,
     exchangeRate: getDocumentExchangeRate(values.currency, values.exchangeRate),
     deliveryType: values.deliveryType,
@@ -651,7 +650,10 @@ async function downloadDocument(quoteId: string) {
 
   for (const file of files) {
     const response = await api.get(`/quotes/${quoteId}/export-xlsx/`, {
-      params: file.template_key ? { template_key: file.template_key } : undefined,
+      params: {
+        ...(file.template_key ? { template_key: file.template_key } : {}),
+        _ts: Date.now(),
+      },
       responseType: 'blob',
     })
     const url = window.URL.createObjectURL(new Blob([response.data]))
@@ -829,9 +831,6 @@ export function QuotesPage() {
         actions={
           <div className="flex gap-2">
             <RbacGuard perm="quotes.edit">
-              <TemplateQuoteWizardTrigger companies={companies} />
-            </RbacGuard>
-            <RbacGuard perm="quotes.edit">
               <DocumentWizardTrigger mode="Contract" />
             </RbacGuard>
             <RbacGuard perm="quotes.edit">
@@ -856,6 +855,7 @@ export function QuotesPage() {
           </div>
         }
       />
+
 
       <div className="grid gap-3 rounded-xl border border-border/70 bg-card/40 p-4 md:grid-cols-2 xl:grid-cols-[220px_220px_minmax(280px,1fr)_140px_140px_auto]">
         <div className="space-y-1">
@@ -1162,8 +1162,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
               <div><Label>{`Kur (${getCurrencySymbol(form.watch('currency'))} -> ₺)`}</Label><Input type="number" step="0.0001" min="1" disabled={(form.watch('currency') || 'TRY') === 'TRY'} value={form.watch('exchangeRate') ?? 1} onChange={(event) => form.setValue('exchangeRate', Number(event.target.value || 1), { shouldDirty: true })} /><p className="mt-1 text-xs text-muted-foreground">{(form.watch('currency') || 'TRY') === 'TRY' ? 'Türk Lirası seçildiğinde kur 1 kabul edilir.' : formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p></div>
               <div><Label>Şablon</Label><Select value={form.watch('templateKey') || '__auto__'} onValueChange={(value) => form.setValue('templateKey', value === '__auto__' ? '' : value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{TEMPLATE_OPTIONS[documentMode].map((option) => <SelectItem key={option.value || '__auto__'} value={option.value || '__auto__'}>{option.label}</SelectItem>)}</SelectContent></Select></div>
               <div><Label>Belge tarihi</Label><Input type="date" value={form.watch('contractDate') || ''} onChange={(event) => form.setValue('contractDate', event.target.value)} /></div>
-              <div><Label>Geçerlilik tarihi</Label><Input type="date" value={form.watch('validUntil') || ''} onChange={(event) => form.setValue('validUntil', event.target.value)} /></div>
-              <div><Label>Geçerlilik etiketi</Label><Input value={form.watch('validityLabel') || ''} onChange={(event) => form.setValue('validityLabel', event.target.value)} /></div>
+              <div><Label>Geçerlilik tarihi</Label><Input type="date" value={form.watch('validUntil') || ''} onChange={(event) => form.setValue('validUntil', event.target.value, { shouldDirty: true, shouldValidate: true })} /></div>
               <div><Label>Fiyat listesi etiketi</Label><Input value={form.watch('priceListLabel') || ''} onChange={(event) => form.setValue('priceListLabel', event.target.value)} /></div>
               <div><Label>İmza etiketi</Label><Input value={form.watch('signatureCustomerLabel') || ''} onChange={(event) => form.setValue('signatureCustomerLabel', event.target.value)} /></div>
               <div><Label>Teslim tipi</Label><Input value={form.watch('deliveryType') || ''} onChange={(event) => form.setValue('deliveryType', event.target.value)} /></div>

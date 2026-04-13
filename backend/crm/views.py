@@ -1,16 +1,24 @@
 from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+import mimetypes
+
 from django.http import FileResponse
 
 from .models import Quote, PricingRule, BusinessPartner, Lead, Opportunity, Contact
-from .contracts import build_document_export, list_document_exports
+from .contracts import build_document_export, get_template_download, list_document_exports, list_template_library, save_template_override
 from workflow.models import ApprovalInstance, ApprovalStep
 from erp.models import Product
 from .serializers import QuoteSerializer, PricingRuleSerializer, BusinessPartnerSerializer, ProductSerializer, LeadSerializer, OpportunitySerializer, ContactSerializer
 from organizations.models import NumberRange
 from permissions import IsOrgMember, IsOwnerOrManager, HasAPIPermission
 from audit.utils import log_entity_action
+
+EXCEL_TEMPLATE_CONTENT_TYPES = {
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.xltx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.template',
+    '.xlsm': 'application/vnd.ms-excel.sheet.macroEnabled.12',
+}
 
 
 class OrgScopedMixin:
@@ -42,6 +50,7 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         'approve': 'quotes.approve',
         'reject': 'quotes.approve',
         'apply_preview': 'quotes.edit',
+        'template_library_upload': 'quotes.edit',
     }
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['number', 'customer__name', 'status', 'document_type']
@@ -231,17 +240,58 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             export = build_document_export(quote, template_key=request.query_params.get('template_key'))
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return FileResponse(
+        response = FileResponse(
             export['content'],
             as_attachment=True,
             filename=export['filename'],
             content_type=export['content_type'],
         )
+        response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response['Pragma'] = 'no-cache'
+        response['Expires'] = '0'
+        return response
 
     @action(detail=True, methods=['get'], url_path='export-files')
     def export_files(self, request, pk=None):
         quote = self.get_object()
         return Response({'files': list_document_exports(quote)})
+
+    @action(detail=False, methods=['get'], url_path='template-library')
+    def template_library(self, request):
+        return Response({'templates': list_template_library(request.user.organization)})
+
+    @action(detail=False, methods=['get'], url_path='template-library-download')
+    def template_library_download(self, request):
+        template_key = str(request.query_params.get('template_key') or '').strip()
+        variant = str(request.query_params.get('variant') or 'current').strip().lower()
+        try:
+            template = get_template_download(request.user.organization, template_key, variant=variant)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        extension = template['path'].suffix.lower()
+        content_type = EXCEL_TEMPLATE_CONTENT_TYPES.get(extension) or mimetypes.guess_type(template['filename'])[0] or 'application/octet-stream'
+        response = FileResponse(
+            open(template['path'], 'rb'),
+            as_attachment=True,
+            filename=template['filename'],
+            content_type=content_type,
+        )
+        response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response['Pragma'] = 'no-cache'
+        response['Expires'] = '0'
+        return response
+
+    @action(detail=False, methods=['post'], url_path='template-library-upload')
+    def template_library_upload(self, request):
+        template_key = str(request.data.get('template_key') or '').strip()
+        uploaded_file = request.FILES.get('file')
+        if not template_key or not uploaded_file:
+            return Response({'detail': 'template_key ve file zorunludur'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            entry = save_template_override(request.user.organization, template_key, uploaded_file, user=request.user)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'template': entry})
 
 
 class PricingRuleViewSet(OrgScopedMixin, viewsets.ModelViewSet):
