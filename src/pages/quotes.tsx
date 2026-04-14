@@ -135,7 +135,7 @@ const documentSchema = z.object({
   priceListLabel: z.string().optional(),
   payment: z.string().optional(),
   paymentOption: z.string().optional(),
-  delivery: z.string().optional(),
+  delivery: z.string().min(1, 'Teslim tarihi zorunludur.'),
   deliveryType: z.string().optional(),
   notes: z.string().optional(),
   customerName: z.string().optional(),
@@ -180,6 +180,20 @@ const getDefaultPreparerId = (preparers: any[], quote?: Quote) => {
   return preparers[0]?.id ?? ''
 }
 
+const normalizeDateInputValue = (value?: string | null) => {
+  if (!value) return ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+
+  const isoPrefix = String(value).match(/^(\d{4}-\d{2}-\d{2})/)
+  if (isoPrefix) return isoPrefix[1]
+
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return ''
+
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`
+}
+
 const buildLineFromProduct = (product?: Product, previousLine?: any) => {
   const defaults = product?.templateDefaults || {}
   const categoryDefaults = product?.categoryTemplateDefaults || {}
@@ -208,6 +222,50 @@ const buildLineFromProduct = (product?: Product, previousLine?: any) => {
 
 const createEmptyLine = () => buildLineFromProduct(undefined, { mode: 'manual', name: 'Yeni kalem', sectionKey: 'steel_door', unit: 'Adet', qty: 1, unitPrice: 0, discount: 0, discountSecondary: 0, tax: 20, details: { code: '', primary: '', secondary: '', attributes: {} } })
 
+const buildLineForSelectedProduct = (product?: Product, previousLine?: any) =>
+  buildLineFromProduct(product, {
+    ...previousLine,
+    mode: 'product',
+    productId: undefined,
+    sku: '',
+    name: undefined,
+    sectionKey: undefined,
+    unit: undefined,
+    unitPrice: undefined,
+    discount: undefined,
+    discountSecondary: undefined,
+    tax: undefined,
+    details: {
+      code: undefined,
+      primary: undefined,
+      secondary: undefined,
+      attributes: undefined,
+    },
+  })
+
+const resolveErrorTab = (fieldPath?: string) => {
+  if (!fieldPath) return 'document'
+  if (fieldPath.startsWith('lines')) return 'lines'
+  if (fieldPath.startsWith('customer') || fieldPath === 'customerId') return 'customer'
+  return 'document'
+}
+
+const collectFirstError = (errors: any, parentPath = ''): { path: string; message: string } | null => {
+  if (!errors || typeof errors !== 'object') return null
+
+  for (const [key, value] of Object.entries(errors)) {
+    const nextPath = parentPath ? `${parentPath}.${key}` : key
+    if (!value) continue
+    if (typeof value === 'object' && 'message' in value && typeof value.message === 'string' && value.message) {
+      return { path: nextPath, message: value.message }
+    }
+    const nested = collectFirstError(value, nextPath)
+    if (nested) return nested
+  }
+
+  return null
+}
+
 const getInitialValues = (mode: SalesDocumentType, companies: any[], preparers: any[], products: Product[], quote?: Quote) => {
   const customerSnapshot = quote?.contractConfig?.customerSnapshot || quote?.contractConfig?.customer_snapshot || {}
   const company = companies.find((item) => item.id === quote?.customerId) || companies[0]
@@ -221,13 +279,13 @@ const getInitialValues = (mode: SalesDocumentType, companies: any[], preparers: 
     currency: initialCurrency,
     exchangeRate: getDocumentExchangeRate(initialCurrency, quote?.contractConfig?.exchangeRate || quote?.contractConfig?.exchange_rate),
     templateKey: quote?.contractConfig?.templateKey || quote?.contractConfig?.template_key || '',
-    contractDate: quote?.contractConfig?.contractDate || quote?.contractConfig?.contract_date || new Date().toISOString().slice(0, 10),
-    validUntil: quote?.validUntil || '',
+      contractDate: normalizeDateInputValue(quote?.contractConfig?.contractDate || quote?.contractConfig?.contract_date) || new Date().toISOString().slice(0, 10),
+      validUntil: normalizeDateInputValue(quote?.validUntil),
     validityLabel: '',
     priceListLabel: quote?.contractConfig?.priceListLabel || quote?.contractConfig?.price_list_label || '2026/1. LİSTE',
     payment: quote?.terms?.payment || '',
     paymentOption: quote?.contractConfig?.paymentOption || quote?.contractConfig?.payment_option || '',
-    delivery: quote?.terms?.delivery || '',
+      delivery: normalizeDateInputValue(quote?.terms?.delivery),
     deliveryType: quote?.contractConfig?.deliveryType || quote?.contractConfig?.delivery_type || '',
     notes: quote?.terms?.notes || '',
     customerName: customerSnapshot.name || company?.name || '',
@@ -953,6 +1011,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   const [open, setOpen] = useState(false)
   const [customerModalOpen, setCustomerModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [activeTab, setActiveTab] = useState('customer')
   const companies = data.companies
   const products = data.products
   const preparers = useMemo(() => data.users.filter((user) => user.canPrepareQuotes || user.permissions?.includes('quotes.prepare')), [data.users])
@@ -963,7 +1022,10 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen)
-    if (nextOpen) form.reset(getFormDefaults())
+    if (nextOpen) {
+      setActiveTab('customer')
+      form.reset(getFormDefaults())
+    }
   }
 
   const selectedCustomer = companies.find((company) => company.id === form.watch('customerId'))
@@ -1041,7 +1103,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   const removeLine = (index: number) => form.setValue('lines', lines.filter((_, currentIndex) => currentIndex !== index), { shouldDirty: true })
   const applyProduct = (index: number, productId: string) => {
     const product = products.find((item) => item.id === productId)
-    form.setValue(`lines.${index}`, buildLineFromProduct(product, lines[index]), { shouldDirty: true })
+    form.setValue(`lines.${index}`, buildLineForSelectedProduct(product, lines[index]), { shouldDirty: true, shouldValidate: true })
   }
   const setManualMode = (index: number) => form.setValue(`lines.${index}`, { ...lines[index], mode: 'manual', productId: undefined }, { shouldDirty: true })
   const getDiscountValidationMessage = (nextLines: any[]) => {
@@ -1068,6 +1130,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   const handleSave = form.handleSubmit(async (values) => {
     const discountValidationMessage = getDiscountValidationMessage(values.lines)
     if (discountValidationMessage) {
+      setActiveTab('lines')
       toast({ title: discountValidationMessage, variant: 'destructive' })
       return
     }
@@ -1089,6 +1152,21 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
     }
   })
 
+  const handleSaveClick = async () => {
+    const isValid = await form.trigger()
+    if (!isValid) {
+      const firstError = collectFirstError(form.formState.errors)
+      setActiveTab(resolveErrorTab(firstError?.path))
+      toast({
+        title: firstError?.message || 'Lütfen zorunlu alanları kontrol edin.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    handleSave()
+  }
+
   return (
     <>
       <CompanyModal open={customerModalOpen} onOpenChange={setCustomerModalOpen} onSubmit={handleCustomerCreate} />
@@ -1103,7 +1181,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
       </DialogTrigger>
       <DialogContent className={cn('max-h-[92vh] max-w-[82rem] overflow-y-auto', customerModalOpen && 'pointer-events-none opacity-0')}>
         <DialogHeader><DialogTitle>{isEditing ? `${DOCUMENT_TYPE_TR[documentMode]} düzenle` : documentMode === 'Contract' ? 'Sözleşme oluştur' : 'Teklif oluştur'}</DialogTitle></DialogHeader>
-        <Tabs defaultValue="customer">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-3 grid grid-cols-4">
             <TabsTrigger value="customer">Müşteri</TabsTrigger>
             <TabsTrigger value="document">Belge</TabsTrigger>
@@ -1165,10 +1243,10 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
               <div><Label>Geçerlilik tarihi</Label><Input type="date" value={form.watch('validUntil') || ''} onChange={(event) => form.setValue('validUntil', event.target.value, { shouldDirty: true, shouldValidate: true })} /></div>
               <div><Label>Fiyat listesi etiketi</Label><Input value={form.watch('priceListLabel') || ''} onChange={(event) => form.setValue('priceListLabel', event.target.value)} /></div>
               <div><Label>İmza etiketi</Label><Input value={form.watch('signatureCustomerLabel') || ''} onChange={(event) => form.setValue('signatureCustomerLabel', event.target.value)} /></div>
-              <div><Label>Teslim tipi</Label><Input value={form.watch('deliveryType') || ''} onChange={(event) => form.setValue('deliveryType', event.target.value)} /></div>
-              <div><Label>Ödeme tipi</Label><Input value={form.watch('paymentOption') || ''} onChange={(event) => form.setValue('paymentOption', event.target.value)} /></div>
-              <div><Label>Ödeme metni</Label><Input value={form.watch('payment') || ''} onChange={(event) => form.setValue('payment', event.target.value)} /></div>
-              <div><Label>Teslim metni</Label><Input value={form.watch('delivery') || ''} onChange={(event) => form.setValue('delivery', event.target.value)} /></div>
+                <div><Label>Teslim tipi</Label><Input value={form.watch('deliveryType') || ''} onChange={(event) => form.setValue('deliveryType', event.target.value)} /></div>
+                <div><Label>Ödeme tipi</Label><Input value={form.watch('paymentOption') || ''} onChange={(event) => form.setValue('paymentOption', event.target.value)} /></div>
+                <div><Label>Ödeme metni</Label><Input value={form.watch('payment') || ''} onChange={(event) => form.setValue('payment', event.target.value)} /></div>
+                <div><Label>Teslim tarihi</Label><Input type="date" value={form.watch('delivery') || ''} onChange={(event) => form.setValue('delivery', event.target.value, { shouldDirty: true, shouldValidate: true })} /></div>
             </div>
             <div><Label>Notlar</Label><Textarea value={form.watch('notes') || ''} onChange={(event) => form.setValue('notes', event.target.value)} /></div>
             <div><Label>Maddeler</Label><p className="text-xs text-muted-foreground">Her dolu satır bir madde olur. Boşsa Excel&apos;e hiçbir madde eklenmez.</p><Textarea rows={10} value={form.watch('termsText') || ''} onChange={(event) => form.setValue('termsText', event.target.value)} /></div>
@@ -1215,11 +1293,11 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
             </div>
           </TabsContent>
 
-          <TabsContent value="review" className="space-y-3">
-            <Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Belge türü: {DOCUMENT_TYPE_TR[documentMode]}</p><p>Müşteri: {form.watch('customerName') || selectedCustomer?.name || '-'}</p><p>Hazırlayan: {preparers.find((user) => user.id === form.watch('preparedById'))?.fullName || '-'}</p><p>Satıcı firma: {form.watch('sellerCompanyKey') || '-'}</p><p>Para birimi: {getCurrencySymbol(form.watch('currency'))} {getCurrencyLabel(form.watch('currency'))}</p><p>Kur: {formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p><p>Şablon: {templateLabel(documentMode, form.watch('templateKey'))}</p><p>Satır sayısı: {lines.length}</p><p>Ara toplam: {formatDocumentAmount(subtotal, form.watch('currency'))}</p><p>Toplam iskonto: {formatDocumentAmount(discountTotal, form.watch('currency'))}</p><p>KDV: {formatDocumentAmount(taxTotal, form.watch('currency'))}</p><p>Genel toplam: {formatDocumentAmount(total, form.watch('currency'))}</p></CardContent></Card>
+            <TabsContent value="review" className="space-y-3">
+              <Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Belge türü: {DOCUMENT_TYPE_TR[documentMode]}</p><p>Müşteri: {form.watch('customerName') || selectedCustomer?.name || '-'}</p><p>Hazırlayan: {preparers.find((user) => user.id === form.watch('preparedById'))?.fullName || '-'}</p><p>Satıcı firma: {form.watch('sellerCompanyKey') || '-'}</p><p>Para birimi: {getCurrencySymbol(form.watch('currency'))} {getCurrencyLabel(form.watch('currency'))}</p><p>Kur: {formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p><p>Teslim tarihi: {form.watch('delivery') ? formatDate(form.watch('delivery')) : '-'}</p><p>Şablon: {templateLabel(documentMode, form.watch('templateKey'))}</p><p>Satır sayısı: {lines.length}</p><p>Ara toplam: {formatDocumentAmount(subtotal, form.watch('currency'))}</p><p>Toplam iskonto: {formatDocumentAmount(discountTotal, form.watch('currency'))}</p><p>KDV: {formatDocumentAmount(taxTotal, form.watch('currency'))}</p><p>Genel toplam: {formatDocumentAmount(total, form.watch('currency'))}</p></CardContent></Card>
           </TabsContent>
         </Tabs>
-        <DialogFooter><Button onClick={handleSave} disabled={saving}>{saving ? 'Kaydediliyor...' : isEditing ? 'Değişiklikleri kaydet' : 'Kaydet'}</Button></DialogFooter>
+        <DialogFooter><Button type="button" onClick={handleSaveClick} disabled={saving}>{saving ? 'Kaydediliyor...' : isEditing ? 'Değişiklikleri kaydet' : 'Kaydet'}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
     </>
@@ -1306,7 +1384,7 @@ export function QuoteDetailPage() {
             <RbacGuard perm="quotes.edit"><Button size="sm" variant="outline" onClick={async () => { try { await updateQuote(quote.id, { status: 'Sent' }); toast({ title: 'Belge gönderildi olarak işaretlendi' }) } catch (error: any) { toast({ title: error?.response?.data?.detail || 'Durum güncellenemedi', variant: 'destructive' }) } }}><Send className="mr-2 h-4 w-4" />Gönder</Button></RbacGuard>
             <Button onClick={handleDownload}><Download className="mr-2 h-4 w-4" />İndir</Button>
             <RbacGuard perm="quotes.edit"><Button size="sm" variant="outline" onClick={() => approve('Manager')}><Shield className="mr-2 h-4 w-4" />Onay iste</Button></RbacGuard>
-            <RbacGuard perm="quotes.approve"><Button size="sm" onClick={() => { convertQuote(quote.id); toast({ title: 'Satış siparişine dönüştürüldü' }) }}><Check className="mr-2 h-4 w-4" />Satış siparişi</Button></RbacGuard>
+            <RbacGuard perm="quotes.edit"><Button size="sm" onClick={() => { convertQuote(quote.id); toast({ title: 'Satış siparişine dönüştürüldü' }) }}><Check className="mr-2 h-4 w-4" />Satış siparişi</Button></RbacGuard>
             <RbacGuard perm="quotes.edit"><Button size="sm" variant="destructive" disabled={deleting} onClick={handleDelete}><Trash2 className="mr-2 h-4 w-4" />Sil</Button></RbacGuard>
           </div>
         }
@@ -1322,7 +1400,7 @@ export function QuoteDetailPage() {
           <TabsTrigger value="history">Geçmiş</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview"><Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Müşteri: {quote.customerName || company?.name}</p><p>Sahip: {quote.owner}</p><p>Hazırlayan: {quote.preparedByName || '-'}</p><p>Oluşturulma: {formatDateTime(quote.createdAt)}</p><p>Geçerlilik: {formatDate(quote.validUntil)}</p><p>Para birimi: {getCurrencySymbol(quote.currency)} {getCurrencyLabel(quote.currency)}</p><p>Kur: {formatExchangeRate(quote.contractConfig?.exchangeRate || quote.contractConfig?.exchange_rate, quote.currency)}</p><p>Ödeme: {quote.terms.payment || '-'}</p><p>Teslim: {quote.terms.delivery || '-'}</p><p>KDV oranı: %{quote.vatRate ?? 20}</p><p>Toplam: {formatCurrency(quote.total, quote.currency)}</p></CardContent></Card></TabsContent>
+        <TabsContent value="overview"><Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Müşteri: {quote.customerName || company?.name}</p><p>Sahip: {quote.owner}</p><p>Hazırlayan: {quote.preparedByName || '-'}</p><p>Oluşturulma: {formatDateTime(quote.createdAt)}</p><p>Geçerlilik: {formatDate(quote.validUntil)}</p><p>Para birimi: {getCurrencySymbol(quote.currency)} {getCurrencyLabel(quote.currency)}</p><p>Kur: {formatExchangeRate(quote.contractConfig?.exchangeRate || quote.contractConfig?.exchange_rate, quote.currency)}</p><p>Ödeme: {quote.terms.payment || '-'}</p><p>Teslim tarihi: {quote.terms.delivery ? formatDate(quote.terms.delivery) : '-'}</p><p>KDV oranı: %{quote.vatRate ?? 20}</p><p>Toplam: {formatCurrency(quote.total, quote.currency)}</p></CardContent></Card></TabsContent>
         <TabsContent value="lines"><Card><CardContent className="space-y-3 pt-4">{quote.lines.map((line, index) => <div key={`${line.name}-${index}`} className="rounded-md border p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold">{line.name}</p><p className="text-muted-foreground">{sectionLabel(line.sectionKey)} - Kod: {line.details?.code || line.sku || '-'}</p></div><p>{formatCurrency(line.unitPrice, quote.currency)} / {line.unit || 'Adet'}</p></div><div className="mt-2 grid gap-1 md:grid-cols-3"><span>Detay 1: {line.details?.primary || '-'}</span><span>Detay 2: {line.details?.secondary || '-'}</span><span>Miktar: {line.qty}</span><span>İskonto 1: %{line.discount || 0}</span><span>İskonto 2: %{line.discountSecondary || 0}</span><span>KDV: %{line.tax || 0}</span><span>Etkin iskonto: %{getEffectiveDiscountRate(line).toFixed(2)}</span><span>Net tutar: {formatCurrency(getLineDiscountedBase(line), quote.currency)}</span><span>Tutar: {formatCurrency(getLineBase(line), quote.currency)}</span></div>{line.details?.attributes && Object.keys(line.details.attributes).length > 0 && <div className="mt-3 grid gap-2 rounded-md bg-muted/30 p-3 md:grid-cols-2">{Object.entries(line.details.attributes).map(([key, value]) => <span key={key}>{key}: {String(value)}</span>)}</div>}</div>)}</CardContent></Card></TabsContent>
         <TabsContent value="document"><Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Satıcı firma: {quote.sellerCompanyKey || '-'}</p><p>Şablon: {templateLabel(quote.documentType, quote.contractConfig?.templateKey || quote.contractConfig?.template_key)}</p><p>Cari ünvanı: {customerSnapshot.name || quote.customerName || company?.name || '-'}</p><p>Vergi bilgisi: {[customerSnapshot.tax_office || customerSnapshot.taxOffice, customerSnapshot.tax_number || customerSnapshot.taxNumber].filter(Boolean).join(' / ') || '-'}</p><p>Yetkili: {customerSnapshot.authorized_person || customerSnapshot.authorizedPerson || '-'}</p><p>Telefon / mail: {[customerSnapshot.phone, customerSnapshot.email].filter(Boolean).join(' / ') || '-'}</p><p>Adres: {customerSnapshot.address || '-'}</p>{termsLines.length > 0 && <div className="space-y-2 pt-2"><p className="font-medium">Maddeler</p>{termsLines.map((term, index) => <p key={`term-${index}`}>{term}</p>)}</div>}{contractNotesLines.length > 0 && <div className="space-y-2 pt-2"><p className="font-medium">Sözleşme notları</p>{contractNotesLines.map((term, index) => <p key={`contract-note-${index}`}>{term}</p>)}</div>}</CardContent></Card></TabsContent>
         <TabsContent value="pricing"><Card><CardContent className="pt-4 space-y-2 text-sm"><p>Fiyatlama kuralları müşteri, ürün kategorisi ve hacim bazlı uygulanır.</p><div className="flex gap-2"><Badge>VIP müşteri %8</Badge><Badge>Donanım %5</Badge><Badge>50k+ %3</Badge></div></CardContent></Card></TabsContent>
