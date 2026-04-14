@@ -164,6 +164,9 @@ const mapQuote = (q: any, idx = 0) => ({
   terms: { payment: q.payment_terms || '', delivery: q.delivery_terms || '', notes: q.notes || '' },
 })
 
+const KNOWN_ROLES: Role[] = ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse', 'Worker']
+const isKnownRole = (v: unknown): v is Role => typeof v === 'string' && KNOWN_ROLES.includes(v as Role)
+
 const serializeCompanyPayload = (payload: Partial<Company>) => ({
   name: payload.name || '',
   group: payload.industry || '',
@@ -229,7 +232,8 @@ export const useAppStore = create<AppState>()(
   hydrateFromApi: async () => {
     try {
       const meRes = await api.get('/auth/me/')
-      const userRole = meRes.data?.role as Role | undefined
+      const userRoleRaw = meRes.data?.role
+      const userRole = isKnownRole(userRoleRaw) ? userRoleRaw : undefined
       // current user bilgilerini lokal sakla (UI tarafında filtre varsayılanları için)
       if (meRes.data?.id) {
         try {
@@ -238,19 +242,24 @@ export const useAppStore = create<AppState>()(
           /* ignore */
         }
       }
-      try {
-        localStorage.setItem('current-user-role', String(userRole || 'Worker'))
-      } catch {
-        /* ignore */
+      if (userRole) {
+        try {
+          localStorage.setItem('current-user-role', String(userRole))
+        } catch {
+          /* ignore */
+        }
+        // Role bilgisini hemen state'e yaz (UI guard’ları için)
+        set((state) => ({
+          data: { ...state.data, settings: { ...state.data.settings, role: userRole } },
+        }))
+      } else {
+        console.warn('hydrateFromApi: backend unknown/empty role döndürdü, mevcut rol korunuyor:', userRoleRaw)
       }
-      // Role bilgisini hemen state'e yaz (UI guard’ları için)
-      set((state) => ({
-        data: { ...state.data, settings: { ...state.data.settings, role: (userRole as Role) || 'Worker' } },
-      }))
 
       // Worker: gereksiz endpointlere gitme (403). Sıra ASLA değişmemeli — aşağıdaki dizi,
       // products → … → salesOrders → teams → users → tasks eşlemesiyle aynı olmalı.
-      const isWorkerRole = (userRole || 'Worker') === 'Worker'
+      const effectiveRole = userRole ?? get().data.settings.role
+      const isWorkerRole = effectiveRole === 'Worker'
       const emptyList = Promise.resolve({ data: [] })
       const settled = await Promise.allSettled([
         isWorkerRole ? emptyList : api.get('/products/'),

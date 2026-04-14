@@ -5,6 +5,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import api from '@/lib/api'
 import { useAppStore } from '@/state/use-app-store'
+import type { Role } from '@/types'
+
+const KNOWN_ROLES: Role[] = ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse', 'Worker']
+const isKnownRole = (v: unknown): v is Role => typeof v === 'string' && KNOWN_ROLES.includes(v as Role)
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -28,7 +32,7 @@ export function LoginPage() {
       setHydrating(true)
       try {
         const me = await api.get('/auth/me/')
-        if (me?.data?.role) {
+        if (isKnownRole(me?.data?.role)) {
           setRole(me.data.role)
           localStorage.setItem('current-user-role', me.data.role)
         }
