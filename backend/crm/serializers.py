@@ -336,6 +336,10 @@ class QuoteSerializer(serializers.ModelSerializer):
         if normalized_currency not in allowed_partner_currencies(country):
             raise serializers.ValidationError({'currency': 'Yurt disi musteriler icin TL kullanilamaz.'})
 
+        delivery_terms = attrs.get('delivery_terms', getattr(self.instance, 'delivery_terms', ''))
+        if not str(delivery_terms or '').strip():
+            raise serializers.ValidationError({'delivery_terms': 'Teslim tarihi zorunludur.'})
+
         attrs['currency'] = normalized_currency
         return attrs
 

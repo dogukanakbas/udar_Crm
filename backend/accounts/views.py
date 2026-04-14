@@ -31,6 +31,7 @@ class MeView(APIView):
   permission_classes = [IsAuthenticated]
 
   def get(self, request):
+    ensure_permissions_seeded()
     user = request.user
     # Eğer organization atanmadıysa, mevcut org'a otomatik bağla (demo/dev kolaylığı)
     if not getattr(user, "organization", None):
@@ -57,6 +58,7 @@ class UsersListView(APIView):
   permission_classes = [IsAuthenticated]
 
   def get(self, request):
+    ensure_permissions_seeded()
     User = get_user_model()
     qs = User.objects.all()
     org = getattr(request.user, "organization", None)

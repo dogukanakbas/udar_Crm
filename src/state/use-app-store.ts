@@ -424,6 +424,8 @@ export const useAppStore = create<AppState>()(
         permissions: u.permissions || [],
         canPrepareQuotes: Boolean(u.can_prepare_quotes),
       }))
+      const currentUserPermissions =
+        users.find((user) => String(user.id) === String(meRes.data?.id))?.permissions || []
       const tasks: Task[] = (tasksRes.data || []).map((t: any, idx: number) => ({
         id: String(t.id ?? idx),
         title: t.title,
@@ -542,6 +544,7 @@ export const useAppStore = create<AppState>()(
         data: {
           ...state.data,
           settings: { ...state.data.settings, role: userRole ?? state.data.settings.role },
+          rolePermissions: currentUserPermissions,
           products,
           companies,
           contacts,
