@@ -1152,12 +1152,21 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             if lines_count <= 1 or line_idx is None:
                 st['qty_done'] = qty
             else:
-                try:
-                    ai = int(getattr(task, 'active_product_index', 0) or 0)
-                except (TypeError, ValueError):
-                    ai = 0
-                if line_idx == ai:
-                    st['qty_done'] = qty
+                if getattr(task, 'workflow_parallel', False):
+                    total_done = 0
+                    for v in qmap.values():
+                        try:
+                            total_done += max(0, int(v or 0))
+                        except (TypeError, ValueError):
+                            continue
+                    st['qty_done'] = total_done
+                else:
+                    try:
+                        ai = int(getattr(task, 'active_product_index', 0) or 0)
+                    except (TypeError, ValueError):
+                        ai = 0
+                    if line_idx == ai:
+                        st['qty_done'] = qty
             state[str(tid)] = st
             task.workflow_stage_state = state
             state_changed = True
@@ -1169,6 +1178,45 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             save_fields.append('product_lines')
         if save_fields:
             task.save(update_fields=list(dict.fromkeys(save_fields)))
+
+        # Paralel akışta: ekip üretimi hedefi yakaladığında adımı otomatik tamamla.
+        # Böylece ekip lideri onayı/ek buton tıklaması beklenmeden sonraki akış ilerler.
+        if wf and getattr(task, 'workflow_parallel', False) and str(tid) in state:
+            st_auto = dict((task.workflow_stage_state or {}).get(str(tid), {}) or {})
+            if not st_auto.get('stage_done') and workflow_stage_production_met(task, tid):
+                st_auto['pending_approval'] = False
+                st_auto['stage_done'] = True
+                st_auto['assignee_id'] = None
+                state[str(tid)] = st_auto
+                task.workflow_stage_state = state
+                all_done = all((state.get(str(t)) or {}).get('stage_done') for t in wf)
+                upd = ['workflow_stage_state', 'updated_at']
+                if all_done:
+                    task.status = 'done'
+                    task.assignee = None
+                    upd.extend(['status', 'assignee'])
+                task.save(update_fields=list(dict.fromkeys(upd)))
+                TaskComment.objects.create(
+                    task=task,
+                    author=user,
+                    type='activity',
+                    text=(
+                        f"{user.username} üretim girişi ile bölüm hedefini tamamladı — adım otomatik kapatıldı"
+                        + (" — görev tamamlandı" if all_done else "")
+                    ),
+                )
+                if all_done:
+                    push_event(
+                        {
+                            'type': 'task.status',
+                            'task_id': task.id,
+                            'organization': task.organization_id,
+                            'title': task.title,
+                            'status': 'done',
+                            'assignee_id': None,
+                            'by': getattr(user, 'email', None),
+                        }
+                    )
 
         TaskProductionEntry.objects.create(
             task=task,
