@@ -1829,7 +1829,7 @@ export function TaskDetailPage() {
                       </Button>
                     )}
                     {task.status === 'in-progress' &&
-                      ((task.workflowParallel && isAssignee) ||
+                      ((task.workflowParallel && inCurrentWorkflowTeam) ||
                         canSubmitSequentialApproval ||
                         (!hasWfTeams && isAssignee)) && (
                         <div className="flex flex-col gap-2 w-full sm:w-auto">
@@ -1866,13 +1866,13 @@ export function TaskDetailPage() {
                                 await api.post(`/tasks/${task.id}/complete-stage/`, body)
                                 setProductionShortfallNote('')
                                 await hydrateFromApi()
-                                const toApproval = task.workflowParallel || canSubmitSequentialApproval
+                                const toApproval = canSubmitSequentialApproval
                                 toast({
                                   title: toApproval ? 'Onaya gönderildi' : 'Aşama tamamlandı',
                                   description: toApproval
                                     ? sequentialFlow
                                       ? 'Usta başı «Bölümü onayla» ile sıradaki ekibe geçilir.'
-                                      : 'Usta başı onayından sonra bölüm kapanır.'
+                                      : undefined
                                     : undefined,
                                 })
                               } catch (e: any) {
@@ -1884,7 +1884,7 @@ export function TaskDetailPage() {
                               }
                             }}
                           >
-                            {task.workflowParallel || canSubmitSequentialApproval
+                            {canSubmitSequentialApproval
                               ? 'Bölümü bitir (onaya gönder)'
                               : 'Bitir'}
                           </Button>
@@ -1912,7 +1912,7 @@ export function TaskDetailPage() {
                 ) : null}
               </div>
             </div>
-            {(task.workflowParallel || sequentialFlow) &&
+            {sequentialFlow &&
               pendingSectionTeamIds.filter(
                 (tid) =>
                   isLeaderOfTeamId(tid) || data.settings.role === 'Admin' || data.settings.role === 'Manager'
@@ -2331,6 +2331,42 @@ export function TaskDetailPage() {
             {(task.workflowTeamIds || []).length > 0 && (
               <div className="rounded border bg-background/70 p-3 space-y-2">
                 <p className="text-xs font-semibold uppercase text-muted-foreground">İş akışı — bölüm hedefleri</p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {(task.workflowTeamIds || []).map((tid, idx) => {
+                    const st = wfState[tid] || {}
+                    const isCurrent = String(task.currentTeam || '') === String(tid)
+                    const done = !!st?.stage_done
+                    return (
+                      <div
+                        key={`wf-step-${tid}`}
+                        className={cn(
+                          'rounded-lg border px-3 py-2 text-sm font-medium shadow-sm',
+                          done &&
+                            'border-emerald-300 bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-900 dark:border-emerald-800 dark:from-emerald-950/40 dark:to-emerald-900/20 dark:text-emerald-200',
+                          isCurrent &&
+                            !done &&
+                            'border-sky-300 bg-gradient-to-br from-sky-100 to-blue-100 text-sky-900 ring-2 ring-sky-400/50 dark:border-sky-700 dark:from-sky-900/50 dark:to-blue-900/40 dark:text-sky-100',
+                          !done &&
+                            !isCurrent &&
+                            'border-amber-300 bg-gradient-to-br from-amber-50 to-yellow-100 text-amber-900 dark:border-amber-700 dark:from-amber-950/30 dark:to-yellow-900/20 dark:text-amber-100'
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate">
+                            <span className="mr-1 font-bold">{idx + 1}.</span>
+                            {data.teams.find((t) => t.id === tid)?.name || tid}
+                          </span>
+                          <span className="shrink-0 text-base">{done ? '✓' : isCurrent ? '●' : '○'}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  <span className="font-medium text-primary">● Aktif</span> •{' '}
+                  <span className="font-medium text-emerald-700 dark:text-emerald-300">✓ Tamamlandı</span> •{' '}
+                  <span>○ Bekliyor</span>
+                </p>
                 <ul className="space-y-1.5 text-sm">
                   {(task.workflowTeamIds || []).map((tid, idx) => {
                     const tname = data.teams.find((t) => t.id === tid)?.name || tid
@@ -3139,18 +3175,15 @@ function TaskModal({
             onSubmit={form.handleSubmit(async (values) => {
             try {
               const payload = { ...values }
-              if (payload.start) {
-                const sd = new Date(payload.start)
-                if (!Number.isNaN(sd.getTime())) payload.start = sd.toISOString()
+              const normalizeDateTime = (v: unknown): string | null => {
+                const s = String(v ?? '').trim()
+                if (!s) return null
+                const d = new Date(s)
+                return Number.isNaN(d.getTime()) ? null : d.toISOString()
               }
-              if (payload.end) {
-                const ed = new Date(payload.end)
-                if (!Number.isNaN(ed.getTime())) payload.end = ed.toISOString()
-              }
-              if (payload.due) {
-                const dd = new Date(payload.due)
-                if (!Number.isNaN(dd.getTime())) payload.due = dd.toISOString()
-              }
+              ;(payload as any).start = normalizeDateTime((payload as any).start)
+              ;(payload as any).end = normalizeDateTime((payload as any).end)
+              ;(payload as any).due = normalizeDateTime((payload as any).due)
               const normalizedLines = (values.productLines || []).map((line) => {
                 let row = { ...line }
                 if (row.mode === 'fixed') {

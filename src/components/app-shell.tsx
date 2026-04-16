@@ -87,7 +87,7 @@ const nav = [
     roles: ['Admin', 'Support', 'Manager'],
     children: [{ label: 'Destek talepleri', to: '/support/tickets' }],
   },
-  { label: 'Görevler', to: '/tasks', icon: ClipboardCheckIcon, roles: ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse', 'Worker'] },
+  { label: 'Görevler', to: '/tasks', icon: ClipboardCheckIcon, roles: ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse'] },
   { label: 'Çalışan Takibi', to: '/worker-tracking', icon: Activity, roles: ['Admin', 'Manager'] },
   { label: 'Takvim', to: '/calendar', icon: CalendarIconMini, roles: ['Admin', 'Manager', 'Sales', 'Support'] },
   { label: 'Raporlar', to: '/reports', icon: BarChart3, roles: ['Admin', 'Manager', 'Finance'] },
@@ -343,6 +343,11 @@ function NotificationMenu() {
 function UserMenu() {
   const { data, resetDemo, setRole } = useAppStore()
   const { setTheme, theme } = useTheme()
+  const currentUserId = typeof window !== 'undefined' ? localStorage.getItem('current-user-id') : null
+  const currentUser = data.users.find((u) => currentUserId && String(u.id) === String(currentUserId))
+  const currentTeamName =
+    data.teams.find((t) => t.memberIds?.includes(String(currentUserId)) || String(t.leaderId || '') === String(currentUserId))
+      ?.name || '—'
 
   return (
     <DropdownMenu>
@@ -357,6 +362,14 @@ function UserMenu() {
           <p className="text-xs text-muted-foreground">
             Rol: {ROLE_LABEL_TR[data.settings.role] ?? data.settings.role}
           </p>
+          {data.settings.role === 'Worker' && (
+            <>
+              <p className="text-xs text-muted-foreground">
+                İsim Soyisim: {currentUser ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.username : '—'}
+              </p>
+              <p className="text-xs text-muted-foreground">Bölüm: {currentTeamName}</p>
+            </>
+          )}
         </div>
         <Separator />
         <div className="px-3 space-y-2">

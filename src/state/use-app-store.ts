@@ -433,6 +433,23 @@ export const useAppStore = create<AppState>()(
         permissions: u.permissions || [],
         canPrepareQuotes: Boolean(u.can_prepare_quotes),
       }))
+      if (meRes?.data?.id && !users.some((u) => String(u.id) === String(meRes.data.id))) {
+        users.unshift({
+          id: String(meRes.data.id),
+          username: meRes.data.username || meRes.data.email || `user-${meRes.data.id}`,
+          email: meRes.data.email || '',
+          role: meRes.data.role || 'Worker',
+          firstName: meRes.data.first_name || '',
+          lastName: meRes.data.last_name || '',
+          fullName:
+            [meRes.data.first_name, meRes.data.last_name].filter(Boolean).join(' ') ||
+            meRes.data.username ||
+            meRes.data.email ||
+            `user-${meRes.data.id}`,
+          permissions: [],
+          canPrepareQuotes: false,
+        } as any)
+      }
       const currentUserPermissions =
         users.find((user) => String(user.id) === String(meRes.data?.id))?.permissions || []
       const tasks: Task[] = (tasksRes.data || []).map((t: any, idx: number) => ({
@@ -934,6 +951,18 @@ export const useAppStore = create<AppState>()(
           payload.team = payload.teamId ? Number(payload.teamId) : null
           delete payload.teamId
         }
+        if ('start' in payload) {
+          const s = String(payload.start ?? '').trim()
+          payload.start = s ? s : null
+        }
+        if ('end' in payload) {
+          const s = String(payload.end ?? '').trim()
+          payload.end = s ? s : null
+        }
+        if ('due' in payload) {
+          const s = String(payload.due ?? '').trim()
+          payload.due = s ? s : null
+        }
         if ('plannedHours' in payload) payload.planned_hours = (payload as any).plannedHours
         if ('plannedCost' in payload) payload.planned_cost = (payload as any).plannedCost
         if ('mode' in payload) payload.mode = (payload as any).mode
@@ -985,12 +1014,24 @@ export const useAppStore = create<AppState>()(
       } catch (err) {
         console.error('API updateTask failed', err)
         set((state) => ({ data: { ...state.data, tasks: prev } }))
-        
+
+        const e: any = err
+        const d = e?.response?.data
+        const detail =
+          (typeof d === 'object' && d && !Array.isArray(d)
+            ? Object.entries(d)
+                .map(([k, v]) => `${k}: ${Array.isArray(v) ? (v as any[]).join(', ') : String(v)}`)
+                .join(' • ')
+            : null) ||
+          d?.detail ||
+          e?.message ||
+          'Görev güncellenemedi, lütfen tekrar deneyin'
+
         // CRITICAL: Kullanıcıyı bilgilendir
         import('@/components/ui/use-toast').then(({ toast }) => {
           toast({
             title: 'Değişiklik Kaydedilemedi',
-            description: 'Görev güncellenemedi, lütfen tekrar deneyin',
+            description: String(detail),
             variant: 'destructive',
           })
         })

@@ -358,7 +358,8 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 if tid not in user_set:
                     continue
                 sec_team = Team.objects.filter(id=tid, organization_id=task.organization_id).first()
-                if not user_may_claim_task_as_leader(request.user, sec_team):
+                # Paralel akışta sadece lider değil, bölüm üyesi olan herkes üstlenebilir.
+                if not sec_team or not sec_team.members.filter(id=request.user.id).exists():
                     continue
                 st = dict(state.get(str(tid), {}))
                 if st.get('stage_done'):
@@ -658,18 +659,20 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 st = state.get(str(tid), {})
                 if st.get('stage_done'):
                     continue
-                if st.get('assignee_id') == request.user.id:
+                aid = st.get('assignee_id')
+                if aid == request.user.id or aid in (None, ''):
                     active_tid = tid
                     break
             if active_tid is None:
-                raise PermissionDenied("Tamamlanacak size atanmış bölümünüz yok")
+                raise PermissionDenied("Tamamlanacak uygun bir bölümünüz yok")
             st = dict(state[str(active_tid)])
-            if st.get('pending_approval'):
-                raise PermissionDenied("Bu bölüm zaten onay bekliyor")
             gate_err_p, shortfall_p = resolve_production_gate(task, active_tid, request.data)
             if gate_err_p:
                 return gate_err_p
-            st['pending_approval'] = True
+            # Paralel akışta lider onayı beklenmez: bölüm otomatik kapanır.
+            st['pending_approval'] = False
+            st['stage_done'] = True
+            st['assignee_id'] = None
             if shortfall_p:
                 done_p = int(st.get('qty_done') or 0)
                 st['production_shortfall_reason'] = format_shortfall_reason_for_storage(done_p, shortfall_p)
@@ -677,14 +680,33 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 st.pop('production_shortfall_reason', None)
             state[str(active_tid)] = st
             task.workflow_stage_state = state
-            task.save(update_fields=['workflow_stage_state', 'updated_at'])
+            all_done = all((state.get(str(tid)) or {}).get('stage_done') for tid in wf)
+            update_fields = ['workflow_stage_state', 'updated_at']
+            if all_done:
+                task.status = 'done'
+                task.assignee = None
+                update_fields.extend(['status', 'assignee'])
+            task.save(update_fields=list(dict.fromkeys(update_fields)))
             note_p = " (hedef altı tamamlama — gerekçe kayıtlı)" if shortfall_p else ""
             TaskComment.objects.create(
                 task=task,
                 author=request.user,
                 type='activity',
-                text=f"{request.user.username} bölüm çalışmasını tamamladı — usta başı onayı bekleniyor{note_p}",
+                text=f"{request.user.username} bölüm çalışmasını tamamladı{note_p}"
+                + (" — görev tamamlandı" if all_done else ""),
             )
+            if all_done:
+                push_event(
+                    {
+                        "type": "task.status",
+                        "task_id": task.id,
+                        "organization": task.organization_id,
+                        "title": task.title,
+                        "status": "done",
+                        "assignee_id": None,
+                        "by": getattr(request.user, "email", None),
+                    }
+                )
             return Response(TaskSerializer(task, context={'request': request}).data)
 
         org = request.user.organization
