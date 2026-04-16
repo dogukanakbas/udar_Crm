@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from copy import deepcopy
+from copy import copy, deepcopy
 from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
+from django.conf import settings
 from openpyxl import load_workbook
 from openpyxl.styles import Border, PatternFill, Side
 
@@ -283,6 +284,8 @@ TEMPLATE_REGISTRY = [
     },
 ]
 
+ALLOWED_TEMPLATE_EXTENSIONS = {'.xlsx', '.xltx', '.xlsm'}
+
 
 def get_seller_profiles(organization):
     settings = getattr(organization, 'contract_settings', {}) or {}
@@ -290,6 +293,121 @@ def get_seller_profiles(organization):
     if isinstance(profiles, list) and profiles:
         return profiles
     return deepcopy(DEFAULT_SELLER_PROFILES)
+
+
+def _template_override_settings(organization):
+    settings_data = getattr(organization, 'contract_settings', {}) or {}
+    overrides = settings_data.get('document_template_overrides') or {}
+    return overrides if isinstance(overrides, dict) else {}
+
+
+def _template_override_entry(organization, template_key: str):
+    entry = _template_override_settings(organization).get(template_key) or {}
+    return entry if isinstance(entry, dict) else {}
+
+
+def _custom_template_path(organization, template_key: str):
+    entry = _template_override_entry(organization, template_key)
+    relative_path = str(entry.get('path') or '').strip()
+    if not relative_path:
+        return None
+    candidate = Path(settings.MEDIA_ROOT) / relative_path
+    return candidate if candidate.exists() else None
+
+
+def _template_source_path(organization, template):
+    return _custom_template_path(organization, template['template_key']) or template['source_path']
+
+
+def _template_label(template):
+    document_label = 'Teklif' if template['document_type'] == 'Quote' else 'Sözleşme'
+    family_labels = {
+        'quote_steel': 'Çelik grubu',
+        'quote_interior': 'İç oda grubu',
+        'quote_furniture': 'Mobilya grubu',
+        'quote_service': 'Montaj grubu',
+        'contract_steel': 'Çelik grubu',
+        'contract_interior': 'İç oda grubu',
+        'contract_furniture': 'Mobilya grubu',
+        'contract_service': 'Montaj grubu',
+        'contract_ck_ik_mob_montajli': 'CK + İK + MOB + Montaj',
+        'contract_ck_ik_montajli': 'CK + İK + Montaj',
+        'contract_ck_ik_montajsiz': 'CK + İK',
+    }
+    return f"{document_label} / {family_labels.get(template['template_key'], template['template_key'])}"
+
+
+def list_template_library(organization):
+    templates = []
+    for template in TEMPLATE_REGISTRY:
+        override_entry = _template_override_entry(organization, template['template_key'])
+        current_path = _template_source_path(organization, template)
+        has_custom = bool(_custom_template_path(organization, template['template_key']))
+        templates.append(
+            {
+                'template_key': template['template_key'],
+                'document_type': template['document_type'],
+                'label': _template_label(template),
+                'default_filename': template['source_path'].name,
+                'current_filename': current_path.name,
+                'has_custom': has_custom,
+                'source_type': 'custom' if has_custom else 'default',
+                'uploaded_at': override_entry.get('uploaded_at'),
+                'uploaded_by': override_entry.get('uploaded_by'),
+            }
+        )
+    return templates
+
+
+def get_template_download(organization, template_key: str, variant: str = 'current'):
+    template = next((item for item in TEMPLATE_REGISTRY if item['template_key'] == template_key), None)
+    if not template:
+        raise ValueError('Şablon bulunamadı')
+    source_path = template['source_path'] if variant == 'default' else _template_source_path(organization, template)
+    if not source_path.exists():
+        raise ValueError('Şablon dosyası bulunamadı')
+    suffix = source_path.suffix or '.xlsx'
+    return {
+        'path': source_path,
+        'filename': f"{template_key}-sablon{suffix}",
+    }
+
+
+def save_template_override(organization, template_key: str, uploaded_file, user=None):
+    template = next((item for item in TEMPLATE_REGISTRY if item['template_key'] == template_key), None)
+    if not template:
+        raise ValueError('Şablon bulunamadı')
+
+    extension = Path(getattr(uploaded_file, 'name', '') or '').suffix.lower()
+    if extension not in ALLOWED_TEMPLATE_EXTENSIONS:
+        raise ValueError('Yalnızca .xlsx, .xltx veya .xlsm dosyaları yüklenebilir')
+
+    content = uploaded_file.read()
+    if not content:
+        raise ValueError('Yüklenen dosya boş görünüyor')
+
+    try:
+        load_workbook(BytesIO(content))
+    except Exception as exc:
+        raise ValueError('Excel şablonu okunamadı') from exc
+
+    target_dir = Path(settings.MEDIA_ROOT) / 'document-templates' / f'org_{organization.id}'
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / f'{template_key}{extension}'
+    target_path.write_bytes(content)
+
+    settings_data = dict(getattr(organization, 'contract_settings', {}) or {})
+    overrides = dict(settings_data.get('document_template_overrides') or {})
+    overrides[template_key] = {
+        'path': target_path.relative_to(settings.MEDIA_ROOT).as_posix(),
+        'original_name': getattr(uploaded_file, 'name', target_path.name),
+        'uploaded_at': datetime.now().isoformat(),
+        'uploaded_by': getattr(user, 'id', None),
+    }
+    settings_data['document_template_overrides'] = overrides
+    organization.contract_settings = settings_data
+    organization.save(update_fields=['contract_settings'])
+    return next((item for item in list_template_library(organization) if item['template_key'] == template_key), None)
 
 
 def list_document_exports(quote):
@@ -305,7 +423,7 @@ def list_document_exports(quote):
 def build_document_export(quote, template_key: str | None = None):
     outputs = []
     for template in _select_templates(quote, template_key=template_key):
-        workbook = load_workbook(template['source_path'])
+        workbook = load_workbook(_template_source_path(quote.organization, template))
         workbook.template = False
         worksheet = workbook['1'] if '1' in workbook.sheetnames else workbook[workbook.sheetnames[0]]
         _fill_shared_header(worksheet, quote)
@@ -386,7 +504,7 @@ def _quote_families(quote):
 def _fill_shared_header(ws, quote):
     config = quote.contract_config or {}
     customer = _customer_snapshot(config)
-    prepared_by = _resolve_prepared_by_name(quote)
+    prepared_by = '' if quote.document_type == 'Quote' else _resolve_prepared_by_name(quote)
     currency_code = _quote_currency(quote)
     currency_note = _currency_note(quote)
     seller_key = (quote.seller_company_key or 'AYKA').strip().upper()
@@ -402,20 +520,10 @@ def _fill_shared_header(ws, quote):
     _set_cell_value(ws, 'D26', customer.get('authorized_person') or '')
     _set_cell_value(ws, 'D27', _join_contact(customer.get('phone'), customer.get('email')))
     _set_cell_value(ws, 'D30', quote.number)
-    for column in ['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']:
-        _set_cell_value(ws, f'{column}31', '')
+    _ensure_header_value_row_layout(ws, 31)
     _set_cell_value(ws, 'D31', prepared_by)
-    for merged_range in list(ws.merged_cells.ranges):
-        if (
-            merged_range.min_row == 32
-            and merged_range.max_row == 32
-            and merged_range.min_col == 7
-            and merged_range.max_col == 11
-        ):
-            ws.unmerge_cells(start_row=32, start_column=7, end_row=32, end_column=11)
-    for column in ['E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']:
-        _clear_visual_cell(ws, f'{column}32')
-    _set_cell_value(ws, 'D32', config.get('validity_label') or format_validity_text(quote.valid_until))
+    _ensure_header_value_row_layout(ws, 32, source_row=31)
+    _set_cell_value(ws, 'D32', format_validity_text(quote.valid_until))
     _set_cell_value(ws, 'D33', ' • '.join(part for part in [config.get('price_list_label') or '', currency_note] if part))
     _set_cell_value(ws, 'C16', _choice_text(_normalize_display_name(ortka.get('display_name', '')), seller_key == 'ORTKA'))
     _set_cell_value(ws, 'J16', _choice_text(_normalize_display_name(ayka.get('display_name', '')), seller_key == 'AYKA'))
@@ -432,15 +540,23 @@ def _fill_line_blocks(ws, quote, template):
     currency_code = _quote_currency(quote)
     currency_symbol = _currency_symbol(currency_code)
     for block in template['line_blocks']:
-        lines = [line for line in ordered_lines if (line.section_key or _category_section_key(line)).strip() in block['section_keys']]
+        lines = [
+            line
+            for line in ordered_lines
+            if (line.section_key or _category_section_key(line)).strip() in block['section_keys'] and _line_is_meaningful(line)
+        ]
         visible = bool(lines)
         for row in range(block['start_row'] - 2, block['grand_row'] + 1):
             ws.row_dimensions[row].hidden = not visible
 
         for offset in range(block['capacity']):
             row_number = block['start_row'] + offset
-            _clear_line_row(ws, row_number)
-            if offset >= len(lines):
+            has_line = offset < len(lines)
+            ws.row_dimensions[row_number].hidden = not has_line
+            if has_line:
+                _clear_line_row(ws, row_number)
+            else:
+                _clear_line_row(ws, row_number, clear_visual=True)
                 continue
             line = lines[offset]
             details = dict(line.details or {})
@@ -453,10 +569,10 @@ def _fill_line_blocks(ws, quote, template):
             _set_cell_value(ws, f'D{row_number}', line.name)
             _set_cell_value(ws, f'E{row_number}', primary)
             _set_cell_value(ws, f'F{row_number}', secondary)
-            _set_cell_value(ws, f'G{row_number}', float(line.qty))
-            _set_currency_value(ws, f'H{row_number}', float(line.unit_price), currency_code)
-            _set_cell_value(ws, f'I{row_number}', float(Decimal(line.discount or 0)))
-            _set_cell_value(ws, f'J{row_number}', float(Decimal(getattr(line, 'discount_secondary', 0) or 0)))
+            _set_cell_value(ws, f'G{row_number}', float(line.qty) if Decimal(line.qty or 0) > 0 else '')
+            _set_currency_value(ws, f'H{row_number}', float(line.unit_price) if Decimal(line.unit_price or 0) > 0 else '', currency_code)
+            _set_cell_value(ws, f'I{row_number}', float(Decimal(line.discount or 0)) if Decimal(line.discount or 0) > 0 else '')
+            _set_cell_value(ws, f'J{row_number}', float(Decimal(getattr(line, 'discount_secondary', 0) or 0)) if Decimal(getattr(line, 'discount_secondary', 0) or 0) > 0 else '')
             _set_cell_value(ws, f'K{row_number}', line.unit or 'Adet')
             _set_currency_value(ws, f'L{row_number}', float(net_unit), currency_code)
             _set_currency_value(ws, f'M{row_number}', float(line_total), currency_code)
@@ -468,6 +584,7 @@ def _fill_line_blocks(ws, quote, template):
             for column in ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K']:
                 _clear_visual_cell(ws, f'{column}{summary_row}')
         _set_cell_value(ws, f'L{block["subtotal_row"]}', f'Tutar Toplam ({currency_symbol})' if visible else '')
+        _set_cell_value(ws, f'L{block["tax_row"]}', _summary_tax_label(lines) if visible else '')
         _set_cell_value(ws, f'L{block["grand_row"]}', f'Yekün ({currency_symbol})' if visible else '')
         _set_currency_value(ws, f'M{block["subtotal_row"]}', float(subtotal_value) if visible else '', currency_code)
         _set_currency_value(ws, f'M{block["tax_row"]}', float(tax_value) if visible else '', currency_code)
@@ -477,12 +594,13 @@ def _fill_line_blocks(ws, quote, template):
 def _fill_commercial_rows(ws, quote, template):
     config = quote.contract_config or {}
     currency_code = _quote_currency(quote)
+    prepared_by = '' if quote.document_type == 'Quote' else _resolve_prepared_by_name(quote)
     commercial_values = [
         quote.number,
-        _resolve_prepared_by_name(quote),
+        prepared_by,
         quote.payment_terms or '',
         quote.delivery_terms or '',
-        config.get('validity_label') or format_validity_text(quote.valid_until),
+        format_validity_text(quote.valid_until),
         (config.get('delivery_type') or '').strip(),
         (config.get('payment_option') or '').strip(),
     ]
@@ -527,21 +645,23 @@ def _fill_bank_accounts(ws, quote, template):
     ortka = profiles.get('ORTKA', DEFAULT_SELLER_PROFILES[0])
     ayka = profiles.get('AYKA', DEFAULT_SELLER_PROFILES[1])
     header_row = template['bank_header_row']
+    _ensure_bank_header_layout(ws, header_row)
     _set_cell_value(ws, f'C{header_row}', f"{_normalize_display_name(ortka.get('display_name', ''))} {currency_symbol}")
     _set_cell_value(ws, f'K{header_row}', f"{_normalize_display_name(ayka.get('display_name', ''))} {currency_symbol}")
     ortka_accounts = ortka.get('bank_accounts') or []
     ayka_accounts = ayka.get('bank_accounts') or []
     for index, row in enumerate(template['bank_rows']):
+        _ensure_bank_row_layout(ws, row)
         left = ortka_accounts[index] if index < len(ortka_accounts) else {}
         right = ayka_accounts[index] if index < len(ayka_accounts) else {}
         left_bank = _normalize_bank_name(left.get('bank', '')) if left.get('bank') and left.get('iban') else ''
         left_iban = left.get('iban', '') if left.get('bank') and left.get('iban') else ''
-        right_value = ''
-        if right.get('bank') and right.get('iban'):
-            right_value = ' '.join(part for part in [_normalize_bank_name(right.get('bank', '')), right.get('iban', '')] if part)
+        right_bank = _normalize_bank_name(right.get('bank', '')) if right.get('bank') and right.get('iban') else ''
+        right_iban = right.get('iban', '') if right.get('bank') and right.get('iban') else ''
         _set_cell_value(ws, f'C{row}', left_bank)
         _set_cell_value(ws, f'D{row}', left_iban)
-        _set_cell_value(ws, f'K{row}', right_value)
+        _set_cell_value(ws, f'K{row}', right_bank)
+        _set_cell_value(ws, f'M{row}', right_iban)
 
 
 def _fill_signature_block(ws, quote, template):
@@ -579,6 +699,80 @@ def _normalize_bank_name(value):
     }
     text = str(value or '').strip()
     return normalized.get(text, text)
+
+
+def _summary_tax_label(lines):
+    tax_rates = []
+    for line in lines:
+        try:
+            rate = Decimal(line.tax or 0)
+        except Exception:
+            rate = Decimal('0')
+        if rate > 0:
+            tax_rates.append(rate)
+
+    unique_rates = sorted({rate.normalize() for rate in tax_rates})
+    if len(unique_rates) == 1:
+        rate_label = format(unique_rates[0], 'f')
+        if '.' in rate_label:
+            rate_label = rate_label.rstrip('0').rstrip('.')
+        return f'K.D.V. %{rate_label}'
+    return 'K.D.V.'
+
+
+def _ensure_header_value_row_layout(ws, row_number, source_row=31):
+    for merged_range in list(ws.merged_cells.ranges):
+        if (
+            merged_range.min_row == row_number
+            and merged_range.max_row == row_number
+            and merged_range.min_col >= 4
+            and merged_range.max_col <= 13
+        ):
+            ws.unmerge_cells(str(merged_range))
+    for column in ['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']:
+        _copy_bank_cell_layout(ws, f'{column}{source_row}', f'{column}{row_number}')
+        _set_cell_value(ws, f'{column}{row_number}', '')
+
+
+def _ensure_bank_row_layout(ws, row_number):
+    for merged_range in list(ws.merged_cells.ranges):
+        if merged_range.min_row == row_number and merged_range.max_row == row_number and merged_range.min_col >= 11 and merged_range.max_col <= 14:
+            ws.unmerge_cells(str(merged_range))
+    _copy_bank_cell_layout(ws, f'C{row_number}', f'K{row_number}')
+    _copy_bank_cell_layout(ws, f'C{row_number}', f'L{row_number}')
+    _copy_bank_cell_layout(ws, f'D{row_number}', f'M{row_number}')
+    for coordinate in [f'K{row_number}', f'L{row_number}', f'M{row_number}', f'N{row_number}']:
+        _set_cell_value(ws, coordinate, '')
+    _clear_visual_cell(ws, f'N{row_number}')
+    for target_merge in [f'K{row_number}:L{row_number}']:
+        if all(str(existing) != target_merge for existing in ws.merged_cells.ranges):
+            ws.merge_cells(target_merge)
+
+
+def _ensure_bank_header_layout(ws, row_number):
+    for merged_range in list(ws.merged_cells.ranges):
+        if merged_range.min_row == row_number and merged_range.max_row == row_number and merged_range.min_col >= 11 and merged_range.max_col <= 14:
+            ws.unmerge_cells(str(merged_range))
+    _copy_bank_cell_layout(ws, f'C{row_number}', f'K{row_number}')
+    _copy_bank_cell_layout(ws, f'D{row_number}', f'L{row_number}')
+    _copy_bank_cell_layout(ws, f'D{row_number}', f'M{row_number}')
+    for coordinate in [f'K{row_number}', f'L{row_number}', f'M{row_number}', f'N{row_number}']:
+        _set_cell_value(ws, coordinate, '')
+    _clear_visual_cell(ws, f'N{row_number}')
+    target_merge = f'K{row_number}:M{row_number}'
+    if all(str(existing) != target_merge for existing in ws.merged_cells.ranges):
+        ws.merge_cells(target_merge)
+
+
+def _copy_bank_cell_layout(ws, source_coordinate, target_coordinate):
+    source = _resolve_cell(ws, source_coordinate)
+    target = _resolve_cell(ws, target_coordinate)
+    target.font = copy(source.font)
+    target.fill = copy(source.fill)
+    target.border = copy(source.border)
+    target.alignment = copy(source.alignment)
+    target.number_format = source.number_format
+    target.protection = copy(source.protection)
 
 
 def _user_display_name(user):
@@ -667,11 +861,15 @@ def _clear_visual_cell(ws, coordinate):
     cell.value = ''
     cell.border = EMPTY_BORDER
     cell.fill = EMPTY_FILL
+    cell.number_format = 'General'
 
 
-def _clear_line_row(ws, row_number):
+def _clear_line_row(ws, row_number, clear_visual=False):
     for column in ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']:
-        _set_cell_value(ws, f'{column}{row_number}', '')
+        if clear_visual:
+            _clear_visual_cell(ws, f'{column}{row_number}')
+        else:
+            _set_cell_value(ws, f'{column}{row_number}', '')
 
 
 def _set_cell_value(ws, coordinate, value):
@@ -681,6 +879,13 @@ def _set_cell_value(ws, coordinate, value):
 
 def _line_subtotal(line):
     return Decimal(line.qty) * _net_unit_price(line)
+
+
+def _line_is_meaningful(line):
+    try:
+        return Decimal(line.qty or 0) > 0
+    except Exception:
+        return False
 
 
 def _line_tax(line):
