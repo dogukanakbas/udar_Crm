@@ -30,10 +30,10 @@ const rootRoute = new RootRoute({
       throw redirect({ to: '/login' })
     }
     
-    // CRITICAL: Her route değişiminde verileri tazele (stale data önleme)
+    // Route geçişlerinde istek patlamasını önlemek için non-force hydrate kullan.
     try {
       const store = useAppStore.getState()
-      await store.hydrateFromApi()
+      await store.hydrateFromApi({ force: false })
     } catch (err) {
       console.error('Route hydration failed', err)
       // Hata olsa bile route'a izin ver (offline durumlar için)

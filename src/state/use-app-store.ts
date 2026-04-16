@@ -30,7 +30,7 @@ import { mapApiProductLineToTask, taskProductLinesToApiPayload } from '@/lib/tas
 type AppState = {
   data: MockDbSnapshot
   resetDemo: () => void
-  hydrateFromApi: () => Promise<void>
+  hydrateFromApi: (options?: { force?: boolean }) => Promise<void>
   startSse: () => void | (() => void)
   setRole: (role: Role) => void
   logAccess?: (action: string, meta?: Record<string, any>) => void
@@ -166,6 +166,11 @@ const mapQuote = (q: any, idx = 0) => ({
 
 const KNOWN_ROLES: Role[] = ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse', 'Worker']
 const isKnownRole = (v: unknown): v is Role => typeof v === 'string' && KNOWN_ROLES.includes(v as Role)
+const HYDRATE_COOLDOWN_MS = 15000
+
+let hydrateInFlight: Promise<void> | null = null
+let lastHydrateAt = 0
+let sseStopper: (() => void) | null = null
 
 const serializeCompanyPayload = (payload: Partial<Company>) => ({
   name: payload.name || '',
@@ -197,6 +202,7 @@ export const useAppStore = create<AppState>()(
     }
   },
   startSse: () => {
+    if (sseStopper) return sseStopper
     let timer: any
     const stop = startSseClient((ev) => {
       const t = ev?.type || ''
@@ -223,14 +229,25 @@ export const useAppStore = create<AppState>()(
         t.startsWith('orders.')
       if (shouldHydrate) {
         timer = setTimeout(() => {
-          get().hydrateFromApi()
+          get().hydrateFromApi({ force: false })
         }, 500)
       }
     })
-    return stop
+    sseStopper = () => {
+      if (timer) clearTimeout(timer)
+      stop?.()
+      sseStopper = null
+    }
+    return sseStopper
   },
-  hydrateFromApi: async () => {
-    try {
+  hydrateFromApi: async (options) => {
+    const force = options?.force ?? true
+    const now = Date.now()
+    if (hydrateInFlight) return hydrateInFlight
+    if (!force && now - lastHydrateAt < HYDRATE_COOLDOWN_MS) return
+
+    hydrateInFlight = (async () => {
+      try {
       const meRes = await api.get('/auth/me/')
       const userRoleRaw = meRes.data?.role
       const userRole = isKnownRole(userRoleRaw) ? userRoleRaw : undefined
@@ -586,17 +603,23 @@ export const useAppStore = create<AppState>()(
           tasks,
         },
       }))
-    } catch (err: any) {
-      console.error('API hydrate failed', err)
-      const status = err?.response?.status
-      const isLogin = typeof window !== 'undefined' && window.location.pathname.startsWith('/login')
-      if ((status === 401 || status === 403) && getTokens() && !isLogin) {
-        try {
-          clearTokens()
-        } catch {}
-        window.location.replace('/login')
+      } catch (err: any) {
+        console.error('API hydrate failed', err)
+        const status = err?.response?.status
+        const isLogin = typeof window !== 'undefined' && window.location.pathname.startsWith('/login')
+        if ((status === 401 || status === 403) && getTokens() && !isLogin) {
+          try {
+            clearTokens()
+          } catch {}
+          window.location.replace('/login')
+        }
+      } finally {
+        lastHydrateAt = Date.now()
+        hydrateInFlight = null
       }
-    }
+    })()
+
+    return hydrateInFlight
   },
   setRole: (role) =>
     set((state) => ({

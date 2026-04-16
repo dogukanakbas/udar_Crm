@@ -19,7 +19,6 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const setRole = useAppStore((s) => s.setRole)
   const hydrate = useAppStore((s) => s.hydrateFromApi)
-  const startSse = useAppStore((s) => s.startSse)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -40,11 +39,8 @@ export function LoginPage() {
         /* ignore */
       }
       
-      // Store'u tazele ve SSE başlat
+      // Store'u tazele (SSE App seviyesinde tek noktadan başlatılıyor)
       await hydrate()
-      if (startSse) {
-        startSse()
-      }
       setHydrating(false)
       
       navigate({ to: '/' })
