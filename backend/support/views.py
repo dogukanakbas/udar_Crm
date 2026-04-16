@@ -50,14 +50,13 @@ def assign_task_to_team_leader(task, team):
 
 
 def user_may_claim_task_as_leader(user, team):
-    """Görev üstlenme: yalnızca ilgili ekip usta başısı veya Admin/Manager."""
+    """Görev üstlenme: ekip üyesi (Admin/Manager dahil)."""
     if not team:
         return False
     role = getattr(user, 'role', '')
     if role in ('Admin', 'Manager'):
         return True
-    lid = getattr(team, 'leader_id', None)
-    return bool(lid and user.id == lid)
+    return team.members.filter(id=user.id).exists()
 
 
 def user_can_see_claim_queue_entry(task, user):

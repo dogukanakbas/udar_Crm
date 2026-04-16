@@ -54,7 +54,7 @@ export const PageHeader = ({ title, description, actions, breadcrumb }: PageHead
 const nav = [
   { label: 'Kontrol Paneli', to: '/', icon: Home, roles: ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse'] },
   { label: 'Görevlerim', to: '/', icon: Home, roles: ['Worker'] },
-  { label: 'Şifre değiştir', to: '/change-password', icon: KeyRound, roles: ['Worker'] },
+  { label: 'Şifre değiştir', to: '/change-password', icon: KeyRound, roles: ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse', 'Worker'] },
   {
     label: 'CRM',
     icon: Gauge,

@@ -252,7 +252,11 @@ def ensure_workflow_state(task):
 
 
 def parallel_queue_visible(task, user, user_team_ids):
-    """Paralel akışta bu kullanıcı görevi ekip kuyruğunda görmeli mi? (Yalnızca bölüm usta başıları.)"""
+    """Paralel akışta bu kullanıcı görevi ekip kuyruğunda görmeli mi?
+
+    Workflow paralelse: görev henüz herhangi bir kullanıcı tarafından üstlenilmediyse
+    aynı ekibin tüm üyeleri kuyruğu görmelidir.
+    """
     from accounts.models import Team
 
     if not getattr(task, 'workflow_parallel', False) or task.status == 'done':
@@ -273,10 +277,7 @@ def parallel_queue_visible(task, user, user_team_ids):
         team = Team.objects.filter(id=tid, organization_id=org_id).first()
         if not team:
             continue
-        if not staff:
-            lid = getattr(team, 'leader_id', None)
-            if not lid or uid != lid:
-                continue
+        # Non-staff kullanıcılar: zaten `tid in user_set` kontrolüyle ekibin üyesi sayılır.
         st = state.get(str(tid), {})
         if st.get('stage_done'):
             continue
