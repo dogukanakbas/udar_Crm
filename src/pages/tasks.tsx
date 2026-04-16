@@ -2102,6 +2102,7 @@ export function TaskDetailPage() {
                         <DetailRow
                           label="Hedef / üretilen / kalan"
                           value={`${formatNumber(lineTarget)} / ${formatNumber(lineProduced)} / ${formatNumber(lineRemaining)}`}
+                          stackedValue
                         />
                         <DetailRow label="Varyant" value={line.variant?.trim() ? line.variant : '—'} />
                         <div className="sm:col-span-2 flex flex-wrap items-center gap-3 rounded border bg-muted/30 px-2 py-1.5">
@@ -2937,11 +2938,16 @@ export function TaskDetailPage() {
   )
 }
 
-function DetailRow({ label, value }: { label: string; value?: string }) {
+function DetailRow({ label, value, stackedValue }: { label: string; value?: string; stackedValue?: boolean }) {
   return (
-    <div className="flex items-center gap-2 text-sm">
+    <div
+      className={cn(
+        'flex gap-2 text-sm',
+        stackedValue ? 'flex-col items-start gap-0.5' : 'items-center'
+      )}
+    >
       <span className="text-xs uppercase text-muted-foreground">{label}</span>
-      <span className="font-medium">{value || '—'}</span>
+      <span className={cn('font-medium', stackedValue && 'text-base leading-none')}>{value || '—'}</span>
     </div>
   )
 }
