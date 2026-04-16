@@ -2099,11 +2099,12 @@ export function TaskDetailPage() {
                       ) : null}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
                         <DetailRow label="Model" value={line.modelCode?.trim() ? line.modelCode : '—'} />
-                        <DetailRow
-                          label="Hedef / üretilen / kalan"
-                          value={`${formatNumber(lineTarget)} / ${formatNumber(lineProduced)} / ${formatNumber(lineRemaining)}`}
-                          stackedValue
-                        />
+                        <div className="flex flex-col gap-0.5 text-sm">
+                          <span className="text-xs uppercase text-muted-foreground">Hedef / üretilen / kalan</span>
+                          <span className="font-medium">Hedef: {formatNumber(lineTarget)}</span>
+                          <span className="font-medium">Üretilen: {formatNumber(lineProduced)}</span>
+                          <span className="font-medium">Kalan: {formatNumber(lineRemaining)}</span>
+                        </div>
                         <DetailRow label="Varyant" value={line.variant?.trim() ? line.variant : '—'} />
                         <div className="sm:col-span-2 flex flex-wrap items-center gap-3 rounded border bg-muted/30 px-2 py-1.5">
                           {hex ? (
