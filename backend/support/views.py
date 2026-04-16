@@ -45,15 +45,8 @@ from .checklist_sync import sync_workflow_checklist
 
 
 def assign_task_to_team_leader(task, team):
-    """Ekibe düşen görev önce usta başına atanır; lider yoksa veya üye değilse havuza (assignee boş) bırakılır."""
-    if not team:
-        task.assignee = None
-        return
-    lid = getattr(team, 'leader_id', None)
-    if lid and team.members.filter(id=lid).exists():
-        task.assignee_id = lid
-    else:
-        task.assignee = None
+    """Ekibe düşen görev ekip havuzunda kalır (tek kullanıcıya otomatik atanmaz)."""
+    task.assignee = None
 
 
 def user_may_claim_task_as_leader(user, team):
