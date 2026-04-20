@@ -228,7 +228,7 @@ class QuoteSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['number', 'subtotal', 'discount_total', 'tax_total', 'total']
+        read_only_fields = ['number', 'subtotal', 'discount_total', 'tax_total', 'total', 'created_at', 'updated_at']
 
     def get_owner_name(self, obj):
         if not obj.owner:
@@ -455,7 +455,8 @@ class QuoteSerializer(serializers.ModelSerializer):
         config.setdefault('delivery_type', validated_data.get('delivery_terms') or (instance.delivery_terms if instance else ''))
         config.setdefault('payment_option', validated_data.get('payment_terms') or (instance.payment_terms if instance else ''))
         config.setdefault('signature_customer_label', snapshot.get('name') or 'CARİ ÜNVANI')
-        config.setdefault('contract_date', timezone.localdate().isoformat())
+        existing_config = self._normalize_contract_config(instance.contract_config or {}) if instance else {}
+        config['contract_date'] = existing_config.get('contract_date') or timezone.localdate().isoformat()
         config.setdefault('terms_text', DEFAULT_TERMS_TEXT)
         config.setdefault('contract_notes_text', DEFAULT_CONTRACT_NOTES_TEXT)
         config['general_terms'] = parse_terms_text(config.get('terms_text'))
