@@ -65,6 +65,7 @@ const nav = [
       { label: 'Şirketler', to: '/crm/companies' },
       { label: 'Kişiler', to: '/crm/contacts' },
       { label: 'Teklifler', to: '/crm/quotes' },
+      { label: 'Satıcı Firmalar', to: '/crm/seller-companies' },
       { label: 'Şablon Yönetimi', to: '/crm/quote-templates' },
     ],
   },
@@ -127,9 +128,10 @@ export function AppShell() {
 
   const activePath = routerState.location.pathname
   const isQuotesWorkspace = activePath.startsWith('/crm/quotes')
+  const isSellerCompanyWorkspace = activePath.startsWith('/crm/seller-companies')
   const isQuoteTemplateWorkspace = activePath.startsWith('/crm/quote-templates')
   const isInventoryWorkspace = activePath.startsWith('/erp/inventory')
-  const isWideWorkspace = isQuotesWorkspace || isQuoteTemplateWorkspace || isInventoryWorkspace
+  const isWideWorkspace = isQuotesWorkspace || isSellerCompanyWorkspace || isQuoteTemplateWorkspace || isInventoryWorkspace
 
   if (isPublic) {
     return (

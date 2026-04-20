@@ -5,6 +5,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
+import re
+import unicodedata
 from django.conf import settings
 from openpyxl import load_workbook
 from openpyxl.styles import Border, PatternFill, Side
@@ -46,12 +48,25 @@ SECTION_FAMILY_MAP = {
 DEFAULT_SELLER_PROFILES = [
     {
         'key': 'ORTKA',
+        'short_name': 'ORTKA',
         'display_name': 'ORTKA YAPI ELEMANLARI ÜRETİM SAN. LTD. ŞTİ.',
+        'legal_name': 'ORTKA YAPI ELEMANLARI ÜRETİM SAN. LTD. ŞTİ.',
         'tax_office': 'BEYDAĞI',
         'tax_number': '6480365207',
         'address': '2. OSB 6. CADDE NO:6 YEŞİLYURT / MALATYA',
+        'city': 'Malatya',
+        'country': 'Türkiye',
         'phone': '444 0 932',
         'email': 'muhasebe@aykakapi.com.tr',
+        'website': '',
+        'kep_address': '',
+        'logo_url': '',
+        'signature_name': '',
+        'signature_title': '',
+        'signature_label': '',
+        'notes': '',
+        'is_active': True,
+        'sort_order': 0,
         'bank_accounts': [
             {'bank': 'Türkiye İş Bankası', 'iban': 'TR24 0006 4000 0018 6003 9367 45'},
             {'bank': 'Ziraat Bankası', 'iban': 'TR07 0001 0021 6935 0399 4450 09'},
@@ -61,12 +76,25 @@ DEFAULT_SELLER_PROFILES = [
     },
     {
         'key': 'AYKA',
+        'short_name': 'AYKA',
         'display_name': 'AYKA KAPI SANAYİ TİCARET ANONİM ŞİRKETİ',
+        'legal_name': 'AYKA KAPI SANAYİ TİCARET ANONİM ŞİRKETİ',
         'tax_office': 'BEYDAĞI',
         'tax_number': '1210461108',
         'address': '2. OSB 6. CADDE NO:6 YEŞİLYURT / MALATYA',
+        'city': 'Malatya',
+        'country': 'Türkiye',
         'phone': '444 0 932',
         'email': 'muhasebe@aykakapi.com.tr',
+        'website': '',
+        'kep_address': '',
+        'logo_url': '',
+        'signature_name': '',
+        'signature_title': '',
+        'signature_label': '',
+        'notes': '',
+        'is_active': True,
+        'sort_order': 1,
         'bank_accounts': [
             {'bank': 'Garanti BBVA Bankası', 'iban': 'TR14 0006 2000 1120 0006 2913 29'},
             {'bank': 'Ziraat Bankası', 'iban': 'TR72 0001 0021 6994 2088 8850 01'},
@@ -287,12 +315,92 @@ TEMPLATE_REGISTRY = [
 ALLOWED_TEMPLATE_EXTENSIONS = {'.xlsx', '.xltx', '.xlsm'}
 
 
+def normalize_seller_company_key(value):
+    raw = unicodedata.normalize('NFKD', str(value or '')).encode('ascii', 'ignore').decode('ascii')
+    normalized = re.sub(r'[^A-Za-z0-9]+', '_', raw).strip('_').upper()
+    return normalized[:50]
+
+
+def _normalize_seller_bank_account(account):
+    item = dict(account or {})
+    return {
+        'bank': str(item.get('bank') or '').strip(),
+        'iban': str(item.get('iban') or '').strip(),
+        'currency': _normalize_currency_code(item.get('currency') or 'TRY'),
+        'branch': str(item.get('branch') or '').strip(),
+        'account_holder': str(item.get('account_holder') or item.get('accountHolder') or '').strip(),
+    }
+
+
+def _normalize_seller_profile(profile, fallback=None, sort_order=0):
+    source = deepcopy(fallback or {})
+    source.update(dict(profile or {}))
+    key = normalize_seller_company_key(source.get('key') or source.get('short_name') or source.get('display_name'))
+    return {
+        'key': key,
+        'short_name': str(source.get('short_name') or key).strip() or key,
+        'display_name': str(source.get('display_name') or source.get('legal_name') or key).strip() or key,
+        'legal_name': str(source.get('legal_name') or source.get('display_name') or key).strip() or key,
+        'tax_office': str(source.get('tax_office') or '').strip(),
+        'tax_number': str(source.get('tax_number') or '').strip(),
+        'mersis_number': str(source.get('mersis_number') or '').strip(),
+        'trade_registry_number': str(source.get('trade_registry_number') or '').strip(),
+        'address': str(source.get('address') or '').strip(),
+        'city': str(source.get('city') or '').strip(),
+        'country': str(source.get('country') or '').strip(),
+        'phone': str(source.get('phone') or '').strip(),
+        'email': str(source.get('email') or '').strip(),
+        'website': str(source.get('website') or '').strip(),
+        'kep_address': str(source.get('kep_address') or '').strip(),
+        'logo_url': str(source.get('logo_url') or '').strip(),
+        'signature_name': str(source.get('signature_name') or '').strip(),
+        'signature_title': str(source.get('signature_title') or '').strip(),
+        'signature_label': str(source.get('signature_label') or '').strip(),
+        'notes': str(source.get('notes') or '').strip(),
+        'is_active': bool(source.get('is_active', True)),
+        'sort_order': int(source.get('sort_order', sort_order) or sort_order),
+        'bank_accounts': [
+            normalized
+            for normalized in (_normalize_seller_bank_account(item) for item in (source.get('bank_accounts') or []))
+            if normalized['bank'] or normalized['iban'] or normalized['branch'] or normalized['account_holder']
+        ],
+    }
+
+
+def get_default_seller_profiles():
+    return [_normalize_seller_profile(profile, sort_order=index) for index, profile in enumerate(DEFAULT_SELLER_PROFILES)]
+
+
 def get_seller_profiles(organization):
     settings = getattr(organization, 'contract_settings', {}) or {}
     profiles = settings.get('seller_profiles')
+    defaults_by_key = {profile['key']: profile for profile in get_default_seller_profiles()}
     if isinstance(profiles, list) and profiles:
-        return profiles
-    return deepcopy(DEFAULT_SELLER_PROFILES)
+        normalized_profiles = []
+        seen_keys = set()
+        for index, profile in enumerate(profiles):
+            fallback = defaults_by_key.get(normalize_seller_company_key((profile or {}).get('key')))
+            normalized = _normalize_seller_profile(profile, fallback=fallback, sort_order=index)
+            if not normalized['key'] or normalized['key'] in seen_keys:
+                continue
+            normalized_profiles.append(normalized)
+            seen_keys.add(normalized['key'])
+        if normalized_profiles:
+            return sorted(normalized_profiles, key=lambda item: (item.get('sort_order', 0), item.get('short_name', item['key'])))
+    return get_default_seller_profiles()
+
+
+def save_seller_profiles(organization, profiles):
+    normalized_profiles = [
+        _normalize_seller_profile(profile, sort_order=index)
+        for index, profile in enumerate(profiles or [])
+        if normalize_seller_company_key((profile or {}).get('key') or (profile or {}).get('short_name') or (profile or {}).get('display_name'))
+    ]
+    settings = dict(getattr(organization, 'contract_settings', {}) or {})
+    settings['seller_profiles'] = normalized_profiles
+    organization.contract_settings = settings
+    organization.save(update_fields=['contract_settings'])
+    return normalized_profiles
 
 
 def _template_override_settings(organization):
@@ -501,6 +609,18 @@ def _quote_families(quote):
     return families
 
 
+def _seller_profiles_for_template(quote):
+    profiles = [profile for profile in get_seller_profiles(quote.organization) if profile.get('is_active', True)]
+    if len(profiles) >= 2:
+        return profiles[0], profiles[1]
+    if len(profiles) == 1:
+        fallback = get_default_seller_profiles()
+        secondary = fallback[1] if normalize_seller_company_key(profiles[0].get('key')) != fallback[1]['key'] else fallback[0]
+        return profiles[0], secondary
+    defaults = get_default_seller_profiles()
+    return defaults[0], defaults[1]
+
+
 def _fill_shared_header(ws, quote):
     config = quote.contract_config or {}
     customer = _customer_snapshot(config)
@@ -508,9 +628,7 @@ def _fill_shared_header(ws, quote):
     currency_code = _quote_currency(quote)
     currency_note = _currency_note(quote)
     seller_key = (quote.seller_company_key or 'AYKA').strip().upper()
-    profiles = {profile['key'].upper(): profile for profile in get_seller_profiles(quote.organization)}
-    ortka = profiles.get('ORTKA', DEFAULT_SELLER_PROFILES[0])
-    ayka = profiles.get('AYKA', DEFAULT_SELLER_PROFILES[1])
+    left_seller, right_seller = _seller_profiles_for_template(quote)
     doc_date = _parse_date(config.get('contract_date')) or _timezone_fallback(quote.created_at)
 
     _set_cell_value(ws, 'L14', doc_date)
@@ -525,14 +643,14 @@ def _fill_shared_header(ws, quote):
     _ensure_header_value_row_layout(ws, 32, source_row=31)
     _set_cell_value(ws, 'D32', format_validity_text(quote.valid_until))
     _set_cell_value(ws, 'D33', ' • '.join(part for part in [config.get('price_list_label') or '', currency_note] if part))
-    _set_cell_value(ws, 'C16', _choice_text(_normalize_display_name(ortka.get('display_name', '')), seller_key == 'ORTKA'))
-    _set_cell_value(ws, 'J16', _choice_text(_normalize_display_name(ayka.get('display_name', '')), seller_key == 'AYKA'))
-    _set_cell_value(ws, 'C17', f"VERGİ DAİRESİ: {ortka.get('tax_office', '')}")
-    _set_cell_value(ws, 'J17', f"VERGİ DAİRESİ: {ayka.get('tax_office', '')}")
-    _set_cell_value(ws, 'C18', f"VERGİ NO: {ortka.get('tax_number', '')}")
-    _set_cell_value(ws, 'J18', f"VERGİ NO: {ayka.get('tax_number', '')}")
-    _set_cell_value(ws, 'C19', _join_contact(ortka.get('email', ''), ortka.get('phone', '')))
-    _set_cell_value(ws, 'J19', _join_contact(ayka.get('email', ''), ayka.get('phone', '')))
+    _set_cell_value(ws, 'C16', _choice_text(_normalize_display_name(left_seller.get('display_name', '')), seller_key == left_seller.get('key')))
+    _set_cell_value(ws, 'J16', _choice_text(_normalize_display_name(right_seller.get('display_name', '')), seller_key == right_seller.get('key')))
+    _set_cell_value(ws, 'C17', f"VERGİ DAİRESİ: {left_seller.get('tax_office', '')}")
+    _set_cell_value(ws, 'J17', f"VERGİ DAİRESİ: {right_seller.get('tax_office', '')}")
+    _set_cell_value(ws, 'C18', f"VERGİ NO: {left_seller.get('tax_number', '')}")
+    _set_cell_value(ws, 'J18', f"VERGİ NO: {right_seller.get('tax_number', '')}")
+    _set_cell_value(ws, 'C19', _join_contact(left_seller.get('email', ''), left_seller.get('phone', '')))
+    _set_cell_value(ws, 'J19', _join_contact(right_seller.get('email', ''), right_seller.get('phone', '')))
 
 
 def _fill_line_blocks(ws, quote, template):
@@ -641,15 +759,13 @@ def _fill_contract_notes(ws, quote, template):
 
 def _fill_bank_accounts(ws, quote, template):
     currency_symbol = _currency_symbol(_quote_currency(quote))
-    profiles = {profile['key'].upper(): profile for profile in get_seller_profiles(quote.organization)}
-    ortka = profiles.get('ORTKA', DEFAULT_SELLER_PROFILES[0])
-    ayka = profiles.get('AYKA', DEFAULT_SELLER_PROFILES[1])
+    left_seller, right_seller = _seller_profiles_for_template(quote)
     header_row = template['bank_header_row']
     _ensure_bank_header_layout(ws, header_row)
-    _set_cell_value(ws, f'C{header_row}', f"{_normalize_display_name(ortka.get('display_name', ''))} {currency_symbol}")
-    _set_cell_value(ws, f'K{header_row}', f"{_normalize_display_name(ayka.get('display_name', ''))} {currency_symbol}")
-    ortka_accounts = ortka.get('bank_accounts') or []
-    ayka_accounts = ayka.get('bank_accounts') or []
+    _set_cell_value(ws, f'C{header_row}', f"{_normalize_display_name(left_seller.get('display_name', ''))} {currency_symbol}")
+    _set_cell_value(ws, f'K{header_row}', f"{_normalize_display_name(right_seller.get('display_name', ''))} {currency_symbol}")
+    ortka_accounts = left_seller.get('bank_accounts') or []
+    ayka_accounts = right_seller.get('bank_accounts') or []
     for index, row in enumerate(template['bank_rows']):
         _ensure_bank_row_layout(ws, row)
         left = ortka_accounts[index] if index < len(ortka_accounts) else {}
@@ -667,9 +783,11 @@ def _fill_bank_accounts(ws, quote, template):
 def _fill_signature_block(ws, quote, template):
     customer = _customer_snapshot(quote.contract_config or {})
     profiles = {profile['key'].upper(): profile for profile in get_seller_profiles(quote.organization)}
-    seller = profiles.get((quote.seller_company_key or 'AYKA').strip().upper(), DEFAULT_SELLER_PROFILES[1])
+    fallback_seller = _seller_profiles_for_template(quote)[1]
+    seller = profiles.get((quote.seller_company_key or fallback_seller.get('key') or 'AYKA').strip().upper(), fallback_seller)
     row = template['signature_row']
-    _set_cell_value(ws, f'C{row}', f"{_normalize_display_name(seller.get('display_name', ''))} ADINA İMZA")
+    signature_label = str(seller.get('signature_label') or '').strip() or f"{_normalize_display_name(seller.get('display_name', ''))} ADINA İMZA"
+    _set_cell_value(ws, f'C{row}', signature_label)
     _set_cell_value(ws, f'J{row}', customer.get('name') or getattr(quote.customer, 'name', '') or '')
 
 

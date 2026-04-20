@@ -11,6 +11,7 @@ import { TicketsPage } from '@/pages/support'
 import { TasksPage, TaskDetailPage } from '@/pages/tasks'
 import { QuotesPage, QuoteDetailPage } from '@/pages/quotes'
 import { QuoteTemplatesPage } from '@/pages/quote-templates'
+import { SellerCompaniesPage } from '@/pages/seller-companies'
 import { CalendarPage } from '@/pages/calendar'
 import { WorkerTrackingPage } from '@/pages/worker-tracking'
 import { WorkerDetailPage } from '@/pages/worker-detail'
@@ -99,6 +100,12 @@ const quoteTemplatesRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/crm/quote-templates',
   component: QuoteTemplatesPage,
+})
+
+const sellerCompaniesRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/crm/seller-companies',
+  component: SellerCompaniesPage,
 })
 
 const salesOrdersRoute = new Route({
@@ -222,6 +229,7 @@ const routeTree = rootRoute.addChildren([
   quoteNewRoute,
   quoteDetailRoute,
   quoteTemplatesRoute,
+  sellerCompaniesRoute,
   salesOrdersRoute,
   purchasesRoute,
   inventoryRoute,

@@ -17,6 +17,7 @@ import type {
   Vehicle,
   Team,
   UserLite,
+  SellerCompanyProfile,
   Role,
   Ticket,
   Task,
@@ -100,6 +101,7 @@ const emptySnapshot: MockDbSnapshot = {
   leads: [],
   opportunities: [],
   companies: [],
+  sellerCompanies: [],
   contacts: [],
   categories: [],
   products: [],
@@ -181,6 +183,38 @@ const serializeCompanyPayload = (payload: Partial<Company>) => ({
   email: payload.email || '',
 })
 
+const mapSellerCompany = (profile: any, idx = 0): SellerCompanyProfile => ({
+  key: String(profile.key || profile.short_name || `SELLER_${idx + 1}`).toUpperCase(),
+  shortName: profile.short_name || profile.shortName || profile.key || '',
+  displayName: profile.display_name || profile.displayName || '',
+  legalName: profile.legal_name || profile.legalName || '',
+  taxOffice: profile.tax_office || profile.taxOffice || '',
+  taxNumber: profile.tax_number || profile.taxNumber || '',
+  mersisNumber: profile.mersis_number || profile.mersisNumber || '',
+  tradeRegistryNumber: profile.trade_registry_number || profile.tradeRegistryNumber || '',
+  address: profile.address || '',
+  city: profile.city || '',
+  country: profile.country || '',
+  phone: profile.phone || '',
+  email: profile.email || '',
+  website: profile.website || '',
+  kepAddress: profile.kep_address || profile.kepAddress || '',
+  logoUrl: profile.logo_url || profile.logoUrl || '',
+  signatureName: profile.signature_name || profile.signatureName || '',
+  signatureTitle: profile.signature_title || profile.signatureTitle || '',
+  signatureLabel: profile.signature_label || profile.signatureLabel || '',
+  notes: profile.notes || '',
+  isActive: profile.is_active !== false,
+  sortOrder: Number(profile.sort_order ?? profile.sortOrder ?? idx),
+  bankAccounts: (profile.bank_accounts || profile.bankAccounts || []).map((account: any) => ({
+    bank: account.bank || '',
+    iban: account.iban || '',
+    currency: account.currency || 'TRY',
+    branch: account.branch || '',
+    accountHolder: account.account_holder || account.accountHolder || '',
+  })),
+})
+
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
@@ -258,6 +292,7 @@ export const useAppStore = create<AppState>()(
         isWorkerRole ? emptyList : api.get('/products/'),
         isWorkerRole ? emptyList : api.get('/categories/'),
         isWorkerRole ? emptyList : api.get('/quotes/'),
+        isWorkerRole ? emptyList : api.get('/seller-companies/'),
         isWorkerRole ? emptyList : api.get('/partners/'),
         isWorkerRole ? emptyList : api.get('/contacts/'),
         isWorkerRole ? emptyList : api.get('/leads/'),
@@ -273,6 +308,7 @@ export const useAppStore = create<AppState>()(
         productsRes,
         categoriesRes,
         quotesRes,
+        sellerCompaniesRes,
         partnersRes,
         contactsRes,
         leadsRes,
@@ -328,6 +364,7 @@ export const useAppStore = create<AppState>()(
         phone: c.phone || '',
         email: c.email || '',
       }))
+      const sellerCompanies = (sellerCompaniesRes.data || []).map((profile: any, idx: number) => mapSellerCompany(profile, idx))
       const quotes = (quotesRes.data || []).map((q: any, idx: number) => mapQuote(q, idx))
       const leads = (leadsRes.data || []).map((l: any, idx: number) => ({
         id: String(l.id ?? idx),
@@ -549,6 +586,7 @@ export const useAppStore = create<AppState>()(
           rolePermissions: currentUserPermissions,
           products,
           companies,
+          sellerCompanies,
           contacts,
           categories,
           quotes,

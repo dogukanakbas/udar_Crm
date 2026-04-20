@@ -395,6 +395,7 @@ export const buildSeed = (): MockDbSnapshot => {
     leads,
     opportunities,
     products,
+    sellerCompanies: [],
     salesOrders,
     purchaseOrders,
     invoices,

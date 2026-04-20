@@ -1,14 +1,32 @@
 from copy import deepcopy
+from io import BytesIO
+from pathlib import Path
+from uuid import uuid4
+from xml.etree import ElementTree
 
 from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 import mimetypes
 
+from django.conf import settings
 from django.http import FileResponse
+from PIL import Image, UnidentifiedImageError
 
 from .models import Quote, QuoteLine, PricingRule, BusinessPartner, Lead, Opportunity, Contact
-from .contracts import build_document_export, get_template_download, list_document_exports, list_template_library, save_template_override
+from .contracts import (
+    build_document_export,
+    get_default_seller_profiles,
+    get_seller_profiles,
+    get_template_download,
+    list_document_exports,
+    list_template_library,
+    normalize_seller_company_key,
+    save_seller_profiles,
+    save_template_override,
+    _normalize_seller_profile,
+)
 from workflow.models import ApprovalInstance, ApprovalStep
 from erp.models import Product
 from .serializers import QuoteSerializer, PricingRuleSerializer, BusinessPartnerSerializer, ProductSerializer, LeadSerializer, OpportunitySerializer, ContactSerializer
@@ -21,6 +39,102 @@ EXCEL_TEMPLATE_CONTENT_TYPES = {
     '.xltx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.template',
     '.xlsm': 'application/vnd.ms-excel.sheet.macroEnabled.12',
 }
+
+ALLOWED_LOGO_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.svg'}
+MAX_LOGO_FILE_SIZE = 3 * 1024 * 1024
+DISALLOWED_SVG_TAGS = {'script', 'foreignobject', 'iframe', 'object', 'embed'}
+
+
+def _relative_media_path_for_url(url):
+    value = str(url or '').strip()
+    if not value:
+        return ''
+    media_prefix = settings.MEDIA_URL.rstrip('/') + '/'
+    if value.startswith(media_prefix):
+        return value[len(media_prefix):]
+    return value.lstrip('/')
+
+
+def _delete_logo_file(relative_path):
+    path_value = _relative_media_path_for_url(relative_path)
+    if not path_value:
+        return
+    target = Path(settings.MEDIA_ROOT) / path_value
+    try:
+        target.resolve().relative_to(Path(settings.MEDIA_ROOT).resolve())
+    except Exception:
+        return
+    if target.exists() and target.is_file():
+        target.unlink()
+
+
+def _validate_raster_logo(content, extension):
+    try:
+        image = Image.open(BytesIO(content))
+        image.verify()
+    except (UnidentifiedImageError, OSError) as exc:
+        raise ValueError('Logo dosyasi gecersiz veya bozuk.') from exc
+    image = Image.open(BytesIO(content))
+    if image.format not in {'PNG', 'JPEG'}:
+        raise ValueError('Yalnizca PNG veya JPEG logo dosyalari kabul edilir.')
+    if extension == '.png' and image.format != 'PNG':
+        raise ValueError('PNG uzantili dosya gercek bir PNG olmali.')
+    if extension in {'.jpg', '.jpeg'} and image.format != 'JPEG':
+        raise ValueError('JPG/JPEG uzantili dosya gercek bir JPEG olmali.')
+
+
+def _validate_svg_logo(content):
+    try:
+        decoded = content.decode('utf-8')
+    except UnicodeDecodeError as exc:
+        raise ValueError('SVG dosyasi UTF-8 olarak kaydedilmelidir.') from exc
+
+    try:
+        root = ElementTree.fromstring(decoded)
+    except ElementTree.ParseError as exc:
+        raise ValueError('SVG dosyasi gecersiz veya bozuk.') from exc
+
+    if root.tag.split('}')[-1].lower() != 'svg':
+        raise ValueError('Yuklenen SVG dosyasinin kok etiketi svg olmali.')
+
+    for element in root.iter():
+        tag_name = element.tag.split('}')[-1].lower()
+        if tag_name in DISALLOWED_SVG_TAGS:
+            raise ValueError('SVG icinde guvensiz etiketler kullanilamaz.')
+        for attr_name, attr_value in element.attrib.items():
+            name = attr_name.split('}')[-1].lower()
+            value = str(attr_value or '').strip().lower()
+            if name.startswith('on'):
+                raise ValueError('SVG event handler attribute kullanamaz.')
+            if name in {'href', 'xlink:href'} and value and not value.startswith('#'):
+                raise ValueError('SVG dis kaynak referansi kullanamaz.')
+            if 'javascript:' in value:
+                raise ValueError('SVG javascript iceremez.')
+
+
+def _save_seller_logo_file(org, key, uploaded_file):
+    extension = Path(str(getattr(uploaded_file, 'name', '') or '')).suffix.lower()
+    if extension not in ALLOWED_LOGO_EXTENSIONS:
+        raise ValueError('Yalnizca PNG, JPG, JPEG veya SVG logo yukleyebilirsiniz.')
+    if uploaded_file.size > MAX_LOGO_FILE_SIZE:
+        raise ValueError('Logo dosyasi 3 MB boyutunu asamaz.')
+
+    content = uploaded_file.read()
+    if not content:
+        raise ValueError('Bos dosya yuklenemez.')
+
+    if extension == '.svg':
+        _validate_svg_logo(content)
+    else:
+        _validate_raster_logo(content, extension)
+
+    directory = Path(settings.MEDIA_ROOT) / 'seller-logos' / f'org_{org.id}'
+    directory.mkdir(parents=True, exist_ok=True)
+    filename = f"{normalize_seller_company_key(key)}-{uuid4().hex[:8]}{extension}"
+    target = directory / filename
+    with open(target, 'wb') as handle:
+        handle.write(content)
+    return f"{settings.MEDIA_URL.rstrip('/')}/seller-logos/org_{org.id}/{filename}"
 
 
 class OrgScopedMixin:
@@ -381,6 +495,154 @@ class PricingRuleViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
     required_perm = 'pricing.manage'
     queryset = PricingRule.objects.all()
+
+
+class SellerCompanyViewSet(viewsets.ViewSet):
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'quotes.view'
+    permission_map = {
+        'create': 'quotes.edit',
+        'partial_update': 'quotes.edit',
+        'destroy': 'quotes.edit',
+        'upload_logo': 'quotes.edit',
+    }
+
+    def _organization(self, request):
+        return getattr(request.user, 'organization', None)
+
+    def list(self, request):
+        org = self._organization(request)
+        if not org:
+            return Response(get_default_seller_profiles())
+        return Response(get_seller_profiles(org))
+
+    def _find_profile(self, org, key):
+        normalized_key = normalize_seller_company_key(key)
+        profiles = get_seller_profiles(org)
+        for index, profile in enumerate(profiles):
+            if profile['key'] == normalized_key:
+                return profiles, index, profile
+        return profiles, None, None
+
+    def create(self, request):
+        org = self._organization(request)
+        if not org:
+            return Response({'detail': 'Organizasyon bulunamadı'}, status=status.HTTP_400_BAD_REQUEST)
+
+        profiles = get_seller_profiles(org)
+        payload = dict(request.data or {})
+        key = normalize_seller_company_key(payload.get('key') or payload.get('short_name') or payload.get('display_name'))
+        if not key:
+            return Response({'detail': 'Firma kodu veya kısa adı zorunludur'}, status=status.HTTP_400_BAD_REQUEST)
+        if any(profile['key'] == key for profile in profiles):
+            return Response({'detail': 'Bu satıcı firma kodu zaten kullanılıyor'}, status=status.HTTP_400_BAD_REQUEST)
+
+        normalized = _normalize_seller_profile(payload, sort_order=len(profiles))
+        profiles.append(normalized)
+        save_seller_profiles(org, profiles)
+        return Response(normalized, status=status.HTTP_201_CREATED)
+
+    def partial_update(self, request, pk=None):
+        org = self._organization(request)
+        if not org:
+            return Response({'detail': 'Organizasyon bulunamadı'}, status=status.HTTP_400_BAD_REQUEST)
+
+        key = normalize_seller_company_key(pk)
+        profiles = get_seller_profiles(org)
+        for index, profile in enumerate(profiles):
+            if profile['key'] != key:
+                continue
+            payload = dict(request.data or {})
+            payload['key'] = key
+            normalized = _normalize_seller_profile(payload, fallback=profile, sort_order=index)
+            profiles[index] = normalized
+            save_seller_profiles(org, profiles)
+            return Response(normalized)
+
+        return Response({'detail': 'Satıcı firma bulunamadı'}, status=status.HTTP_404_NOT_FOUND)
+
+    def destroy(self, request, pk=None):
+        org = self._organization(request)
+        if not org:
+            return Response({'detail': 'Organizasyon bulunamadı'}, status=status.HTTP_400_BAD_REQUEST)
+
+        key = normalize_seller_company_key(pk)
+        if Quote.objects.filter(organization=org, seller_company_key__iexact=key).exists():
+            return Response({'detail': 'Bu firma mevcut belgelerde kullanıldığı için silinemez'}, status=status.HTTP_400_BAD_REQUEST)
+
+        profiles = get_seller_profiles(org)
+        remaining = [profile for profile in profiles if profile['key'] != key]
+        if len(remaining) == len(profiles):
+            return Response({'detail': 'Satıcı firma bulunamadı'}, status=status.HTTP_404_NOT_FOUND)
+        save_seller_profiles(org, remaining)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def partial_update(self, request, pk=None):
+        org = self._organization(request)
+        if not org:
+            return Response({'detail': 'Organizasyon bulunamadÄ±'}, status=status.HTTP_400_BAD_REQUEST)
+
+        key = normalize_seller_company_key(pk)
+        profiles, index, profile = self._find_profile(org, key)
+        if profile is None or index is None:
+            return Response({'detail': 'SatÄ±cÄ± firma bulunamadÄ±'}, status=status.HTTP_404_NOT_FOUND)
+
+        payload = dict(request.data or {})
+        payload['key'] = key
+        normalized = _normalize_seller_profile(payload, fallback=profile, sort_order=index)
+        profiles[index] = normalized
+        save_seller_profiles(org, profiles)
+        return Response(normalized)
+
+    def destroy(self, request, pk=None):
+        org = self._organization(request)
+        if not org:
+            return Response({'detail': 'Organizasyon bulunamadÄ±'}, status=status.HTTP_400_BAD_REQUEST)
+
+        key = normalize_seller_company_key(pk)
+        if Quote.objects.filter(organization=org, seller_company_key__iexact=key).exists():
+            return Response({'detail': 'Bu firma mevcut belgelerde kullanÄ±ldÄ±ÄŸÄ± iÃ§in silinemez'}, status=status.HTTP_400_BAD_REQUEST)
+
+        profiles = get_seller_profiles(org)
+        remaining = [profile for profile in profiles if profile['key'] != key]
+        if len(remaining) == len(profiles):
+            return Response({'detail': 'SatÄ±cÄ± firma bulunamadÄ±'}, status=status.HTTP_404_NOT_FOUND)
+
+        deleted = next((profile for profile in profiles if profile['key'] == key), None)
+        if deleted and deleted.get('logo_url'):
+            _delete_logo_file(deleted.get('logo_url'))
+        save_seller_profiles(org, remaining)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['post'], url_path='upload-logo', parser_classes=[MultiPartParser, FormParser])
+    def upload_logo(self, request, pk=None):
+        org = self._organization(request)
+        if not org:
+            return Response({'detail': 'Organizasyon bulunamadÄ±'}, status=status.HTTP_400_BAD_REQUEST)
+
+        key = normalize_seller_company_key(pk)
+        profiles, index, profile = self._find_profile(org, key)
+        if profile is None or index is None:
+            return Response({'detail': 'SatÄ±cÄ± firma bulunamadÄ±'}, status=status.HTTP_404_NOT_FOUND)
+
+        uploaded_file = request.FILES.get('file')
+        if not uploaded_file:
+            return Response({'detail': 'Logo dosyasi zorunludur.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            logo_url = _save_seller_logo_file(org, key, uploaded_file)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if profile.get('logo_url'):
+            _delete_logo_file(profile.get('logo_url'))
+
+        payload = dict(profile)
+        payload['logo_url'] = logo_url
+        normalized = _normalize_seller_profile(payload, fallback=profile, sort_order=index)
+        profiles[index] = normalized
+        save_seller_profiles(org, profiles)
+        return Response(normalized)
 
 
 class BusinessPartnerViewSet(OrgScopedMixin, viewsets.ModelViewSet):
