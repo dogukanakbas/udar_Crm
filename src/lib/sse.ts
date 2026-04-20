@@ -4,12 +4,8 @@ import { getTokens } from './auth'
 export type SseHandler = (event: { type: string; [k: string]: any }) => void
 
 export function startSse(onEvent: SseHandler) {
-  const tokens = getTokens()
-  if (!tokens?.access) return () => {}
-
   const base = (api.defaults.baseURL || '').replace(/\/$/, '')
   const root = base.endsWith('/api') ? base.slice(0, -4) : base
-  const url = `${root}/api/stream/?token=${tokens.access}`
 
   let es: EventSource | null = null
   let reconnectTimer: any = null
@@ -19,6 +15,11 @@ export function startSse(onEvent: SseHandler) {
 
   const connect = () => {
     if (isStopped) return
+
+    const tokens = getTokens()
+    if (!tokens?.access) return
+
+    const url = `${root}/api/stream/?token=${tokens.access}`
     
     try {
       es = new EventSource(url)

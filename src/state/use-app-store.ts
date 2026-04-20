@@ -87,8 +87,10 @@ type AppState = {
   addTimeEntry: (payload: { task: string; started_at: string; ended_at?: string; note?: string }) => void
   createQuote: (payload: Omit<Quote, 'id' | 'number' | 'createdAt' | 'updatedAt'>) => Promise<void>
   updateQuote: (id: string, patch: Partial<Quote>) => Promise<void>
+  sendQuote: (id: string) => Promise<void>
+  requestQuoteApproval: (id: string) => Promise<void>
   deleteQuotes: (ids: string[]) => Promise<void>
-  convertQuote: (id: string) => Promise<SalesOrder | undefined>
+  convertQuote: (id: string) => Promise<Quote | undefined>
   upsertPricingRule: (rule: PricingRule) => void
   deletePricingRule: (id: string) => void
 }
@@ -1138,6 +1140,39 @@ export const useAppStore = create<AppState>()(
       throw err
     }
   },
+  sendQuote: async (id) => {
+    try {
+      const response = await api.post(`/quotes/${id}/send/`)
+      const updatedQuote = response.data?.quote ? mapQuote(response.data.quote) : null
+      set((state) => ({
+        data: {
+          ...state.data,
+          quotes: state.data.quotes.map((quote) =>
+            quote.id === id ? updatedQuote || { ...quote, status: 'Sent' as Quote['status'] } : quote
+          ),
+        },
+      }))
+    } catch (err) {
+      console.error('API sendQuote failed', err)
+      throw err
+    }
+  },
+  requestQuoteApproval: async (id) => {
+    try {
+      await api.post(`/quotes/${id}/request_approval/`)
+      set((state) => ({
+        data: {
+          ...state.data,
+          quotes: state.data.quotes.map((quote) =>
+            quote.id === id ? { ...quote, status: 'Under Review' as Quote['status'] } : quote
+          ),
+        },
+      }))
+    } catch (err) {
+      console.error('API requestQuoteApproval failed', err)
+      throw err
+    }
+  },
   deleteQuotes: async (ids) => {
     try {
       await Promise.all(ids.map((id) => api.delete(`/quotes/${id}/`)))
@@ -1154,12 +1189,27 @@ export const useAppStore = create<AppState>()(
   },
   convertQuote: async (id) => {
     try {
-      await api.post(`/quotes/${id}/convert/`)
-      await get().hydrateFromApi()
-      return undefined
+      const response = await api.post(`/quotes/${id}/convert/`)
+      const sourceQuote = response.data?.source ? mapQuote(response.data.source) : null
+      const contractQuote = response.data?.contract ? mapQuote(response.data.contract) : null
+      set((state) => {
+        const withoutSource: Quote[] = state.data.quotes.map((quote) =>
+          quote.id === id ? (sourceQuote || { ...quote, status: 'Converted' as Quote['status'] }) : quote
+        )
+        const mergedQuotes = contractQuote
+          ? [contractQuote, ...withoutSource.filter((quote) => quote.id !== contractQuote.id)]
+          : withoutSource
+        return {
+          data: {
+            ...state.data,
+            quotes: mergedQuotes,
+          },
+        }
+      })
+      return contractQuote || undefined
     } catch (err) {
       console.error('API convertQuote failed', err)
-      return undefined
+      throw err
     }
   },
   upsertPricingRule: async (rule) => {

@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useToast } from '@/components/ui/use-toast'
 import { useAppStore } from '@/state/use-app-store'
 import { useTheme } from '@/components/theme-provider'
@@ -18,7 +19,7 @@ import { ROLE_LABEL_TR } from '@/lib/role-labels'
 import { DataTable } from '@/components/data-table'
 import { type ColumnDef } from '@tanstack/react-table'
 import type { UserLite } from '@/types'
-import { AlertCircle, ShieldCheck, Plus, Trash2, ImageIcon } from 'lucide-react'
+import { AlertCircle, ShieldCheck, Plus, Trash2, ImageIcon, Pencil } from 'lucide-react'
 import { RbacGuard } from '@/components/rbac'
 
 function formatApiError(err: unknown): string {
@@ -104,6 +105,14 @@ export function SettingsPage() {
   const [assocPhone, setAssocPhone] = useState('')
   const [assocNotes, setAssocNotes] = useState('')
   const [assocTeamIds, setAssocTeamIds] = useState<number[]>([])
+  const [editingUser, setEditingUser] = useState<UserLite | null>(null)
+  const [editUserOpen, setEditUserOpen] = useState(false)
+  const [editUserUsername, setEditUserUsername] = useState('')
+  const [editUserEmail, setEditUserEmail] = useState('')
+  const [editUserRole, setEditUserRole] = useState('Worker')
+  const [editUserFirstName, setEditUserFirstName] = useState('')
+  const [editUserLastName, setEditUserLastName] = useState('')
+  const [editUserBusy, setEditUserBusy] = useState(false)
 
   const loadTeamAssociates = async () => {
     try {
@@ -115,14 +124,54 @@ export function SettingsPage() {
     }
   }
 
+  const getUserDisplayName = (user: UserLite) =>
+    [user.firstName, user.lastName].filter(Boolean).join(' ').trim() || user.fullName?.trim() || ''
+
+  const openUserEditor = (user: UserLite) => {
+    setEditingUser(user)
+    setEditUserUsername(user.username || '')
+    setEditUserEmail(user.email || '')
+    setEditUserRole(user.role || 'Worker')
+    setEditUserFirstName(user.firstName || '')
+    setEditUserLastName(user.lastName || '')
+    setEditUserOpen(true)
+  }
+
+  const saveUserChanges = async () => {
+    if (!editingUser) return
+    setEditUserBusy(true)
+    try {
+      await api.patch(`/auth/users/${editingUser.id}/`, {
+        username: editUserUsername.trim(),
+        email: editUserEmail.trim(),
+        role: editUserRole,
+        first_name: editUserFirstName.trim(),
+        last_name: editUserLastName.trim(),
+      })
+      await useAppStore.getState().hydrateFromApi()
+      setEditUserOpen(false)
+      setEditingUser(null)
+      toast({ title: 'Kullanıcı güncellendi' })
+    } catch (err: unknown) {
+      toast({ title: 'Hata', description: formatApiError(err), variant: 'destructive' })
+    } finally {
+      setEditUserBusy(false)
+    }
+  }
+
   const userColumns: ColumnDef<UserLite>[] = [
+    {
+      id: 'fullName',
+      header: 'Ad Soyad',
+      cell: ({ row }) => {
+        const displayName = getUserDisplayName(row.original)
+        return displayName ? <div className="font-medium">{displayName}</div> : <span className="text-muted-foreground">Tanımlı değil</span>
+      },
+    },
     {
       accessorKey: 'username',
       header: 'Kullanıcı',
-      cell: ({ row }) => {
-        const d = [row.original.firstName, row.original.lastName].filter(Boolean).join(' ').trim()
-        return d ? `${d} · @${row.original.username}` : row.original.username
-      },
+      cell: ({ row }) => `@${row.original.username}`,
     },
     { accessorKey: 'email', header: 'E-posta' },
     {
@@ -136,34 +185,40 @@ export function SettingsPage() {
             id: 'user-actions',
             header: '',
             cell: ({ row }: { row: { original: UserLite } }) => (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 text-destructive hover:text-destructive"
-                onClick={async () => {
-                  if (
-                    !confirm(
-                      `${row.original.username} kullanıcısını kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz.`
+              <div className="flex items-center justify-end gap-1">
+                <Button variant="ghost" size="sm" className="h-8" onClick={() => openUserEditor(row.original)}>
+                  <Pencil className="mr-1 h-3.5 w-3.5" />
+                  Düzenle
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-destructive hover:text-destructive"
+                  onClick={async () => {
+                    if (
+                      !confirm(
+                        `${row.original.username} kullanıcısını kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz.`
+                      )
                     )
-                  )
-                    return
-                  try {
-                    await api.delete(`/auth/users/${row.original.id}/`)
-                    await useAppStore.getState().hydrateFromApi()
-                    toast({ title: 'Kullanıcı silindi' })
-                  } catch (err: any) {
-                    const d = err?.response?.data
-                    const msg =
-                      (typeof d?.detail === 'string' && d.detail) ||
-                      (Array.isArray(d?.detail) && d.detail[0]) ||
-                      (d && typeof d === 'object' && Object.values(d).flat().find((x) => typeof x === 'string')) ||
-                      'Silinemedi'
-                    toast({ title: 'Hata', description: String(msg), variant: 'destructive' })
-                  }
-                }}
-              >
-                Sil
-              </Button>
+                      return
+                    try {
+                      await api.delete(`/auth/users/${row.original.id}/`)
+                      await useAppStore.getState().hydrateFromApi()
+                      toast({ title: 'Kullanıcı silindi' })
+                    } catch (err: any) {
+                      const d = err?.response?.data
+                      const msg =
+                        (typeof d?.detail === 'string' && d.detail) ||
+                        (Array.isArray(d?.detail) && d.detail[0]) ||
+                        (d && typeof d === 'object' && Object.values(d).flat().find((x) => typeof x === 'string')) ||
+                        'Silinemedi'
+                      toast({ title: 'Hata', description: String(msg), variant: 'destructive' })
+                    }
+                  }}
+                >
+                  Sil
+                </Button>
+              </div>
             ),
           },
         ] as ColumnDef<UserLite>[])
@@ -1067,7 +1122,7 @@ export function SettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Kullanıcı listesi</CardTitle>
-            <CardDescription>Sistem kullanıcıları</CardDescription>
+            <CardDescription>Ad soyad bilgileri eksik olan üyeleri buradan düzenleyebilirsiniz</CardDescription>
           </CardHeader>
           <CardContent>
             <DataTable columns={userColumns} data={data.users} searchKey="username" />
@@ -1237,6 +1292,63 @@ export function SettingsPage() {
           </Card>
         </RbacGuard>
       </div>
+      <Dialog
+        open={editUserOpen}
+        onOpenChange={(open) => {
+          setEditUserOpen(open)
+          if (!open) setEditingUser(null)
+        }}
+      >
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Kullanıcıyı düzenle</DialogTitle>
+            <DialogDescription>
+              Ad soyad eksikse burada tamamlayabilirsiniz. Bu bilgi teklif ve sözleşmelerde hazırlayan alanında da kullanılır.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Ad</Label>
+              <Input value={editUserFirstName} onChange={(e) => setEditUserFirstName(e.target.value)} placeholder="Örn. Ali" />
+            </div>
+            <div className="space-y-2">
+              <Label>Soyad</Label>
+              <Input value={editUserLastName} onChange={(e) => setEditUserLastName(e.target.value)} placeholder="Örn. Yılmaz" />
+            </div>
+            <div className="space-y-2">
+              <Label>Kullanıcı adı</Label>
+              <Input value={editUserUsername} onChange={(e) => setEditUserUsername(e.target.value)} placeholder="Kullanıcı adı" />
+            </div>
+            <div className="space-y-2">
+              <Label>E-posta</Label>
+              <Input value={editUserEmail} onChange={(e) => setEditUserEmail(e.target.value)} placeholder="ornek@firma.com" />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label>Rol</Label>
+              <Select value={editUserRole} onValueChange={setEditUserRole}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {['Worker', 'Support', 'Sales', 'Finance', 'Manager', 'Warehouse', 'Admin'].map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {ROLE_LABEL_TR[r] ?? r}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditUserOpen(false)} disabled={editUserBusy}>
+              Vazgeç
+            </Button>
+            <Button onClick={saveUserChanges} disabled={editUserBusy}>
+              {editUserBusy ? 'Kaydediliyor...' : 'Kaydet'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <RbacGuard perm="teams.edit">
         <Card>
           <CardHeader>

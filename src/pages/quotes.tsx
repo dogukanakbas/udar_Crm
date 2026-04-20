@@ -180,6 +180,14 @@ const getDefaultPreparerId = (preparers: any[], quote?: Quote) => {
   return preparers[0]?.id ?? ''
 }
 
+const getPreparerDisplayName = (preparers: any[], preparedById?: string, fallback?: string) => {
+  const preparer = preparers.find((user) => String(user.id) === String(preparedById))
+  if (preparer?.fullName) return preparer.fullName
+  if (preparer?.firstName || preparer?.lastName) return [preparer?.firstName, preparer?.lastName].filter(Boolean).join(' ')
+  if (preparer?.username) return preparer.username
+  return fallback || ''
+}
+
 const normalizeDateInputValue = (value?: string | null) => {
   if (!value) return ''
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
@@ -782,7 +790,7 @@ function NumericEditor({ value, onValueChange, min = 0, max }: { value?: number;
 }
 
 export function QuotesPage() {
-  const { data, deleteQuotes } = useAppStore()
+  const { data, deleteQuotes, convertQuote } = useAppStore()
   const { toast } = useToast()
   const [status, setStatus] = useState('all')
   const [customer, setCustomer] = useState('all')
@@ -832,6 +840,15 @@ export function QuotesPage() {
     }
   }
 
+  const handleConvert = async (quote: Quote) => {
+    try {
+      await convertQuote(quote.id)
+      toast({ title: 'Teklif sözleşmeye dönüştürüldü' })
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Sözleşmeye dönüştürme sırasında hata oluştu', variant: 'destructive' })
+    }
+  }
+
   const columns: ColumnDef<Quote>[] = [
     { accessorKey: 'documentType', header: 'Tür', cell: ({ row }) => <Badge variant="outline">{DOCUMENT_TYPE_TR[row.original.documentType]}</Badge> },
     { accessorKey: 'number', header: 'No' },
@@ -864,6 +881,14 @@ export function QuotesPage() {
             <Download className="mr-2 h-4 w-4" />
             İndir
           </Button>
+          {row.original.documentType === 'Quote' ? (
+            <RbacGuard perm="quotes.edit">
+              <Button variant="ghost" size="sm" onClick={() => handleConvert(row.original)}>
+                <Check className="mr-2 h-4 w-4" />
+                Sözleşmeye dönüştür
+              </Button>
+            </RbacGuard>
+          ) : null}
           <RbacGuard perm="quotes.edit">
             <Button
               variant="ghost"
@@ -944,13 +969,13 @@ export function QuotesPage() {
         </div>
 
         <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Müşteri</Label>
+          <Label className="text-xs text-muted-foreground">Cari</Label>
           <Select value={customer} onValueChange={setCustomer}>
             <SelectTrigger>
-              <SelectValue placeholder="Tüm müşteriler" />
+              <SelectValue placeholder="Tüm cariler" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Tüm müşteriler</SelectItem>
+              <SelectItem value="all">Tüm cariler</SelectItem>
               {companies.map((company) => <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>)}
             </SelectContent>
           </Select>
@@ -1019,6 +1044,8 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   const isEditing = Boolean(quote)
   const getFormDefaults = () => getInitialValues(documentMode, companies, preparers, products, quote)
   const form = useForm({ resolver: zodResolver(documentSchema) as any, defaultValues: getFormDefaults() })
+  const preparedById = form.watch('preparedById')
+  const preparedByDisplayName = getPreparerDisplayName(preparers, preparedById, quote?.preparedByName || quote?.owner)
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen)
@@ -1124,7 +1151,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
         )
 
     if (nextCompany) applyCustomerToForm(nextCompany, { includeCustomerId: true, forcePreferredCurrency: true })
-    toast({ title: 'Müşteri eklendi' })
+      toast({ title: 'Cari eklendi' })
   }
 
   const handleSave = form.handleSubmit(async (values) => {
@@ -1183,7 +1210,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
         <DialogHeader><DialogTitle>{isEditing ? `${DOCUMENT_TYPE_TR[documentMode]} düzenle` : documentMode === 'Contract' ? 'Sözleşme oluştur' : 'Teklif oluştur'}</DialogTitle></DialogHeader>
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-3 grid grid-cols-4">
-            <TabsTrigger value="customer">Müşteri</TabsTrigger>
+            <TabsTrigger value="customer">Cariler</TabsTrigger>
             <TabsTrigger value="document">Belge</TabsTrigger>
             <TabsTrigger value="lines">Kalemler</TabsTrigger>
             <TabsTrigger value="review">Özet</TabsTrigger>
@@ -1191,10 +1218,10 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
           <TabsContent value="customer" className="space-y-4">
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <Label>Müşteri</Label>
+                <Label>Cari seçiniz</Label>
                 <Button type="button" variant="ghost" size="sm" onClick={() => setCustomerModalOpen(true)}>
                   <Plus className="mr-2 h-4 w-4" />
-                  Müşteri ekle
+                  Cari ekle
                 </Button>
               </div>
               <Select
@@ -1207,13 +1234,13 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
                   form.setValue('customerId', value, { shouldDirty: true, shouldValidate: true })
                 }}
               >
-                <SelectTrigger><SelectValue placeholder="Müşteri seçin" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Cari seçiniz" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={ADD_CUSTOMER_OPTION}>Yeni müşteri / firma ekle</SelectItem>
+                  <SelectItem value={ADD_CUSTOMER_OPTION}>Yeni cari / firma ekle</SelectItem>
                   {companies.map((company) => <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">Listeden ayrılmadan yeni firma ekleyebilir ve eklediğiniz müşteriyi anında seçebilirsiniz.</p>
+              <p className="text-xs text-muted-foreground">Listeden ayrılmadan yeni cari ekleyebilir ve eklediğiniz firmayı anında seçebilirsiniz.</p>
               {selectedCustomer ? (
                 <p className="text-xs text-muted-foreground">
                   Varsayılan para birimi: {getCurrencySymbol(resolveCompanyCurrency(selectedCustomer.currency, selectedCustomer.country))}{' '}
@@ -1234,7 +1261,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
 
           <TabsContent value="document" className="space-y-4">
             <div className="grid gap-3 md:grid-cols-2">
-              <div><Label>Hazırlayan</Label><Select value={form.watch('preparedById') || '__none__'} onValueChange={(value) => form.setValue('preparedById', value === '__none__' ? '' : value)}><SelectTrigger><SelectValue placeholder="Hazırlayan seçin" /></SelectTrigger><SelectContent><SelectItem value="__none__">Seçili değil</SelectItem>{preparers.map((user) => <SelectItem key={user.id} value={user.id}>{user.fullName || user.username}</SelectItem>)}</SelectContent></Select></div>
+              <div><Label>Hazırlayan</Label><Input value={preparedByDisplayName || '-'} readOnly disabled /></div>
               <div><Label>Satıcı firma</Label><Select value={form.watch('sellerCompanyKey') || 'AYKA'} onValueChange={(value) => form.setValue('sellerCompanyKey', value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{SELLER_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
               <div><Label>Para birimi</Label><Select value={form.watch('currency') || 'TRY'} onValueChange={(value) => setDocumentCurrency(value, { forceExchangeRate: value !== form.getValues('currency') })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{selectedCustomerCurrencyOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select><p className="mt-1 text-xs text-muted-foreground">{selectedCustomer && !selectedCustomerAllowedCurrencies.includes('TRY') ? 'Yurt dışı müşterilerde yalnızca dolar veya euro kullanılır.' : 'Seçili müşterinin varsayılan para birimi otomatik doldurulur, isterseniz değiştirebilirsiniz.'}</p></div>
               <div><Label>{`Kur (${getCurrencySymbol(form.watch('currency'))} -> ₺)`}</Label><Input type="number" step="0.0001" min="1" disabled={(form.watch('currency') || 'TRY') === 'TRY'} value={form.watch('exchangeRate') ?? 1} onChange={(event) => form.setValue('exchangeRate', Number(event.target.value || 1), { shouldDirty: true })} /><p className="mt-1 text-xs text-muted-foreground">{(form.watch('currency') || 'TRY') === 'TRY' ? 'Türk Lirası seçildiğinde kur 1 kabul edilir.' : formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p></div>
@@ -1307,7 +1334,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
 export function QuoteDetailPage() {
   const params = useParams({ from: '/crm/quotes/$quoteId' })
   const navigate = useNavigate()
-  const { data, updateQuote, convertQuote, deleteQuotes } = useAppStore()
+  const { data, sendQuote, requestQuoteApproval, convertQuote, deleteQuotes } = useAppStore()
   const { toast } = useToast()
   const [auditLogs, setAuditLogs] = useState<QuoteAuditLogItem[]>([])
   const [approvalSteps, setApprovalSteps] = useState<{ id: string; role: string; status: string; comment?: string; acted_by?: string; updated_at?: string }[]>([])
@@ -1327,15 +1354,35 @@ export function QuoteDetailPage() {
   const termsLines = getTermsText(quote.contractConfig).split('\n').map((line) => line.trim()).filter(Boolean)
   const contractNotesLines = getContractNotesText(quote.contractConfig).split('\n').map((line) => line.trim()).filter(Boolean)
 
-  const approve = async (role: any) => {
+  const handleSend = async () => {
     try {
-      await updateQuote(quote.id, {
-        approval: (quote.approval || []).map((step) => (step.role === role ? { ...step, status: 'Approved', updatedAt: new Date().toISOString() } : step)),
-        status: role === 'Finance' ? 'Approved' : quote.status,
-      })
-      toast({ title: `${role} onayı alındı` })
+      await sendQuote(quote.id)
+      toast({ title: 'Belge gönderildi olarak işaretlendi' })
     } catch (error: any) {
-      toast({ title: error?.response?.data?.detail || 'Onay durumu güncellenemedi', variant: 'destructive' })
+      toast({ title: error?.response?.data?.detail || 'Gönderim durumu güncellenemedi', variant: 'destructive' })
+    }
+  }
+
+  const handleRequestApproval = async () => {
+    try {
+      await requestQuoteApproval(quote.id)
+      const refreshed = await api.get('/approvals/', { params: { quote_id: quote.id } })
+      setApprovalSteps(refreshed.data?.[0]?.steps || [])
+      toast({ title: 'Belge onay sürecine gönderildi' })
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Onay süreci başlatılamadı', variant: 'destructive' })
+    }
+  }
+
+  const handleConvert = async () => {
+    try {
+      const contract = await convertQuote(quote.id)
+      toast({ title: 'Teklif sözleşmeye dönüştürüldü' })
+      if (contract?.id) {
+        navigate({ to: '/crm/quotes/$quoteId', params: { quoteId: contract.id } })
+      }
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Sözleşmeye dönüştürme sırasında hata oluştu', variant: 'destructive' })
     }
   }
 
@@ -1381,10 +1428,10 @@ export function QuoteDetailPage() {
                 }
               />
             </RbacGuard>
-            <RbacGuard perm="quotes.edit"><Button size="sm" variant="outline" onClick={async () => { try { await updateQuote(quote.id, { status: 'Sent' }); toast({ title: 'Belge gönderildi olarak işaretlendi' }) } catch (error: any) { toast({ title: error?.response?.data?.detail || 'Durum güncellenemedi', variant: 'destructive' }) } }}><Send className="mr-2 h-4 w-4" />Gönder</Button></RbacGuard>
+            <RbacGuard perm="quotes.edit"><Button size="sm" variant="outline" onClick={handleSend}><Send className="mr-2 h-4 w-4" />Gönderildi işaretle</Button></RbacGuard>
             <Button onClick={handleDownload}><Download className="mr-2 h-4 w-4" />İndir</Button>
-            <RbacGuard perm="quotes.edit"><Button size="sm" variant="outline" onClick={() => approve('Manager')}><Shield className="mr-2 h-4 w-4" />Onay iste</Button></RbacGuard>
-            <RbacGuard perm="quotes.edit"><Button size="sm" onClick={() => { convertQuote(quote.id); toast({ title: 'Satış siparişine dönüştürüldü' }) }}><Check className="mr-2 h-4 w-4" />Satış siparişi</Button></RbacGuard>
+            <RbacGuard perm="quotes.edit"><Button size="sm" variant="outline" onClick={handleRequestApproval}><Shield className="mr-2 h-4 w-4" />Onay iste</Button></RbacGuard>
+            {quote.documentType === 'Quote' ? <RbacGuard perm="quotes.edit"><Button size="sm" onClick={handleConvert}><Check className="mr-2 h-4 w-4" />Sözleşmeye dönüştür</Button></RbacGuard> : null}
             <RbacGuard perm="quotes.edit"><Button size="sm" variant="destructive" disabled={deleting} onClick={handleDelete}><Trash2 className="mr-2 h-4 w-4" />Sil</Button></RbacGuard>
           </div>
         }

@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -5,7 +7,7 @@ import mimetypes
 
 from django.http import FileResponse
 
-from .models import Quote, PricingRule, BusinessPartner, Lead, Opportunity, Contact
+from .models import Quote, QuoteLine, PricingRule, BusinessPartner, Lead, Opportunity, Contact
 from .contracts import build_document_export, get_template_download, list_document_exports, list_template_library, save_template_override
 from workflow.models import ApprovalInstance, ApprovalStep
 from erp.models import Product
@@ -94,15 +96,95 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         quote.status = 'Sent'
         quote.save(update_fields=['status'])
         log_entity_action(quote, 'sent', user=request.user)
-        return Response({'status': 'sent'})
+        return Response({'status': 'sent', 'quote': QuoteSerializer(quote, context={'request': request}).data})
 
     @action(detail=True, methods=['post'])
     def convert(self, request, pk=None):
         quote = self._attach_audit_user(self.get_object())
+        if quote.document_type != 'Quote':
+            return Response({'detail': 'Yalnizca teklifler sozlesmeye donusturulebilir.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        source_config = deepcopy(quote.contract_config or {})
+        existing_contract_id = source_config.get('converted_contract_id')
+        if existing_contract_id:
+            existing_contract = (
+                Quote.objects.filter(organization=quote.organization, pk=existing_contract_id, document_type='Contract')
+                .select_related('customer', 'owner', 'prepared_by')
+                .prefetch_related('lines__product__category')
+                .first()
+            )
+            if existing_contract:
+                return Response(
+                    {
+                        'status': 'converted',
+                        'contract': QuoteSerializer(existing_contract, context={'request': request}).data,
+                        'source': QuoteSerializer(quote, context={'request': request}).data,
+                    }
+                )
+
+        number_range, _ = NumberRange.objects.get_or_create(
+            organization=quote.organization,
+            doc_type='CONTRACT',
+            defaults={'prefix': 'C-'},
+        )
+        contract_number = number_range.next_number()
+        contract_config = deepcopy(quote.contract_config or {})
+        contract_config['source_quote_id'] = quote.id
+        contract_config['source_quote_number'] = quote.number
+
+        contract = Quote.objects.create(
+            organization=quote.organization,
+            document_type='Contract',
+            number=contract_number,
+            customer=quote.customer,
+            opportunity=quote.opportunity,
+            owner=quote.owner or request.user,
+            prepared_by=quote.prepared_by,
+            seller_company_key=quote.seller_company_key,
+            status='Draft',
+            valid_until=quote.valid_until,
+            currency=quote.currency,
+            payment_terms=quote.payment_terms,
+            delivery_terms=quote.delivery_terms,
+            notes=quote.notes,
+            vat_rate=quote.vat_rate,
+            contract_config=contract_config,
+        )
+        contract._audit_user = request.user
+
+        for line in quote.lines.all().order_by('sort_order', 'id'):
+            QuoteLine.objects.create(
+                quote=contract,
+                product=line.product,
+                section_key=line.section_key,
+                name=line.name,
+                unit=line.unit,
+                qty=line.qty,
+                unit_price=line.unit_price,
+                discount=line.discount,
+                discount_secondary=line.discount_secondary,
+                tax=line.tax,
+                sort_order=line.sort_order,
+                details=deepcopy(line.details or {}),
+            )
+
+        QuoteSerializer(context={'request': request})._recalc(contract)
+
+        source_config['converted_contract_id'] = contract.id
+        source_config['converted_contract_number'] = contract.number
+        quote.contract_config = source_config
         quote.status = 'Converted'
-        quote.save(update_fields=['status'])
-        log_entity_action(quote, 'converted', user=request.user)
-        return Response({'status': 'converted'})
+        quote.save(update_fields=['status', 'contract_config'])
+
+        log_entity_action(quote, 'converted', user=request.user, field='converted_contract_id', new_value=str(contract.id))
+        log_entity_action(contract, 'created_from_quote', user=request.user, field='source_quote_id', new_value=str(quote.id))
+        return Response(
+            {
+                'status': 'converted',
+                'contract': QuoteSerializer(contract, context={'request': request}).data,
+                'source': QuoteSerializer(quote, context={'request': request}).data,
+            }
+        )
 
     @action(detail=True, methods=['post'])
     def request_approval(self, request, pk=None):

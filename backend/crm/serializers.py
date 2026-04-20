@@ -269,6 +269,9 @@ class QuoteSerializer(serializers.ModelSerializer):
         if 'vatRate' in mutable and 'vat_rate' not in mutable:
             mutable['vat_rate'] = mutable.pop('vatRate')
 
+        if 'lines' not in mutable:
+            return super().to_internal_value(mutable)
+
         lines = mutable.get('lines', []) or []
         normalized_lines = []
         for idx, line in enumerate(lines):
