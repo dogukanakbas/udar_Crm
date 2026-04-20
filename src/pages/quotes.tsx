@@ -293,7 +293,15 @@ const collectFirstError = (errors: any, parentPath = ''): { path: string; messag
   return null
 }
 
-const getInitialValues = (mode: SalesDocumentType, companies: any[], preparers: any[], products: Product[], sellerCompanies: SellerCompanyProfile[], quote?: Quote) => {
+const getInitialValues = (
+  mode: SalesDocumentType,
+  companies: any[],
+  preparers: any[],
+  products: Product[],
+  sellerCompanies: SellerCompanyProfile[],
+  quote?: Quote,
+  priceListLabel = ''
+) => {
   const customerSnapshot = quote?.contractConfig?.customerSnapshot || quote?.contractConfig?.customer_snapshot || {}
   const company = companies.find((item) => item.id === quote?.customerId) || companies[0]
   const preferredCurrency = resolveCompanyCurrency(company?.currency, company?.country)
@@ -1059,6 +1067,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   const [customerModalOpen, setCustomerModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [activeTab, setActiveTab] = useState('customer')
+  const [orgPriceListLabel, setOrgPriceListLabel] = useState('2026/1. LİSTE')
   const companies = data.companies
   const sellerCompanies = data.sellerCompanies || []
   const products = data.products
@@ -1066,10 +1075,21 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   const sellerOptions = useMemo(() => getSellerCompanyOptions(sellerCompanies), [sellerCompanies])
   const documentMode = quote?.documentType ?? mode
   const isEditing = Boolean(quote)
-  const getFormDefaults = () => getInitialValues(documentMode, companies, preparers, products, sellerCompanies, quote)
+  const getFormDefaults = () => getInitialValues(documentMode, companies, preparers, products, sellerCompanies, quote, orgPriceListLabel)
   const form = useForm({ resolver: zodResolver(documentSchema) as any, defaultValues: getFormDefaults() })
   const preparedById = form.watch('preparedById')
   const preparedByDisplayName = getPreparerDisplayName(preparers, preparedById, quote?.preparedByName || quote?.owner)
+
+  useEffect(() => {
+    api
+      .get('/auth/organization-settings/')
+      .then((response) => setOrgPriceListLabel(response.data?.price_list_label || '2026/1. LİSTE'))
+      .catch(() => setOrgPriceListLabel('2026/1. LİSTE'))
+  }, [])
+
+  useEffect(() => {
+    form.setValue('priceListLabel', orgPriceListLabel, { shouldDirty: false })
+  }, [form, orgPriceListLabel, open])
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen)
@@ -1292,7 +1312,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
               <div><Label>Şablon</Label><Select value={form.watch('templateKey') || '__auto__'} onValueChange={(value) => form.setValue('templateKey', value === '__auto__' ? '' : value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{TEMPLATE_OPTIONS[documentMode].map((option) => <SelectItem key={option.value || '__auto__'} value={option.value || '__auto__'}>{option.label}</SelectItem>)}</SelectContent></Select></div>
               <div><Label>Oluşturulma tarihi</Label><Input type="date" value={form.watch('contractDate') || ''} readOnly disabled /></div>
               <div><Label>Geçerlilik tarihi</Label><Input type="date" value={form.watch('validUntil') || ''} onChange={(event) => form.setValue('validUntil', event.target.value, { shouldDirty: true, shouldValidate: true })} /></div>
-              <div><Label>Fiyat listesi etiketi</Label><Input value={form.watch('priceListLabel') || ''} onChange={(event) => form.setValue('priceListLabel', event.target.value)} /></div>
+              <div><Label>Fiyat listesi etiketi</Label><Input value={form.watch('priceListLabel') || ''} readOnly disabled /><p className="mt-1 text-xs text-muted-foreground">Bu alan şablon yönetiminde Admin tarafından belirlenir.</p></div>
               <div><Label>İmza etiketi</Label><Input value={form.watch('signatureCustomerLabel') || ''} onChange={(event) => form.setValue('signatureCustomerLabel', event.target.value)} /></div>
                 <div><Label>Teslim tipi</Label><Input value={form.watch('deliveryType') || ''} onChange={(event) => form.setValue('deliveryType', event.target.value)} /></div>
                 <div><Label>Ödeme tipi</Label><Input value={form.watch('paymentOption') || ''} onChange={(event) => form.setValue('paymentOption', event.target.value)} /></div>

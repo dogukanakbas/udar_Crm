@@ -625,9 +625,10 @@ class OrganizationSettingsView(APIView):
         "working_hours_start": s.working_hours_start.strftime("%H:%M"),
         "working_hours_end": s.working_hours_end.strftime("%H:%M"),
         "working_days": s.working_days or [0, 1, 2, 3, 4],
+        "price_list_label": s.price_list_label or "2026/1. LİSTE",
       })
     except OrganizationSettings.DoesNotExist:
-      return Response({"working_hours_start": "08:00", "working_hours_end": "18:00", "working_days": [0, 1, 2, 3, 4]})
+      return Response({"working_hours_start": "08:00", "working_hours_end": "18:00", "working_days": [0, 1, 2, 3, 4], "price_list_label": "2026/1. LİSTE"})
 
   def patch(self, request):
     if getattr(request.user, "role", "") != "Admin":
@@ -639,6 +640,7 @@ class OrganizationSettingsView(APIView):
     start = request.data.get("working_hours_start")
     end = request.data.get("working_hours_end")
     days = request.data.get("working_days")
+    price_list_label = request.data.get("price_list_label")
     if start:
       from datetime import datetime
       try:
@@ -653,9 +655,13 @@ class OrganizationSettingsView(APIView):
         pass
     if days is not None:
       s.working_days = [int(x) for x in days if str(x).isdigit()]
+    if price_list_label is not None:
+      value = str(price_list_label).strip()
+      s.price_list_label = value or "2026/1. LİSTE"
     s.save()
     return Response({
       "working_hours_start": s.working_hours_start.strftime("%H:%M"),
       "working_hours_end": s.working_hours_end.strftime("%H:%M"),
       "working_days": s.working_days,
+      "price_list_label": s.price_list_label or "2026/1. LİSTE",
     })

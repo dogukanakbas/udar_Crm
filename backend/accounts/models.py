@@ -94,6 +94,7 @@ class OrganizationSettings(models.Model):
     working_hours_start = models.TimeField(default=time(8, 0))   # Mesai başlangıç
     working_hours_end = models.TimeField(default=time(18, 0))    # Mesai bitiş
     working_days = models.JSONField(default=list)  # [0,1,2,3,4] = Pzt-Cuma (0=Pzt, 6=Paz)
+    price_list_label = models.CharField(max_length=120, default='2026/1. LİSTE')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

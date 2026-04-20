@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import unicodedata
 from django.conf import settings
+from accounts.models import OrganizationSettings
 from openpyxl import load_workbook
 from openpyxl.styles import Border, PatternFill, Side
 
@@ -313,6 +314,16 @@ TEMPLATE_REGISTRY = [
 ]
 
 ALLOWED_TEMPLATE_EXTENSIONS = {'.xlsx', '.xltx', '.xlsm'}
+
+
+def get_org_price_list_label(organization):
+    if not organization:
+        return '2026/1. LİSTE'
+    try:
+        settings_row = OrganizationSettings.objects.get(organization=organization)
+    except OrganizationSettings.DoesNotExist:
+        return '2026/1. LİSTE'
+    return str(settings_row.price_list_label or '2026/1. LİSTE').strip() or '2026/1. LİSTE'
 
 
 def normalize_seller_company_key(value):
@@ -642,7 +653,7 @@ def _fill_shared_header(ws, quote):
     _set_cell_value(ws, 'D31', prepared_by)
     _ensure_header_value_row_layout(ws, 32, source_row=31)
     _set_cell_value(ws, 'D32', format_validity_text(quote.valid_until))
-    _set_cell_value(ws, 'D33', ' • '.join(part for part in [config.get('price_list_label') or '', currency_note] if part))
+    _set_cell_value(ws, 'D33', ' • '.join(part for part in [get_org_price_list_label(quote.organization), currency_note] if part))
     _set_cell_value(ws, 'C16', _choice_text(_normalize_display_name(left_seller.get('display_name', '')), seller_key == left_seller.get('key')))
     _set_cell_value(ws, 'J16', _choice_text(_normalize_display_name(right_seller.get('display_name', '')), seller_key == right_seller.get('key')))
     _set_cell_value(ws, 'C17', f"VERGİ DAİRESİ: {left_seller.get('tax_office', '')}")

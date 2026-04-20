@@ -6,7 +6,10 @@ import { RbacGuard } from '@/components/rbac'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { useToast } from '@/components/ui/use-toast'
+import { useAppStore } from '@/state/use-app-store'
 
 type DocumentTemplateLibraryItem = {
   template_key: string
@@ -44,12 +47,15 @@ async function downloadTemplateFile(
 }
 
 export function DocumentTemplateLibrary() {
+  const { data } = useAppStore()
   const { toast } = useToast()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [templates, setTemplates] = useState<DocumentTemplateLibraryItem[]>([])
   const [loading, setLoading] = useState(true)
   const [uploadingKey, setUploadingKey] = useState<string | null>(null)
   const [pendingTemplateKey, setPendingTemplateKey] = useState<string | null>(null)
+  const [priceListLabel, setPriceListLabel] = useState('2026/1. LİSTE')
+  const [savingSettings, setSavingSettings] = useState(false)
 
   const fetchTemplates = async () => {
     setLoading(true)
@@ -69,6 +75,13 @@ export function DocumentTemplateLibrary() {
 
   useEffect(() => {
     fetchTemplates()
+  }, [])
+
+  useEffect(() => {
+    api
+      .get('/auth/organization-settings/')
+      .then((response) => setPriceListLabel(response.data?.price_list_label || '2026/1. LİSTE'))
+      .catch(() => setPriceListLabel('2026/1. LİSTE'))
   }, [])
 
   const groupedTemplates = useMemo(
@@ -124,6 +137,54 @@ export function DocumentTemplateLibrary() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        <Card className="border-dashed">
+          <CardHeader>
+            <CardTitle>Belge sabitleri</CardTitle>
+            <CardDescription>
+              Fiyat listesi etiketi gibi kilitli şablon sabitlerini yalnızca Admin değiştirebilir. Belge oluşturma ekranında bu alan salt okunur görünür.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-2">
+              <Label>Fiyat listesi etiketi</Label>
+              <Input
+                value={priceListLabel}
+                onChange={(event) => setPriceListLabel(event.target.value)}
+                disabled={data.settings.role !== 'Admin' || savingSettings}
+              />
+              <p className="text-xs text-muted-foreground">Örn. `2026/2. LİSTE`. Burada ne yazıyorsa teklifler ve sözleşmeler o etiketi kullanır.</p>
+            </div>
+            <RbacGuard perm="quotes.edit">
+              <Button
+                onClick={async () => {
+                  setSavingSettings(true)
+                  try {
+                    const response = await api.patch('/auth/organization-settings/', {
+                      price_list_label: priceListLabel,
+                    })
+                    setPriceListLabel(response.data?.price_list_label || priceListLabel)
+                    toast({
+                      title: 'Belge sabitleri güncellendi',
+                      description: 'Fiyat listesi etiketi artık yeni belge kayıtlarında otomatik kullanılacak.',
+                    })
+                  } catch (error: any) {
+                    toast({
+                      title: 'Ayar kaydedilemedi',
+                      description: error?.response?.data?.detail || 'Fiyat listesi etiketi güncellenemedi.',
+                      variant: 'destructive',
+                    })
+                  } finally {
+                    setSavingSettings(false)
+                  }
+                }}
+                disabled={data.settings.role !== 'Admin' || savingSettings}
+              >
+                {savingSettings ? 'Kaydediliyor...' : 'Belge sabitlerini kaydet'}
+              </Button>
+            </RbacGuard>
+          </CardContent>
+        </Card>
+
         <input
           ref={fileInputRef}
           type="file"

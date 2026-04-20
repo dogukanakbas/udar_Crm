@@ -3,6 +3,7 @@ from decimal import Decimal, InvalidOperation
 from django.utils import timezone
 from rest_framework import serializers
 
+from accounts.models import OrganizationSettings
 from audit.utils import log_entity_action
 from erp.models import Product
 
@@ -33,6 +34,16 @@ def default_partner_currency(country):
     if not str(country or '').strip():
         return 'TRY'
     return 'TRY' if is_turkey_country(country) else 'USD'
+
+
+def get_org_price_list_label(organization):
+    if not organization:
+        return '2026/1. LİSTE'
+    try:
+        settings = OrganizationSettings.objects.get(organization=organization)
+    except OrganizationSettings.DoesNotExist:
+        return '2026/1. LİSTE'
+    return str(settings.price_list_label or '2026/1. LİSTE').strip() or '2026/1. LİSTE'
 
 
 class BusinessPartnerSerializer(serializers.ModelSerializer):
@@ -414,6 +425,7 @@ class QuoteSerializer(serializers.ModelSerializer):
         customer = validated_data.get('customer') or (instance.customer if instance else None)
         prepared_by = validated_data.get('prepared_by') or (instance.prepared_by if instance else None)
         owner = validated_data.get('owner') or (instance.owner if instance else None)
+        organization = validated_data.get('organization') or (instance.organization if instance else None)
 
         snapshot = {}
         if customer:
@@ -444,7 +456,7 @@ class QuoteSerializer(serializers.ModelSerializer):
 
         config.setdefault('template_mode', 'auto')
         config.setdefault('template_key', '')
-        config.setdefault('price_list_label', '2026/1. LİSTE')
+        config['price_list_label'] = get_org_price_list_label(organization)
         config.setdefault('validity_label', '')
         currency_code = str(validated_data.get('currency') or (instance.currency if instance else 'TRY') or 'TRY').upper()
         try:
