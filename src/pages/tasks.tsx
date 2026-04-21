@@ -1627,6 +1627,15 @@ export function TaskDetailPage() {
   const productLineQtyTotal = sumProductLineQuantities(task.productLines)
   const productLineProducedTotal = sumProductLineQtyProduced(task.productLines)
   const workflowQtyFallback = workflowTargetFallbackQty(task)
+  const linkedSalesOrder =
+    task.salesOrder != null && String(task.salesOrder).trim() !== ''
+      ? data.salesOrders.find((s) => s.id === task.salesOrder)
+      : undefined
+  const salesOrderOrderQty = linkedSalesOrder?.orderQuantity ?? 0
+  const salesOrderProduced = linkedSalesOrder?.quantityProduced ?? 0
+  const salesOrderRemaining =
+    salesOrderOrderQty > 0 ? Math.max(0, salesOrderOrderQty - salesOrderProduced) : null
+  const salesOrderFulfilled = salesOrderOrderQty > 0 && salesOrderProduced >= salesOrderOrderQty
   const checklist = (task.checklist || []) as TaskChecklistItem[]
   const workflowChecklistItems = [...checklist]
     .filter((c) => c.workflowTeamId)
@@ -2158,6 +2167,7 @@ export function TaskDetailPage() {
                               pattern="[0-9]*"
                               autoComplete="off"
                               className="h-8 w-24"
+                              disabled={task.status === 'done' || sequentialProdLocked || salesOrderFulfilled}
                               value={
                                 lineProdInput[lidx]?.q ?? String(Math.max(0, Number(lineProduced ?? 0)))
                               }
@@ -2177,6 +2187,7 @@ export function TaskDetailPage() {
                             <Input
                               type="date"
                               className="h-8 w-40"
+                              disabled={task.status === 'done' || sequentialProdLocked || salesOrderFulfilled}
                               value={lineProdInput[lidx]?.d ?? prodDate}
                               onChange={(e) => {
                                 setLineProdInput((prev) => ({
@@ -2188,8 +2199,14 @@ export function TaskDetailPage() {
                           </div>
                           <Button
                             size="sm"
-                            disabled={task.status === 'done' || sequentialProdLocked}
-                            title={sequentialProdLocked ? 'Önce usta başı görevi üstlenmeli' : undefined}
+                            disabled={task.status === 'done' || sequentialProdLocked || salesOrderFulfilled}
+                            title={
+                              salesOrderFulfilled
+                                ? 'Sipariş hedef adedine ulaşıldı'
+                                : sequentialProdLocked
+                                  ? 'Önce usta başı görevi üstlenmeli'
+                                  : undefined
+                            }
                             onClick={async () => {
                               const row = lineProdInput[lidx] || {
                                 q: String(Math.max(0, Number(lineProduced ?? 0))),
@@ -2210,6 +2227,7 @@ export function TaskDetailPage() {
                                   quantity,
                                   entry_date: row.d || prodDate,
                                   product_line_index: lidx,
+                                  ...(task.currentTeam ? { team: task.currentTeam } : {}),
                                 })
                                 await hydrateFromApi()
                                 setLineProdInput((prev) => {
@@ -2763,17 +2781,19 @@ export function TaskDetailPage() {
               ) : null}
               {task.salesOrder && (
                 <p className="text-xs text-muted-foreground">
-                  Sipariş: {data.salesOrders.find((s) => s.id === task.salesOrder)?.number || task.salesOrder}
-                  {(() => {
-                    const so = data.salesOrders.find((s) => s.id === task.salesOrder)
-                    if (!so?.orderQuantity) return null
-                    return (
-                      <span>
-                        {' '}
-                        (sipariş: {so.orderQuantity}, üretilen: {so.quantityProduced ?? 0})
-                      </span>
-                    )
-                  })()}
+                  Sipariş: {linkedSalesOrder?.number || task.salesOrder}
+                  {salesOrderOrderQty > 0 ? (
+                    <span>
+                      {' '}
+                      (sipariş: {formatNumber(salesOrderOrderQty)}, üretilen: {formatNumber(salesOrderProduced)}
+                      {salesOrderRemaining != null ? `, kalan: ${formatNumber(salesOrderRemaining)}` : ''})
+                    </span>
+                  ) : null}
+                  {salesOrderFulfilled ? (
+                    <span className="block mt-1 font-medium text-amber-800 dark:text-amber-400">
+                      Sipariş hedef adedine ulaşıldı — yeni üretim girişi kapalıdır.
+                    </span>
+                  ) : null}
                 </p>
               )}
               {(!task.productLines || task.productLines.length === 0) && (
@@ -2787,6 +2807,7 @@ export function TaskDetailPage() {
                         pattern="[0-9]*"
                         autoComplete="off"
                         className="h-8 w-24"
+                        disabled={task.status === 'done' || sequentialProdLocked || salesOrderFulfilled}
                         value={prodQty}
                         onChange={(e) => {
                           const v = e.target.value
@@ -2796,15 +2817,23 @@ export function TaskDetailPage() {
                     </div>
                     <div>
                       <Label className="text-xs">Tarih</Label>
-                      <Input type="date" className="h-8 w-40" value={prodDate} onChange={(e) => setProdDate(e.target.value)} />
+                      <Input
+                        type="date"
+                        className="h-8 w-40"
+                        disabled={task.status === 'done' || sequentialProdLocked || salesOrderFulfilled}
+                        value={prodDate}
+                        onChange={(e) => setProdDate(e.target.value)}
+                      />
                     </div>
                     <Button
                       size="sm"
-                      disabled={task.status === 'done' || sequentialProdLocked}
+                      disabled={task.status === 'done' || sequentialProdLocked || salesOrderFulfilled}
                       title={
-                        sequentialProdLocked
-                          ? 'Önce usta başı görevi üstlenmeli'
-                          : undefined
+                        salesOrderFulfilled
+                          ? 'Sipariş hedef adedine ulaşıldı'
+                          : sequentialProdLocked
+                            ? 'Önce usta başı görevi üstlenmeli'
+                            : undefined
                       }
                       onClick={async () => {
                         const raw = prodQty.trim()
@@ -2821,6 +2850,7 @@ export function TaskDetailPage() {
                           await api.post(`/tasks/${task.id}/log-production/`, {
                             quantity,
                             entry_date: prodDate,
+                            ...(task.currentTeam ? { team: task.currentTeam } : {}),
                           })
                           await hydrateFromApi()
                           setProdQty('1')
