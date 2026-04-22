@@ -41,6 +41,7 @@ export function workflowTargetFallbackQty(task: {
 export function emptyProductLineRow(): TaskProductLineFormValues {
   return {
     mode: 'manual',
+    unitType: 'adet',
     modelCode: '',
     variant: '',
     quantity: 1,
@@ -51,6 +52,9 @@ export function emptyProductLineRow(): TaskProductLineFormValues {
     productColor: '',
     productColorCode: '',
     briefIntro: '',
+    fireQty: 0,
+    fireReason: '',
+    fireImageDataUrl: '',
     qtyProduced: 0,
   }
 }
@@ -59,6 +63,7 @@ export function mapApiProductLineToTask(ln: any): TaskProductLine {
   const mode = ln?.mode === 'fixed' ? 'fixed' : 'manual'
   return {
     mode,
+    unitType: ln?.unit_type === 'metre' || ln?.unitType === 'metre' ? 'metre' : 'adet',
     modelCode: ln?.model_code != null ? String(ln.model_code) : ln?.modelCode != null ? String(ln.modelCode) : undefined,
     variant: ln?.variant != null ? String(ln.variant) : undefined,
     quantity: ln?.quantity != null ? Number(ln.quantity) : undefined,
@@ -99,6 +104,24 @@ export function mapApiProductLineToTask(ln: any): TaskProductLine {
         : ln?.briefIntro != null && String(ln.briefIntro).trim() !== ''
           ? String(ln.briefIntro).trim()
           : undefined,
+    fireQty:
+      ln?.fire_qty != null
+        ? Number(ln.fire_qty)
+        : ln?.fireQty != null
+          ? Number(ln.fireQty)
+          : 0,
+    fireReason:
+      ln?.fire_reason != null && String(ln.fire_reason).trim() !== ''
+        ? String(ln.fire_reason).trim()
+        : ln?.fireReason != null && String(ln.fireReason).trim() !== ''
+          ? String(ln.fireReason).trim()
+          : undefined,
+    fireImageDataUrl:
+      ln?.fire_image_data_url != null && String(ln.fire_image_data_url).trim() !== ''
+        ? String(ln.fire_image_data_url).trim()
+        : ln?.fireImageDataUrl != null && String(ln.fireImageDataUrl).trim() !== ''
+          ? String(ln.fireImageDataUrl).trim()
+          : undefined,
     qtyProduced:
       ln?.qty_produced != null
         ? Number(ln.qty_produced)
@@ -111,6 +134,7 @@ export function mapApiProductLineToTask(ln: any): TaskProductLine {
 export function taskProductLinesToApiPayload(lines: TaskProductLineFormValues[]): Record<string, unknown>[] {
   return lines.map((line) => ({
     mode: line.mode ?? 'manual',
+    unit_type: line.unitType ?? 'adet',
     model_code: line.modelCode ?? '',
     variant: line.variant ?? '',
     quantity: line.quantity ?? 1,
@@ -121,6 +145,9 @@ export function taskProductLinesToApiPayload(lines: TaskProductLineFormValues[])
     product_color: line.productColor ?? '',
     product_color_code: line.productColorCode ?? '',
     brief_intro: String(line.briefIntro ?? '').trim().slice(0, 600),
+    fire_qty: Math.max(0, Number((line as { fireQty?: unknown }).fireQty ?? 0)),
+    fire_reason: String((line as { fireReason?: unknown }).fireReason ?? '').trim().slice(0, 300),
+    fire_image_data_url: String((line as { fireImageDataUrl?: unknown }).fireImageDataUrl ?? '').trim(),
     qty_produced: Math.max(0, Number((line as { qtyProduced?: unknown }).qtyProduced ?? 0)),
   }))
 }
@@ -129,6 +156,7 @@ export function initialProductLinesForForm(task?: Task): TaskProductLineFormValu
   if (task?.productLines?.length) {
     return task.productLines.map((p) => ({
       mode: p.mode === 'fixed' ? 'fixed' : 'manual',
+      unitType: p.unitType === 'metre' ? 'metre' : 'adet',
       modelCode: p.modelCode ?? '',
       variant: p.variant ?? '',
       quantity: p.quantity ?? 1,
@@ -139,12 +167,16 @@ export function initialProductLinesForForm(task?: Task): TaskProductLineFormValu
       productColor: p.productColor ?? '',
       productColorCode: p.productColorCode ?? '',
       briefIntro: p.briefIntro ?? '',
+      fireQty: Number(p.fireQty ?? 0),
+      fireReason: p.fireReason ?? '',
+      fireImageDataUrl: p.fireImageDataUrl ?? '',
       qtyProduced: Number(p.qtyProduced ?? 0),
     }))
   }
   return [
     {
       mode: task?.mode === 'fixed' ? 'fixed' : 'manual',
+      unitType: 'adet',
       modelCode: task?.modelCode ?? '',
       variant: task?.variant ?? '',
       quantity: task?.quantity ?? 1,
@@ -155,6 +187,9 @@ export function initialProductLinesForForm(task?: Task): TaskProductLineFormValu
       productColor: task?.productColor ?? '',
       productColorCode: task?.productColorCode ?? '',
       briefIntro: '',
+      fireQty: 0,
+      fireReason: '',
+      fireImageDataUrl: '',
       qtyProduced: 0,
     },
   ]

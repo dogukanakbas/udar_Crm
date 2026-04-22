@@ -65,6 +65,7 @@ export function TaskProductLineFields({
 }) {
   const p = `productLines.${index}` as const
   const watchMode = form.watch(`${p}.mode`)
+  const watchUnit = form.watch(`${p}.unitType`) || 'adet'
   const watchModel = form.watch(`${p}.modelCode`)
   const watchVariant = form.watch(`${p}.variant`)
   const watchQty = form.watch(`${p}.quantity`)
@@ -160,9 +161,21 @@ export function TaskProductLineFields({
             </SelectContent>
           </Select>
         </div>
+        <div>
+          <Label>Birim</Label>
+          <Select value={watchUnit} onValueChange={(v) => form.setValue(`${p}.unitType`, v as 'adet' | 'metre')}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="adet">Adet</SelectItem>
+              <SelectItem value="metre">Metre</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         {watchMode === 'fixed' && (
           <div>
-            <Label>Adet</Label>
+            <Label>{watchUnit === 'metre' ? 'Metre' : 'Adet'}</Label>
             <Input
               type="number"
               min={1}
@@ -188,7 +201,7 @@ export function TaskProductLineFields({
       {watchMode === 'manual' && (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <div>
-            <Label>Adet</Label>
+            <Label>{watchUnit === 'metre' ? 'Metre' : 'Adet'}</Label>
             <Input
               type="number"
               min={1}
@@ -362,6 +375,38 @@ export function TaskProductLineFields({
           </div>
         </div>
       )}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div>
+          <Label>Fire {watchUnit === 'metre' ? '(metre)' : '(adet)'}</Label>
+          <Input type="number" min={0} step="0.1" {...form.register(`${p}.fireQty`, { valueAsNumber: true })} />
+        </div>
+        <div className="md:col-span-2">
+          <Label>Fire sebebi</Label>
+          <Input {...form.register(`${p}.fireReason`)} placeholder="Kısa açıklama" />
+        </div>
+        <div className="md:col-span-3">
+          <Label>Fire görseli (yerel)</Label>
+          <Input
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (!f) {
+                form.setValue(`${p}.fireImageDataUrl`, '')
+                return
+              }
+              const rd = new FileReader()
+              rd.onload = () => {
+                form.setValue(`${p}.fireImageDataUrl`, String(rd.result || ''))
+              }
+              rd.readAsDataURL(f)
+            }}
+          />
+          {form.watch(`${p}.fireImageDataUrl`) ? (
+            <img src={form.watch(`${p}.fireImageDataUrl`)} alt="fire" className="mt-2 h-20 w-20 rounded border object-cover" />
+          ) : null}
+        </div>
+      </div>
     </div>
   )
 }

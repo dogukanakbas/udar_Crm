@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, Outlet, useRouterState } from '@tanstack/react-router'
 import {
   Activity,
+  CalendarClock,
   BarChart3,
   Bell,
   FolderKanban,
@@ -54,6 +55,7 @@ export const PageHeader = ({ title, description, actions, breadcrumb }: PageHead
 const nav = [
   { label: 'Kontrol Paneli', to: '/', icon: Home, roles: ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse'] },
   { label: 'Görevlerim', to: '/', icon: Home, roles: ['Worker'] },
+  { label: 'Geçmiş görevler', to: '/task-history', icon: CalendarClock, roles: ['Worker'] },
   { label: 'Şifre değiştir', to: '/change-password', icon: KeyRound, roles: ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse', 'Worker'] },
   {
     label: 'CRM',

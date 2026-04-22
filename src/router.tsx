@@ -15,6 +15,7 @@ import { CalendarPage } from '@/pages/calendar'
 import { WorkerTrackingPage } from '@/pages/worker-tracking'
 import { WorkerDetailPage } from '@/pages/worker-detail'
 import { ChangePasswordPage } from '@/pages/change-password'
+import { TaskHistoryPage } from '@/pages/task-history'
 import { LoginPage } from '@/pages/login'
 import { ActivatePage } from '@/pages/activate'
 import AccessLogsPage from '@/pages/access-logs'
@@ -203,6 +204,12 @@ const changePasswordRoute = new Route({
   component: ChangePasswordPage,
 })
 
+const taskHistoryRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/task-history',
+  component: TaskHistoryPage,
+})
+
 const accessLogsRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/access-logs',
@@ -237,6 +244,7 @@ const routeTree = rootRoute.addChildren([
   reportsRoute,
   settingsRoute,
   changePasswordRoute,
+  taskHistoryRoute,
   accessLogsRoute,
 ])
 

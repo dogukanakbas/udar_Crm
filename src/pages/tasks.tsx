@@ -1627,6 +1627,10 @@ export function TaskDetailPage() {
   const productLineQtyTotal = sumProductLineQuantities(task.productLines)
   const productLineProducedTotal = sumProductLineQtyProduced(task.productLines)
   const workflowQtyFallback = workflowTargetFallbackQty(task)
+  const currentTeamName = data.teams.find((t) => t.id === task.currentTeam)?.name || ''
+  const isPvcStage = /pvc/i.test(currentTeamName)
+  const showCncTechFields =
+    /cnc/i.test(currentTeamName) || data.settings.role === 'Admin' || data.settings.role === 'Manager'
   const linkedSalesOrder =
     task.salesOrder != null && String(task.salesOrder).trim() !== ''
       ? data.salesOrders.find((s) => s.id === task.salesOrder)
@@ -1636,6 +1640,7 @@ export function TaskDetailPage() {
   const salesOrderRemaining =
     salesOrderOrderQty > 0 ? Math.max(0, salesOrderOrderQty - salesOrderProduced) : null
   const salesOrderFulfilled = salesOrderOrderQty > 0 && salesOrderProduced >= salesOrderOrderQty
+  const defaultLineUnit = (task.productLines?.[0]?.unitType === 'metre' || isPvcStage) ? 'metre' : 'adet'
   const checklist = (task.checklist || []) as TaskChecklistItem[]
   const workflowChecklistItems = [...checklist]
     .filter((c) => c.workflowTeamId)
@@ -2076,6 +2081,7 @@ export function TaskDetailPage() {
                       : null
                   const lineProduced = stageProduced != null ? stageProduced : Math.max(0, Number(line.qtyProduced ?? 0))
                   const lineRemaining = Math.max(0, lineTarget - lineProduced)
+                  const unit = line.unitType === 'metre' || isPvcStage ? 'metre' : 'adet'
                   const lineEntries = (task.productionEntries || []).filter((e) => {
                     if (e.productLineIndex != null && !Number.isNaN(Number(e.productLineIndex))) {
                       return Number(e.productLineIndex) === lidx
@@ -2110,11 +2116,11 @@ export function TaskDetailPage() {
                         <DetailRow label="Model" value={line.modelCode?.trim() ? line.modelCode : '—'} />
                         <div className="flex flex-col gap-0.5 text-sm">
                           <span className="text-xs uppercase text-muted-foreground">Hedef / üretilen / kalan</span>
-                          <span className="font-medium">Hedef: {formatNumber(lineTarget)}</span>
-                          <span className="font-medium">Üretilen: {formatNumber(lineProduced)}</span>
-                          <span className="font-medium">Kalan: {formatNumber(lineRemaining)}</span>
+                          <span className="font-medium">Hedef: {formatNumber(lineTarget)} {unit}</span>
+                          <span className="font-medium">Üretilen: {formatNumber(lineProduced)} {unit}</span>
+                          <span className="font-medium">Kalan: {formatNumber(lineRemaining)} {unit}</span>
                         </div>
-                        <DetailRow label="Varyant" value={line.variant?.trim() ? line.variant : '—'} />
+                        {showCncTechFields ? <DetailRow label="Varyant" value={line.variant?.trim() ? line.variant : '—'} /> : <div />}
                         <div className="sm:col-span-2 flex flex-wrap items-center gap-3 rounded border bg-muted/30 px-2 py-1.5">
                           {hex ? (
                             <span
@@ -2128,29 +2134,40 @@ export function TaskDetailPage() {
                             <DetailRow label="Renk kodu" value={line.productColorCode?.trim() ? line.productColorCode : '—'} />
                           </div>
                         </div>
-                        <DetailRow label="Bıçak" value={line.modelBladeDepth?.trim() ? line.modelBladeDepth : '—'} />
-                        <DetailRow
-                          label="Birim süre"
-                          value={
-                            line.modelDurationMinutes != null && Number(line.modelDurationMinutes) > 0
-                              ? `${line.modelDurationMinutes} dk`
-                              : '—'
-                          }
-                        />
-                        <DetailRow
-                          label="Satır plan (dk)"
-                          value={
-                            line.totalPlannedMinutes != null && Number(line.totalPlannedMinutes) > 0
-                              ? `${line.totalPlannedMinutes} dk`
-                              : '—'
-                          }
-                        />
-                        <div className="sm:col-span-2">
-                          <DetailRow
-                            label="Ölçüler"
-                            value={(line.modelSizes || []).length > 0 ? (line.modelSizes || []).join(', ') : '—'}
-                          />
-                        </div>
+                        {showCncTechFields ? (
+                          <>
+                            <DetailRow label="Bıçak" value={line.modelBladeDepth?.trim() ? line.modelBladeDepth : '—'} />
+                            <DetailRow
+                              label="Birim süre"
+                              value={
+                                line.modelDurationMinutes != null && Number(line.modelDurationMinutes) > 0
+                                  ? `${line.modelDurationMinutes} dk`
+                                  : '—'
+                              }
+                            />
+                            <DetailRow
+                              label="Satır plan (dk)"
+                              value={
+                                line.totalPlannedMinutes != null && Number(line.totalPlannedMinutes) > 0
+                                  ? `${line.totalPlannedMinutes} dk`
+                                  : '—'
+                              }
+                            />
+                            <div className="sm:col-span-2">
+                              <DetailRow
+                                label="Ölçüler"
+                                value={(line.modelSizes || []).length > 0 ? [...(line.modelSizes || [])].sort().join(', ') : '—'}
+                              />
+                            </div>
+                          </>
+                        ) : null}
+                        <DetailRow label="Fire" value={`${formatNumber(Number(line.fireQty ?? 0))} ${unit}`} />
+                        <DetailRow label="Fire sebebi" value={line.fireReason?.trim() ? line.fireReason : '—'} />
+                        {line.fireImageDataUrl ? (
+                          <div className="sm:col-span-2">
+                            <img src={line.fireImageDataUrl} alt="fire" className="h-20 w-20 rounded border object-cover" />
+                          </div>
+                        ) : null}
                       </div>
                       <div className="rounded-md border border-dashed bg-muted/20 px-2 py-2 space-y-2">
                         <p className="text-xs font-semibold uppercase text-muted-foreground">Üretim — bu kalem</p>
@@ -2160,7 +2177,7 @@ export function TaskDetailPage() {
                         </p>
                         <div className="flex flex-wrap gap-2 items-end">
                           <div>
-                            <Label className="text-xs">Toplam üretilen (mutlak)</Label>
+                            <Label className="text-xs">Toplam üretilen (mutlak, {unit})</Label>
                             <Input
                               type="text"
                               inputMode="numeric"
@@ -2254,7 +2271,7 @@ export function TaskDetailPage() {
                             <ul className="text-[11px] space-y-0.5 max-h-28 overflow-y-auto text-muted-foreground">
                               {lineEntries.slice(0, 30).map((pe) => (
                                 <li key={pe.id}>
-                                  {pe.entryDate} • bildirilen {pe.quantity} ad • {pe.userName || pe.user || '—'}
+                                  {pe.entryDate} • bildirilen {pe.quantity} {unit} • {pe.userName || pe.user || '—'}
                                   {pe.teamName ? ` • ${pe.teamName}` : ''}
                                 </li>
                               ))}
@@ -2300,7 +2317,7 @@ export function TaskDetailPage() {
                 ) : null}
                 <DetailRow label="Hedef adet (toplam)" value={String(task.quantity ?? 1)} />
                 <DetailRow label="Model kodu" value={task.modelCode?.trim() ? task.modelCode : '—'} />
-                <DetailRow label="Varyant" value={task.variant?.trim() ? task.variant : '—'} />
+                {showCncTechFields ? <DetailRow label="Varyant" value={task.variant?.trim() ? task.variant : '—'} /> : <div />}
                 <div className="sm:col-span-2 flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 px-3 py-2">
                   {(() => {
                     const hex = cssColorFromProductCode(task.productColorCode)
@@ -2317,15 +2334,19 @@ export function TaskDetailPage() {
                     <DetailRow label="Renk kodu" value={task.productColorCode?.trim() ? task.productColorCode : '—'} />
                   </div>
                 </div>
-                <DetailRow label="Bıçak derinliği" value={task.modelBladeDepth?.trim() ? task.modelBladeDepth : '—'} />
-                <DetailRow
-                  label="Birim süre"
-                  value={
-                    task.modelDurationMinutes != null && Number(task.modelDurationMinutes) > 0
-                      ? `${task.modelDurationMinutes} dk`
-                      : '—'
-                  }
-                />
+                {showCncTechFields ? (
+                  <>
+                    <DetailRow label="Bıçak derinliği" value={task.modelBladeDepth?.trim() ? task.modelBladeDepth : '—'} />
+                    <DetailRow
+                      label="Birim süre"
+                      value={
+                        task.modelDurationMinutes != null && Number(task.modelDurationMinutes) > 0
+                          ? `${task.modelDurationMinutes} dk`
+                          : '—'
+                      }
+                    />
+                  </>
+                ) : null}
                 <DetailRow
                   label="Toplam planlanan süre"
                   value={
@@ -2760,7 +2781,7 @@ export function TaskDetailPage() {
               </div>
             )}
             <div className="rounded border p-3 space-y-2 mt-3">
-              <p className="text-sm font-semibold">Günlük üretim (adet)</p>
+              <p className="text-sm font-semibold">Günlük üretim ({defaultLineUnit})</p>
               <p className="text-xs text-muted-foreground">
                 Geçmiş satırlar denetim kaydıdır: her satırdaki adet, o anda bildirilen{' '}
                 <span className="font-medium text-foreground">mutlak</span> üretimdir. İlk ekip 81 bildirdiyse süreç bu
@@ -2875,7 +2896,7 @@ export function TaskDetailPage() {
                       <ul className="text-xs space-y-1 max-h-36 overflow-y-auto text-muted-foreground">
                         {(task.productionEntries || []).slice(0, 40).map((pe) => (
                           <li key={pe.id}>
-                            {pe.entryDate} • bildirilen {pe.quantity} ad • {pe.userName || pe.user || '—'}
+                            {pe.entryDate} • bildirilen {pe.quantity} {defaultLineUnit} • {pe.userName || pe.user || '—'}
                             {pe.teamName ? ` • ${pe.teamName}` : ''}
                           </li>
                         ))}

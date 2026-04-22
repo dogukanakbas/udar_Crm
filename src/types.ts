@@ -184,6 +184,7 @@ export interface Ticket {
 /** Tek görev içindeki bir ürün kalemi (çoklu ürün üretimi). */
 export interface TaskProductLine {
   mode?: 'manual' | 'fixed'
+  unitType?: 'adet' | 'metre'
   modelCode?: string
   variant?: string
   quantity?: number
@@ -195,6 +196,12 @@ export interface TaskProductLine {
   productColorCode?: string
   /** Ürün kalemi için kısa tanıtım (ayrıntı kartında) */
   briefIntro?: string
+  /** Fire adedi (kalem bazında) */
+  fireQty?: number
+  /** Fire sebebi */
+  fireReason?: string
+  /** Yerel/opsiyonel fire görseli */
+  fireImageDataUrl?: string
   /** Bu kalem için raporlanan toplam üretim adedi (sunucu: qty_produced) */
   qtyProduced?: number
 }
