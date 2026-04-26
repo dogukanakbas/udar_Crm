@@ -49,12 +49,41 @@ const DOCUMENT_TYPE_TR = {
 
 const ADD_CUSTOMER_OPTION = '__add_company__'
 const DOCUMENT_CURRENCY_OPTIONS = getCompanyCurrencyOptions(DEFAULT_COMPANY_COUNTRY_LABEL)
+const CUSTOM_OPTION = '__custom__'
+const VALIDITY_PRESETS = [
+  { value: '3', label: '3 iş günü' },
+  { value: '5', label: '5 iş günü' },
+  { value: '7', label: '7 iş günü' },
+  { value: '10', label: '10 iş günü' },
+  { value: CUSTOM_OPTION, label: 'Manuel iş günü' },
+]
+const DELIVERY_TYPE_OPTIONS = [
+  'Fabrika teslim',
+  'Şantiye montaj dahil teslim',
+  'Nakliye dahil, montaj hariç',
+  'Ankara depo teslim',
+  'İstanbul depo teslim',
+  'Malatya depo teslim',
+  'Muş depo teslim',
+  'Ağrı depo teslim',
+]
+const PAYMENT_OPTION_OPTIONS = [
+  '%100 Nakit',
+  '%50 peşin / %50 teslimde',
+  '%30 peşin / %70 sevkiyat öncesi',
+  '%20 nakit / %80 çek 90 gün',
+  'Kredi kartı tek çekim',
+  'Kredi kartı 3 taksit',
+  'Kredi kartı 6 taksit',
+  'Barter',
+]
 const DEFAULT_SELLER_COMPANIES: SellerCompanyProfile[] = [
   { key: 'ORTKA', shortName: 'ORTKA', displayName: 'ORTKA', bankAccounts: [], isActive: true, sortOrder: 0 },
   { key: 'AYKA', shortName: 'AYKA', displayName: 'AYKA', bankAccounts: [], isActive: true, sortOrder: 1 },
 ]
 
 const SECTION_OPTIONS = [
+  { value: 'SAFT_ROGAR_KAPAGI', label: 'Şaft / Rögar Kapağı' },
   { value: 'steel_door', label: 'Çelik Kapı' },
   { value: 'interior_door', label: 'İç Oda Kapısı' },
   { value: 'kitchen', label: 'Mutfak' },
@@ -64,6 +93,55 @@ const SECTION_OPTIONS = [
   { value: 'laminate', label: 'Laminant' },
   { value: 'service', label: 'Montaj / Hizmet' },
 ]
+
+const SPECIAL_PRODUCT_GROUPS = [
+  {
+    terms: ['saft kapagi', 'saft kapak', 'rogar kapagi', 'rogar kapak', 'menhol', 'menhole'],
+    sectionKey: 'SAFT_ROGAR_KAPAGI',
+  },
+]
+
+const normalizeProductGroupText = (value?: string) =>
+  String(value || '')
+    .replace(/ı/g, 'i')
+    .replace(/İ/g, 'I')
+    .replace(/ğ/g, 'g')
+    .replace(/Ğ/g, 'G')
+    .replace(/ü/g, 'u')
+    .replace(/Ü/g, 'U')
+    .replace(/ş/g, 's')
+    .replace(/Ş/g, 'S')
+    .replace(/ö/g, 'o')
+    .replace(/Ö/g, 'O')
+    .replace(/ç/g, 'c')
+    .replace(/Ç/g, 'C')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+
+const resolveSpecialProductGroup = (product?: Product) => {
+  const text = normalizeProductGroupText(`${product?.sku || ''} ${product?.name || ''}`)
+  return SPECIAL_PRODUCT_GROUPS.find((group) => group.terms.some((term) => text.includes(term)))
+}
+
+const getSectionOptionsFromCategories = (categories: any[] = []) => {
+  const dynamicOptions = categories
+    .map((category) => ({
+      value: String(category.templateDefaults?.section_key || '').trim(),
+      label: category.name || category.templateDefaults?.section_key || '',
+      order: Number(category.templateDefaults?.document_order ?? 999),
+    }))
+    .filter((item) => item.value && item.label)
+    .sort((left, right) => left.order - right.order || left.label.localeCompare(right.label, 'tr'))
+  const merged = new Map<string, { value: string; label: string }>()
+  for (const option of dynamicOptions) merged.set(option.value, { value: option.value, label: option.label })
+  for (const option of SECTION_OPTIONS) {
+    if (!merged.has(option.value)) merged.set(option.value, option)
+  }
+  return Array.from(merged.values())
+}
 
 const TEMPLATE_OPTIONS = {
   Quote: [
@@ -134,6 +212,8 @@ const documentSchema = z.object({
   templateKey: z.string().optional(),
   contractDate: z.string().optional(),
   validUntil: z.string().min(1, 'Geçerlilik tarihi zorunludur.'),
+  validityPreset: z.string().optional(),
+  validityCustomDays: z.coerce.number().min(1).max(365).optional(),
   validityLabel: z.string().optional(),
   priceListLabel: z.string().optional(),
   payment: z.string().optional(),
@@ -221,10 +301,31 @@ const normalizeDateInputValue = (value?: string | null) => {
   return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`
 }
 
+const toDateInputValue = (date: Date) => {
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+const addBusinessDaysFromToday = (days: number) => {
+  const next = new Date()
+  let remaining = Math.max(1, Math.min(365, Number(days) || 7))
+  while (remaining > 0) {
+    next.setDate(next.getDate() + 1)
+    if (next.getDay() !== 0 && next.getDay() !== 6) remaining -= 1
+  }
+  return toDateInputValue(next)
+}
+
+const normalizeValidityDays = (value: unknown, fallback = 7) => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed >= 1 && parsed <= 365 ? Math.floor(parsed) : fallback
+}
+
 const buildLineFromProduct = (product?: Product, previousLine?: any) => {
   const defaults = product?.templateDefaults || {}
   const categoryDefaults = product?.categoryTemplateDefaults || {}
-  const sectionKey = defaults.section_key || categoryDefaults.section_key || previousLine?.sectionKey || 'steel_door'
+  const specialGroup = resolveSpecialProductGroup(product)
+  const sectionKey = specialGroup?.sectionKey || defaults.section_key || categoryDefaults.section_key || previousLine?.sectionKey || 'steel_door'
 
   return {
     mode: product ? 'product' : 'manual',
@@ -306,6 +407,11 @@ const getInitialValues = (
   const company = companies.find((item) => item.id === quote?.customerId) || companies[0]
   const preferredCurrency = resolveCompanyCurrency(company?.currency, company?.country)
   const initialCurrency = getDocumentCurrency(quote?.currency || preferredCurrency)
+  const storedValidityDays = normalizeValidityDays(quote?.contractConfig?.validityDays || quote?.contractConfig?.validity_days || 7, 7)
+  const storedValidityPreset = VALIDITY_PRESETS.some((item) => item.value === String(storedValidityDays))
+    ? String(storedValidityDays)
+    : CUSTOM_OPTION
+  const initialValidUntil = normalizeDateInputValue(quote?.validUntil) || addBusinessDaysFromToday(storedValidityDays)
 
   return {
     customerId: quote?.customerId || company?.id || '',
@@ -318,8 +424,10 @@ const getInitialValues = (
         normalizeDateInputValue(quote?.contractConfig?.contractDate || quote?.contractConfig?.contract_date) ||
         normalizeDateInputValue(quote?.createdAt) ||
         new Date().toISOString().slice(0, 10),
-      validUntil: normalizeDateInputValue(quote?.validUntil),
-    validityLabel: '',
+      validUntil: initialValidUntil,
+    validityPreset: storedValidityPreset,
+    validityCustomDays: storedValidityDays,
+    validityLabel: `${storedValidityDays} iş günü`,
     priceListLabel: quote?.contractConfig?.priceListLabel || quote?.contractConfig?.price_list_label || '2026/1. LİSTE',
     payment: quote?.terms?.payment || '',
     paymentOption: quote?.contractConfig?.paymentOption || quote?.contractConfig?.payment_option || '',
@@ -361,6 +469,9 @@ const getInitialValues = (
   }
 }
 
+const resolveValidityDaysFromValues = (values: any) =>
+  normalizeValidityDays(values.validityPreset === CUSTOM_OPTION ? values.validityCustomDays : values.validityPreset, 7)
+
 const buildDocumentPayload = (values: any, mode: SalesDocumentType, status = 'Draft') => ({
   documentType: mode,
   customerId: values.customerId,
@@ -376,7 +487,9 @@ const buildDocumentPayload = (values: any, mode: SalesDocumentType, status = 'Dr
     templateMode: values.templateKey ? 'manual' : 'auto',
     templateKey: values.templateKey || '',
     contractDate: values.contractDate,
-    validityLabel: '',
+    validityPreset: values.validityPreset || '7',
+    validityDays: resolveValidityDaysFromValues(values),
+    validityLabel: `${resolveValidityDaysFromValues(values)} iş günü`,
     priceListLabel: values.priceListLabel,
     exchangeRate: getDocumentExchangeRate(values.currency, values.exchangeRate),
     deliveryType: values.deliveryType,
@@ -1071,8 +1184,9 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   const companies = data.companies
   const sellerCompanies = data.sellerCompanies || []
   const products = data.products
-  const preparers = useMemo(() => data.users.filter((user) => user.canPrepareQuotes || user.permissions?.includes('quotes.prepare')), [data.users])
+  const preparers = useMemo(() => data.users, [data.users])
   const sellerOptions = useMemo(() => getSellerCompanyOptions(sellerCompanies), [sellerCompanies])
+  const sectionOptions = useMemo(() => getSectionOptionsFromCategories(data.categories || []), [data.categories])
   const documentMode = quote?.documentType ?? mode
   const isEditing = Boolean(quote)
   const getFormDefaults = () => getInitialValues(documentMode, companies, preparers, products, sellerCompanies, quote, orgPriceListLabel)
@@ -1122,6 +1236,20 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
 
     if (options?.forceExchangeRate || !Number.isFinite(currentRate) || currentRate <= 0) {
       form.setValue('exchangeRate', 1, { shouldDirty: true, shouldValidate: true })
+    }
+  }
+
+  const applyValidityDays = (days: number) => {
+    const normalizedDays = normalizeValidityDays(days, 7)
+    form.setValue('validityCustomDays', normalizedDays, { shouldDirty: true, shouldValidate: true })
+    form.setValue('validityLabel', `${normalizedDays} iş günü`, { shouldDirty: true })
+    form.setValue('validUntil', addBusinessDaysFromToday(normalizedDays), { shouldDirty: true, shouldValidate: true })
+  }
+
+  const setValidityPreset = (preset: string) => {
+    form.setValue('validityPreset', preset, { shouldDirty: true, shouldValidate: true })
+    if (preset !== CUSTOM_OPTION) {
+      applyValidityDays(Number(preset))
     }
   }
 
@@ -1311,11 +1439,64 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
               <div><Label>{`Kur (${getCurrencySymbol(form.watch('currency'))} -> ₺)`}</Label><Input type="number" step="0.0001" min="1" disabled={(form.watch('currency') || 'TRY') === 'TRY'} value={form.watch('exchangeRate') ?? 1} onChange={(event) => form.setValue('exchangeRate', Number(event.target.value || 1), { shouldDirty: true })} /><p className="mt-1 text-xs text-muted-foreground">{(form.watch('currency') || 'TRY') === 'TRY' ? 'Türk Lirası seçildiğinde kur 1 kabul edilir.' : formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p></div>
               <div><Label>Şablon</Label><Select value={form.watch('templateKey') || '__auto__'} onValueChange={(value) => form.setValue('templateKey', value === '__auto__' ? '' : value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{TEMPLATE_OPTIONS[documentMode].map((option) => <SelectItem key={option.value || '__auto__'} value={option.value || '__auto__'}>{option.label}</SelectItem>)}</SelectContent></Select></div>
               <div><Label>Oluşturulma tarihi</Label><Input type="date" value={form.watch('contractDate') || ''} readOnly disabled /></div>
-              <div><Label>Geçerlilik tarihi</Label><Input type="date" value={form.watch('validUntil') || ''} onChange={(event) => form.setValue('validUntil', event.target.value, { shouldDirty: true, shouldValidate: true })} /></div>
+              <div>
+                <Label>Geçerlilik süresi</Label>
+                <Select value={form.watch('validityPreset') || '7'} onValueChange={setValidityPreset}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {VALIDITY_PRESETS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {form.watch('validityPreset') === CUSTOM_OPTION ? (
+                  <Input
+                    className="mt-2"
+                    type="number"
+                    min="1"
+                    max="365"
+                    value={form.watch('validityCustomDays') || 7}
+                    onChange={(event) => applyValidityDays(Number(event.target.value || 7))}
+                  />
+                ) : null}
+              </div>
+              <div><Label>Geçerlilik tarihi</Label><Input type="date" value={form.watch('validUntil') || ''} readOnly disabled /><p className="mt-1 text-xs text-muted-foreground">Seçilen iş gününe göre hafta sonları atlanarak otomatik hesaplanır.</p></div>
               <div><Label>Fiyat listesi etiketi</Label><Input value={form.watch('priceListLabel') || ''} readOnly disabled /><p className="mt-1 text-xs text-muted-foreground">Bu alan şablon yönetiminde Admin tarafından belirlenir.</p></div>
               <div><Label>İmza etiketi</Label><Input value={form.watch('signatureCustomerLabel') || ''} onChange={(event) => form.setValue('signatureCustomerLabel', event.target.value)} /></div>
-                <div><Label>Teslim tipi</Label><Input value={form.watch('deliveryType') || ''} onChange={(event) => form.setValue('deliveryType', event.target.value)} /></div>
-                <div><Label>Ödeme tipi</Label><Input value={form.watch('paymentOption') || ''} onChange={(event) => form.setValue('paymentOption', event.target.value)} /></div>
+                <div>
+                  <Label>Teslim tipi</Label>
+                  <Select
+                    value={DELIVERY_TYPE_OPTIONS.includes(form.watch('deliveryType') || '') ? form.watch('deliveryType') : CUSTOM_OPTION}
+                    onValueChange={(value) => form.setValue('deliveryType', value === CUSTOM_OPTION ? '' : value, { shouldDirty: true })}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Teslim tipi seçin" /></SelectTrigger>
+                    <SelectContent>
+                      {DELIVERY_TYPE_OPTIONS.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
+                      <SelectItem value={CUSTOM_OPTION}>Manuel giriş</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {!DELIVERY_TYPE_OPTIONS.includes(form.watch('deliveryType') || '') ? (
+                    <Input className="mt-2" value={form.watch('deliveryType') || ''} onChange={(event) => form.setValue('deliveryType', event.target.value)} placeholder="Teslim tipini yazın" />
+                  ) : null}
+                </div>
+                <div>
+                  <Label>Ödeme tipi</Label>
+                  <Select
+                    value={PAYMENT_OPTION_OPTIONS.includes(form.watch('paymentOption') || '') ? form.watch('paymentOption') : CUSTOM_OPTION}
+                    onValueChange={(value) => {
+                      const nextValue = value === CUSTOM_OPTION ? '' : value
+                      form.setValue('paymentOption', nextValue, { shouldDirty: true })
+                      if (nextValue) form.setValue('payment', nextValue, { shouldDirty: true })
+                    }}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Ödeme tipi seçin" /></SelectTrigger>
+                    <SelectContent>
+                      {PAYMENT_OPTION_OPTIONS.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
+                      <SelectItem value={CUSTOM_OPTION}>Manuel giriş</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {!PAYMENT_OPTION_OPTIONS.includes(form.watch('paymentOption') || '') ? (
+                    <Input className="mt-2" value={form.watch('paymentOption') || ''} onChange={(event) => form.setValue('paymentOption', event.target.value)} placeholder="Ödeme tipini yazın" />
+                  ) : null}
+                </div>
                 <div><Label>Ödeme metni</Label><Input value={form.watch('payment') || ''} onChange={(event) => form.setValue('payment', event.target.value)} /></div>
                 <div><Label>Teslim tarihi</Label><Input type="date" value={form.watch('delivery') || ''} onChange={(event) => form.setValue('delivery', event.target.value, { shouldDirty: true, shouldValidate: true })} /></div>
             </div>
@@ -1343,8 +1524,8 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
                     </CardHeader>
                     <CardContent className="grid gap-3 md:grid-cols-3">
                       <div><Label>Ürün modu</Label><Select value={line.mode || 'manual'} onValueChange={(value) => value === 'manual' ? setManualMode(index) : undefined}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="manual">Manuel giriş</SelectItem><SelectItem value="product">Listeden seç</SelectItem></SelectContent></Select></div>
-                      <div className="md:col-span-2"><Label>Ürün</Label><Select value={line.productId || '__manual__'} onValueChange={(value) => value === '__manual__' ? setManualMode(index) : applyProduct(index, value)}><SelectTrigger><SelectValue placeholder="Ürün seçin" /></SelectTrigger><SelectContent><SelectItem value="__manual__">Manuel giriş</SelectItem>{products.map((product) => <SelectItem key={product.id} value={product.id}>{product.sku} - {product.name}</SelectItem>)}</SelectContent></Select></div>
-                      <div><Label>Grup</Label><Select value={line.sectionKey} onValueChange={(value) => form.setValue(`lines.${index}.sectionKey`, value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{SECTION_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
+                      <div className="md:col-span-2"><Label>Ürün</Label><Select value={line.productId || '__manual__'} onValueChange={(value) => value === '__manual__' ? setManualMode(index) : applyProduct(index, value)}><SelectTrigger><SelectValue placeholder="Ürün seçin" /></SelectTrigger><SelectContent className="max-h-[22rem] overflow-y-auto"><SelectItem value="__manual__">Manuel giriş</SelectItem>{products.map((product) => <SelectItem key={product.id} value={product.id}>{product.sku} - {product.name}</SelectItem>)}</SelectContent></Select></div>
+                      <div><Label>Grup</Label><Select value={line.sectionKey} onValueChange={(value) => form.setValue(`lines.${index}.sectionKey`, value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{sectionOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
                       <div><Label>Ürün kodu</Label><Input value={line.details?.code || line.sku || ''} onChange={(event) => form.setValue(`lines.${index}.details.code`, event.target.value)} /></div>
                       <div><Label>Birim</Label><Input value={line.unit || ''} onChange={(event) => form.setValue(`lines.${index}.unit`, event.target.value)} /></div>
                       <div className="md:col-span-3"><Label>Açıklama / satış birimi</Label><Input value={line.name} onChange={(event) => form.setValue(`lines.${index}.name`, event.target.value)} /></div>
@@ -1365,7 +1546,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
           </TabsContent>
 
             <TabsContent value="review" className="space-y-3">
-              <Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Belge türü: {DOCUMENT_TYPE_TR[documentMode]}</p><p>Müşteri: {form.watch('customerName') || selectedCustomer?.name || '-'}</p><p>Hazırlayan: {preparers.find((user) => user.id === form.watch('preparedById'))?.fullName || '-'}</p><p>Satıcı firma: {getSellerCompanyLabel(sellerCompanies, form.watch('sellerCompanyKey'))}</p><p>Para birimi: {getCurrencySymbol(form.watch('currency'))} {getCurrencyLabel(form.watch('currency'))}</p><p>Kur: {formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p><p>Teslim tarihi: {form.watch('delivery') ? formatDate(form.watch('delivery')) : '-'}</p><p>Şablon: {templateLabel(documentMode, form.watch('templateKey'))}</p><p>Satır sayısı: {lines.length}</p><p>Ara toplam: {formatDocumentAmount(subtotal, form.watch('currency'))}</p><p>Toplam iskonto: {formatDocumentAmount(discountTotal, form.watch('currency'))}</p><p>KDV: {formatDocumentAmount(taxTotal, form.watch('currency'))}</p><p>Genel toplam: {formatDocumentAmount(total, form.watch('currency'))}</p></CardContent></Card>
+              <Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Belge türü: {DOCUMENT_TYPE_TR[documentMode]}</p><p>Müşteri: {form.watch('customerName') || selectedCustomer?.name || '-'}</p><p>Hazırlayan: {preparedByDisplayName || '-'}</p><p>Satıcı firma: {getSellerCompanyLabel(sellerCompanies, form.watch('sellerCompanyKey'))}</p><p>Para birimi: {getCurrencySymbol(form.watch('currency'))} {getCurrencyLabel(form.watch('currency'))}</p><p>Kur: {formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p><p>Teslim tarihi: {form.watch('delivery') ? formatDate(form.watch('delivery')) : '-'}</p><p>Şablon: {templateLabel(documentMode, form.watch('templateKey'))}</p><p>Satır sayısı: {lines.length}</p><p>Ara toplam: {formatDocumentAmount(subtotal, form.watch('currency'))}</p><p>Toplam iskonto: {formatDocumentAmount(discountTotal, form.watch('currency'))}</p><p>KDV: {formatDocumentAmount(taxTotal, form.watch('currency'))}</p><p>Genel toplam: {formatDocumentAmount(total, form.watch('currency'))}</p></CardContent></Card>
           </TabsContent>
         </Tabs>
         <DialogFooter><Button type="button" onClick={handleSaveClick} disabled={saving}>{saving ? 'Kaydediliyor...' : isEditing ? 'Değişiklikleri kaydet' : 'Kaydet'}</Button></DialogFooter>

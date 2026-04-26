@@ -11,6 +11,7 @@ from rest_framework.response import Response
 import mimetypes
 
 from django.conf import settings
+from django.utils import timezone
 from django.http import FileResponse
 from PIL import Image, UnidentifiedImageError
 
@@ -22,6 +23,7 @@ from .contracts import (
     get_template_download,
     list_document_exports,
     list_template_library,
+    list_template_placeholders,
     normalize_seller_company_key,
     save_seller_profiles,
     save_template_override,
@@ -30,7 +32,6 @@ from .contracts import (
 from workflow.models import ApprovalInstance, ApprovalStep
 from erp.models import Product
 from .serializers import QuoteSerializer, PricingRuleSerializer, BusinessPartnerSerializer, ProductSerializer, LeadSerializer, OpportunitySerializer, ContactSerializer
-from organizations.models import NumberRange
 from permissions import IsOrgMember, IsOwnerOrManager, HasAPIPermission
 from audit.utils import log_entity_action
 
@@ -137,6 +138,39 @@ def _save_seller_logo_file(org, key, uploaded_file):
     return f"{settings.MEDIA_URL.rstrip('/')}/seller-logos/org_{org.id}/{filename}"
 
 
+def _seller_number_prefix(organization, seller_company_key):
+    selected_key = normalize_seller_company_key(seller_company_key or '')
+    profiles = [profile for profile in get_seller_profiles(organization) if profile.get('is_active', True)] or get_default_seller_profiles()
+    selected_profile = None
+    for profile in profiles:
+        if normalize_seller_company_key(profile.get('key')) == selected_key:
+            selected_profile = profile
+            break
+    selected_profile = selected_profile or profiles[0]
+    source = (
+        selected_profile.get('short_name')
+        or selected_profile.get('key')
+        or selected_profile.get('display_name')
+        or organization.code
+        or organization.name
+        or 'UD'
+    )
+    normalized = normalize_seller_company_key(source)
+    return (normalized[:2] or 'UD').upper()
+
+
+def _generate_sales_document_number(organization, document_type, seller_company_key):
+    document_letter = 'S' if document_type == 'Contract' else 'T'
+    timestamp = timezone.localtime(timezone.now()).strftime('%y%m%d%H%M')
+    base = f'{_seller_number_prefix(organization, seller_company_key)}-{document_letter}-{timestamp}'
+    candidate = base
+    suffix = 2
+    while Quote.objects.filter(organization=organization, number=candidate).exists():
+        candidate = f'{base}-{suffix}'
+        suffix += 1
+    return candidate
+
+
 class OrgScopedMixin:
     def get_queryset(self):
         qs = super().get_queryset()
@@ -190,11 +224,9 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         org = self.request.user.organization
         document_type = serializer.validated_data.get('document_type', 'Quote')
-        doc_type = 'CONTRACT' if document_type == 'Contract' else 'QUOTE'
-        prefix = 'C-' if doc_type == 'CONTRACT' else 'Q-'
-        number_range, _ = NumberRange.objects.get_or_create(organization=org, doc_type=doc_type, defaults={'prefix': prefix})
-        number = number_range.next_number()
-        serializer.save(organization=org, number=number, owner=self.request.user)
+        seller_company_key = serializer.validated_data.get('seller_company_key', '')
+        number = _generate_sales_document_number(org, document_type, seller_company_key)
+        serializer.save(organization=org, number=number, owner=self.request.user, prepared_by=self.request.user)
 
     def perform_update(self, serializer):
         serializer.instance._audit_user = self.request.user
@@ -236,12 +268,11 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                     }
                 )
 
-        number_range, _ = NumberRange.objects.get_or_create(
-            organization=quote.organization,
-            doc_type='CONTRACT',
-            defaults={'prefix': 'C-'},
+        contract_number = _generate_sales_document_number(
+            quote.organization,
+            'Contract',
+            quote.seller_company_key,
         )
-        contract_number = number_range.next_number()
         contract_config = deepcopy(quote.contract_config or {})
         contract_config['source_quote_id'] = quote.id
         contract_config['source_quote_number'] = quote.number
@@ -253,7 +284,7 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             customer=quote.customer,
             opportunity=quote.opportunity,
             owner=quote.owner or request.user,
-            prepared_by=quote.prepared_by,
+            prepared_by=quote.prepared_by or request.user,
             seller_company_key=quote.seller_company_key,
             status='Draft',
             valid_until=quote.valid_until,
@@ -454,14 +485,24 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='template-library')
     def template_library(self, request):
-        return Response({'templates': list_template_library(request.user.organization)})
+        return Response(list_template_library(request.user.organization))
+
+    @action(detail=False, methods=['get'], url_path='template-placeholders')
+    def template_placeholders(self, request):
+        return Response({'groups': list_template_placeholders()})
 
     @action(detail=False, methods=['get'], url_path='template-library-download')
     def template_library_download(self, request):
-        template_key = str(request.query_params.get('template_key') or '').strip()
+        template_key = str(request.query_params.get('template_key') or 'seller_master').strip()
         variant = str(request.query_params.get('variant') or 'current').strip().lower()
+        seller_company_key = str(request.query_params.get('seller_company_key') or '').strip()
         try:
-            template = get_template_download(request.user.organization, template_key, variant=variant)
+            template = get_template_download(
+                request.user.organization,
+                template_key,
+                variant=variant,
+                seller_company_key=seller_company_key,
+            )
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         extension = template['path'].suffix.lower()
@@ -479,12 +520,19 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='template-library-upload')
     def template_library_upload(self, request):
-        template_key = str(request.data.get('template_key') or '').strip()
+        template_key = str(request.data.get('template_key') or 'seller_master').strip()
+        seller_company_key = str(request.data.get('seller_company_key') or '').strip()
         uploaded_file = request.FILES.get('file')
-        if not template_key or not uploaded_file:
-            return Response({'detail': 'template_key ve file zorunludur'}, status=status.HTTP_400_BAD_REQUEST)
+        if not uploaded_file:
+            return Response({'detail': 'file zorunludur'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            entry = save_template_override(request.user.organization, template_key, uploaded_file, user=request.user)
+            entry = save_template_override(
+                request.user.organization,
+                template_key,
+                uploaded_file,
+                user=request.user,
+                seller_company_key=seller_company_key,
+            )
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'template': entry})

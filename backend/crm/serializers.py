@@ -1,3 +1,4 @@
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.utils import timezone
@@ -7,7 +8,13 @@ from accounts.models import OrganizationSettings
 from audit.utils import log_entity_action
 from erp.models import Product
 
-from .contracts import DEFAULT_CONTRACT_NOTES_TEXT, DEFAULT_GENERAL_TERMS, DEFAULT_TERMS_TEXT, parse_terms_text
+from .contracts import (
+    DEFAULT_CONTRACT_NOTES_TEXT,
+    DEFAULT_GENERAL_TERMS,
+    DEFAULT_TERMS_TEXT,
+    parse_terms_text,
+    resolve_product_document_defaults,
+)
 from .models import BusinessPartner, Contact, Lead, Opportunity, PricingRule, Quote, QuoteLine
 
 SUPPORTED_CURRENCIES = {'TRY', 'USD', 'EUR'}
@@ -44,6 +51,27 @@ def get_org_price_list_label(organization):
     except OrganizationSettings.DoesNotExist:
         return '2026/1. LİSTE'
     return str(settings.price_list_label or '2026/1. LİSTE').strip() or '2026/1. LİSTE'
+
+
+def add_business_days(start_date, days):
+    try:
+        remaining = max(0, int(days or 0))
+    except (TypeError, ValueError):
+        remaining = 0
+    current = start_date
+    while remaining > 0:
+        current += timedelta(days=1)
+        if current.weekday() < 5:
+            remaining -= 1
+    return current
+
+
+def normalize_validity_days(value, default=7):
+    try:
+        days = int(value)
+    except (TypeError, ValueError):
+        return default
+    return days if 1 <= days <= 365 else default
 
 
 class BusinessPartnerSerializer(serializers.ModelSerializer):
@@ -239,7 +267,7 @@ class QuoteSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['number', 'subtotal', 'discount_total', 'tax_total', 'total', 'created_at', 'updated_at']
+        read_only_fields = ['number', 'prepared_by', 'subtotal', 'discount_total', 'tax_total', 'total', 'created_at', 'updated_at']
 
     def get_owner_name(self, obj):
         if not obj.owner:
@@ -330,6 +358,11 @@ class QuoteSerializer(serializers.ModelSerializer):
         if org:
             validated_data.setdefault('organization', org)
         validated_data['contract_config'] = self._prepare_contract_config(validated_data, validated_data.get('contract_config') or {})
+        if not validated_data.get('valid_until'):
+            validated_data['valid_until'] = add_business_days(
+                timezone.localdate(),
+                normalize_validity_days(validated_data['contract_config'].get('validity_days'), 7),
+            )
         quote = Quote.objects.create(**validated_data)
         quote._audit_user = self.context.get('request').user if self.context.get('request') else None
         self._create_lines(quote, lines_data)
@@ -368,6 +401,11 @@ class QuoteSerializer(serializers.ModelSerializer):
             instance.contract_config = self._prepare_contract_config(validated_data, contract_config, instance=instance)
         else:
             instance.contract_config = self._prepare_contract_config(validated_data, instance.contract_config or {}, instance=instance)
+        if not getattr(instance, 'valid_until', None):
+            instance.valid_until = add_business_days(
+                timezone.localdate(),
+                normalize_validity_days(instance.contract_config.get('validity_days'), 7),
+            )
         instance._audit_user = request_user
         instance.save()
         if lines_data is not None:
@@ -457,7 +495,9 @@ class QuoteSerializer(serializers.ModelSerializer):
         config.setdefault('template_mode', 'auto')
         config.setdefault('template_key', '')
         config['price_list_label'] = get_org_price_list_label(organization)
-        config.setdefault('validity_label', '')
+        config.setdefault('validity_days', 7)
+        config['validity_days'] = normalize_validity_days(config.get('validity_days'), 7)
+        config.setdefault('validity_label', f"{config['validity_days']} iş günü")
         currency_code = str(validated_data.get('currency') or (instance.currency if instance else 'TRY') or 'TRY').upper()
         try:
             exchange_rate = float(config.get('exchange_rate') or 1)
@@ -481,6 +521,8 @@ class QuoteSerializer(serializers.ModelSerializer):
             'templateSheet': 'template_sheet',
             'contractDate': 'contract_date',
             'validityLabel': 'validity_label',
+            'validityDays': 'validity_days',
+            'validityPreset': 'validity_preset',
             'priceListLabel': 'price_list_label',
             'deliveryType': 'delivery_type',
             'paymentOption': 'payment_option',
@@ -530,7 +572,8 @@ class QuoteSerializer(serializers.ModelSerializer):
 
             if product:
                 defaults = product.template_defaults or {}
-                section_key = section_key or defaults.get('section_key') or getattr(getattr(product, 'category', None), 'template_defaults', {}).get('section_key', '')
+                document_defaults = resolve_product_document_defaults(product, fallback_section_key=section_key, line_name=line.get('name') or '')
+                section_key = document_defaults.get('section_key') or section_key
                 unit = unit or defaults.get('unit') or ''
                 details.setdefault('code', product.sku)
                 if defaults.get('primary') and 'primary' not in details:
