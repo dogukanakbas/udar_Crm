@@ -45,19 +45,12 @@ from .checklist_sync import sync_workflow_checklist
 
 
 def assign_task_to_team_leader(task, team):
-    """Ekibe düşen görev önce usta başına atanır; lider yoksa veya üye değilse havuza (assignee boş) bırakılır."""
-    if not team:
-        task.assignee = None
-        return
-    lid = getattr(team, 'leader_id', None)
-    if lid and team.members.filter(id=lid).exists():
-        task.assignee_id = lid
-    else:
-        task.assignee = None
+    """Ekibe düşen görev ekip havuzunda kalır (tek kullanıcıya otomatik atanmaz)."""
+    task.assignee = None
 
 
 def user_may_claim_task_as_leader(user, team):
-    """Görev üstlenme: yalnızca ilgili ekip usta başısı veya Admin/Manager."""
+    """Normal/sıralı akışta görev üstlenme: yalnızca ekip lideri (Admin/Manager dahil)."""
     if not team:
         return False
     role = getattr(user, 'role', '')
@@ -358,7 +351,8 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 if tid not in user_set:
                     continue
                 sec_team = Team.objects.filter(id=tid, organization_id=task.organization_id).first()
-                if not user_may_claim_task_as_leader(request.user, sec_team):
+                # Paralel akışta sadece lider değil, bölüm üyesi olan herkes üstlenebilir.
+                if not sec_team or not sec_team.members.filter(id=request.user.id).exists():
                     continue
                 st = dict(state.get(str(tid), {}))
                 if st.get('stage_done'):
@@ -658,18 +652,20 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 st = state.get(str(tid), {})
                 if st.get('stage_done'):
                     continue
-                if st.get('assignee_id') == request.user.id:
+                aid = st.get('assignee_id')
+                if aid == request.user.id or aid in (None, ''):
                     active_tid = tid
                     break
             if active_tid is None:
-                raise PermissionDenied("Tamamlanacak size atanmış bölümünüz yok")
+                raise PermissionDenied("Tamamlanacak uygun bir bölümünüz yok")
             st = dict(state[str(active_tid)])
-            if st.get('pending_approval'):
-                raise PermissionDenied("Bu bölüm zaten onay bekliyor")
             gate_err_p, shortfall_p = resolve_production_gate(task, active_tid, request.data)
             if gate_err_p:
                 return gate_err_p
-            st['pending_approval'] = True
+            # Paralel akışta lider onayı beklenmez: bölüm otomatik kapanır.
+            st['pending_approval'] = False
+            st['stage_done'] = True
+            st['assignee_id'] = None
             if shortfall_p:
                 done_p = int(st.get('qty_done') or 0)
                 st['production_shortfall_reason'] = format_shortfall_reason_for_storage(done_p, shortfall_p)
@@ -677,14 +673,33 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 st.pop('production_shortfall_reason', None)
             state[str(active_tid)] = st
             task.workflow_stage_state = state
-            task.save(update_fields=['workflow_stage_state', 'updated_at'])
+            all_done = all((state.get(str(tid)) or {}).get('stage_done') for tid in wf)
+            update_fields = ['workflow_stage_state', 'updated_at']
+            if all_done:
+                task.status = 'done'
+                task.assignee = None
+                update_fields.extend(['status', 'assignee'])
+            task.save(update_fields=list(dict.fromkeys(update_fields)))
             note_p = " (hedef altı tamamlama — gerekçe kayıtlı)" if shortfall_p else ""
             TaskComment.objects.create(
                 task=task,
                 author=request.user,
                 type='activity',
-                text=f"{request.user.username} bölüm çalışmasını tamamladı — usta başı onayı bekleniyor{note_p}",
+                text=f"{request.user.username} bölüm çalışmasını tamamladı{note_p}"
+                + (" — görev tamamlandı" if all_done else ""),
             )
+            if all_done:
+                push_event(
+                    {
+                        "type": "task.status",
+                        "task_id": task.id,
+                        "organization": task.organization_id,
+                        "title": task.title,
+                        "status": "done",
+                        "assignee_id": None,
+                        "by": getattr(request.user, "email", None),
+                    }
+                )
             return Response(TaskSerializer(task, context={'request': request}).data)
 
         org = request.user.organization
@@ -1016,9 +1031,22 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 return Response({'detail': 'entry_date YYYY-MM-DD olmalı'}, status=status.HTTP_400_BAD_REQUEST)
         else:
             day = timezone.now().date()
+        if task.sales_order_id:
+            from erp.models import SalesOrder
+
+            so_gate = SalesOrder.objects.filter(id=task.sales_order_id, organization_id=task.organization_id).first()
+            if so_gate:
+                ordered_gate = int(getattr(so_gate, 'order_quantity', 0) or 0)
+                produced_gate = int(getattr(so_gate, 'quantity_produced', 0) or 0)
+                if ordered_gate > 0 and produced_gate >= ordered_gate:
+                    return Response(
+                        {'detail': 'Sipariş hedef adedine ulaşıldı; yeni üretim girişi yapılamaz.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
         user = request.user
         wf = workflow_team_id_list(task)
         user_teams = list(user.teams.values_list('id', flat=True))
+        user_team_set = set(user_teams)
         team_raw = request.data.get('team')
         tid = int(team_raw) if team_raw not in (None, '') else None
         if tid is None:
@@ -1032,14 +1060,48 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                     cur_tid = None
                 if cur_tid is not None and cur_tid in wf and cur_tid in user_teams:
                     tid = cur_tid
+            # Paralel workflow: aynı kullanıcı birden fazla bölümde üyeyse, ekip seçimini
+            # workflow_team_ids sırasına göre yap (takım tablosu sırasına göre değil).
+            if tid is None and wf and getattr(task, 'workflow_parallel', False):
+                ensure_workflow_state(task)
+                state = dict(task.workflow_stage_state or {})
+                open_for_user = []
+                for wtid in wf:
+                    if wtid not in user_team_set:
+                        continue
+                    st = state.get(str(wtid), {}) or {}
+                    if st.get('stage_done'):
+                        continue
+                    aid = st.get('assignee_id')
+                    try:
+                        aid_claimable = aid in (None, '') or int(aid) == int(user.id)
+                    except (TypeError, ValueError):
+                        aid_claimable = aid in (None, '')
+                    if not aid_claimable:
+                        continue
+                    open_for_user.append(wtid)
+                if len(open_for_user) == 1:
+                    tid = open_for_user[0]
+                elif len(open_for_user) > 1:
+                    return Response(
+                        {
+                            'detail': (
+                                'Birden fazla bölümde üyesiniz; üretimi hangi ekip için girdiğinizi '
+                                'body içinde `team` (ekip id) olarak gönderin.'
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
             if tid is None:
-                for t in user_teams:
-                    if wf and t in wf:
-                        tid = t
-                        break
-                    if not wf and t == (task.current_team_id or task.team_id):
-                        tid = t
-                        break
+                # Paralel akışta ekip yukarıda çözülmediyse rastgele sırayla seçme (yanlış bölüme yazım riski).
+                if not (wf and getattr(task, 'workflow_parallel', False)):
+                    for t in user_teams:
+                        if wf and t in wf:
+                            tid = t
+                            break
+                        if not wf and t == (task.current_team_id or task.team_id):
+                            tid = t
+                            break
         if tid is None:
             return Response({'detail': 'Bölüm (ekip) belirlenemedi'}, status=status.HTTP_400_BAD_REQUEST)
         if wf and tid not in wf:
@@ -1111,6 +1173,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         ensure_workflow_state(task)
         state = dict(task.workflow_stage_state or {})
         state_changed = False
+        workflow_checklist_dirty = False
         prev_team_done = 0
         if str(tid) in state:
             try:
@@ -1130,15 +1193,25 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             if lines_count <= 1 or line_idx is None:
                 st['qty_done'] = qty
             else:
-                try:
-                    ai = int(getattr(task, 'active_product_index', 0) or 0)
-                except (TypeError, ValueError):
-                    ai = 0
-                if line_idx == ai:
-                    st['qty_done'] = qty
+                if getattr(task, 'workflow_parallel', False):
+                    total_done = 0
+                    for v in qmap.values():
+                        try:
+                            total_done += max(0, int(v or 0))
+                        except (TypeError, ValueError):
+                            continue
+                    st['qty_done'] = total_done
+                else:
+                    try:
+                        ai = int(getattr(task, 'active_product_index', 0) or 0)
+                    except (TypeError, ValueError):
+                        ai = 0
+                    if line_idx == ai:
+                        st['qty_done'] = qty
             state[str(tid)] = st
             task.workflow_stage_state = state
             state_changed = True
+            workflow_checklist_dirty = True
 
         save_fields = []
         if state_changed:
@@ -1147,6 +1220,48 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             save_fields.append('product_lines')
         if save_fields:
             task.save(update_fields=list(dict.fromkeys(save_fields)))
+
+        # Paralel akışta: ekip üretimi hedefi yakaladığında adımı otomatik tamamla.
+        # Böylece ekip lideri onayı/ek buton tıklaması beklenmeden sonraki akış ilerler.
+        if wf and getattr(task, 'workflow_parallel', False) and str(tid) in state:
+            st_auto = dict((task.workflow_stage_state or {}).get(str(tid), {}) or {})
+            if not st_auto.get('stage_done') and workflow_stage_production_met(task, tid):
+                st_auto['pending_approval'] = False
+                st_auto['stage_done'] = True
+                st_auto['assignee_id'] = None
+                state[str(tid)] = st_auto
+                task.workflow_stage_state = state
+                all_done = all((state.get(str(t)) or {}).get('stage_done') for t in wf)
+                upd = ['workflow_stage_state', 'updated_at']
+                if all_done:
+                    task.status = 'done'
+                    task.assignee = None
+                    upd.extend(['status', 'assignee'])
+                task.save(update_fields=list(dict.fromkeys(upd)))
+                workflow_checklist_dirty = True
+                TaskComment.objects.create(
+                    task=task,
+                    author=user,
+                    type='activity',
+                    text=(
+                        f"{user.username} üretim girişi ile bölüm hedefini tamamladı — adım otomatik kapatıldı"
+                        + (" — görev tamamlandı" if all_done else "")
+                    ),
+                )
+                if all_done:
+                    push_event(
+                        {
+                            'type': 'task.status',
+                            'task_id': task.id,
+                            'organization': task.organization_id,
+                            'title': task.title,
+                            'status': 'done',
+                            'assignee_id': None,
+                            'by': getattr(user, 'email', None),
+                        }
+                    )
+        if wf and workflow_checklist_dirty:
+            sync_workflow_checklist(task)
 
         TaskProductionEntry.objects.create(
             task=task,
@@ -1283,8 +1398,8 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='my-team-queue')
     def my_team_queue(self, request):
         """
-        Worker için: Aktif ekip aşamasındaki görevler (üye olan herkes görür).
-        Paralel akışta workflow'daki uygun bölümler de listelenir.
+        Worker için: sıralı akışta yalnızca ilgili ekip usta başısı (havuzdaki görevler);
+        paralel akışta ilgili bölüm üyeleri. Liste sonunda kullanıcıya göre filtrelenir.
         """
         user = request.user
         org = getattr(user, 'organization', None)

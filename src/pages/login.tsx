@@ -5,6 +5,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import api from '@/lib/api'
 import { useAppStore } from '@/state/use-app-store'
+import type { Role } from '@/types'
+
+const KNOWN_ROLES: Role[] = ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse', 'Worker']
+const isKnownRole = (v: unknown): v is Role => typeof v === 'string' && KNOWN_ROLES.includes(v as Role)
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -15,7 +19,6 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const setRole = useAppStore((s) => s.setRole)
   const hydrate = useAppStore((s) => s.hydrateFromApi)
-  const startSse = useAppStore((s) => s.startSse)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -28,7 +31,7 @@ export function LoginPage() {
       setHydrating(true)
       try {
         const me = await api.get('/auth/me/')
-        if (me?.data?.role) {
+        if (isKnownRole(me?.data?.role)) {
           setRole(me.data.role)
           localStorage.setItem('current-user-role', me.data.role)
         }
@@ -36,11 +39,8 @@ export function LoginPage() {
         /* ignore */
       }
       
-      // Store'u tazele ve SSE başlat
+      // Store'u tazele (SSE App seviyesinde tek noktadan başlatılıyor)
       await hydrate()
-      if (startSse) {
-        startSse()
-      }
       setHydrating(false)
       
       navigate({ to: '/' })

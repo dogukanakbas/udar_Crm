@@ -1627,6 +1627,20 @@ export function TaskDetailPage() {
   const productLineQtyTotal = sumProductLineQuantities(task.productLines)
   const productLineProducedTotal = sumProductLineQtyProduced(task.productLines)
   const workflowQtyFallback = workflowTargetFallbackQty(task)
+  const currentTeamName = data.teams.find((t) => t.id === task.currentTeam)?.name || ''
+  const isPvcStage = /pvc/i.test(currentTeamName)
+  const showCncTechFields =
+    /cnc/i.test(currentTeamName) || data.settings.role === 'Admin' || data.settings.role === 'Manager'
+  const linkedSalesOrder =
+    task.salesOrder != null && String(task.salesOrder).trim() !== ''
+      ? data.salesOrders.find((s) => s.id === task.salesOrder)
+      : undefined
+  const salesOrderOrderQty = linkedSalesOrder?.orderQuantity ?? 0
+  const salesOrderProduced = linkedSalesOrder?.quantityProduced ?? 0
+  const salesOrderRemaining =
+    salesOrderOrderQty > 0 ? Math.max(0, salesOrderOrderQty - salesOrderProduced) : null
+  const salesOrderFulfilled = salesOrderOrderQty > 0 && salesOrderProduced >= salesOrderOrderQty
+  const defaultLineUnit = (task.productLines?.[0]?.unitType === 'metre' || isPvcStage) ? 'metre' : 'adet'
   const checklist = (task.checklist || []) as TaskChecklistItem[]
   const workflowChecklistItems = [...checklist]
     .filter((c) => c.workflowTeamId)
@@ -1829,7 +1843,7 @@ export function TaskDetailPage() {
                       </Button>
                     )}
                     {task.status === 'in-progress' &&
-                      ((task.workflowParallel && isAssignee) ||
+                      ((task.workflowParallel && inCurrentWorkflowTeam) ||
                         canSubmitSequentialApproval ||
                         (!hasWfTeams && isAssignee)) && (
                         <div className="flex flex-col gap-2 w-full sm:w-auto">
@@ -1866,13 +1880,13 @@ export function TaskDetailPage() {
                                 await api.post(`/tasks/${task.id}/complete-stage/`, body)
                                 setProductionShortfallNote('')
                                 await hydrateFromApi()
-                                const toApproval = task.workflowParallel || canSubmitSequentialApproval
+                                const toApproval = canSubmitSequentialApproval
                                 toast({
                                   title: toApproval ? 'Onaya gönderildi' : 'Aşama tamamlandı',
                                   description: toApproval
                                     ? sequentialFlow
                                       ? 'Usta başı «Bölümü onayla» ile sıradaki ekibe geçilir.'
-                                      : 'Usta başı onayından sonra bölüm kapanır.'
+                                      : undefined
                                     : undefined,
                                 })
                               } catch (e: any) {
@@ -1884,7 +1898,7 @@ export function TaskDetailPage() {
                               }
                             }}
                           >
-                            {task.workflowParallel || canSubmitSequentialApproval
+                            {canSubmitSequentialApproval
                               ? 'Bölümü bitir (onaya gönder)'
                               : 'Bitir'}
                           </Button>
@@ -1912,7 +1926,7 @@ export function TaskDetailPage() {
                 ) : null}
               </div>
             </div>
-            {(task.workflowParallel || sequentialFlow) &&
+            {sequentialFlow &&
               pendingSectionTeamIds.filter(
                 (tid) =>
                   isLeaderOfTeamId(tid) || data.settings.role === 'Admin' || data.settings.role === 'Manager'
@@ -2067,6 +2081,7 @@ export function TaskDetailPage() {
                       : null
                   const lineProduced = stageProduced != null ? stageProduced : Math.max(0, Number(line.qtyProduced ?? 0))
                   const lineRemaining = Math.max(0, lineTarget - lineProduced)
+                  const unit = line.unitType === 'metre' || isPvcStage ? 'metre' : 'adet'
                   const lineEntries = (task.productionEntries || []).filter((e) => {
                     if (e.productLineIndex != null && !Number.isNaN(Number(e.productLineIndex))) {
                       return Number(e.productLineIndex) === lidx
@@ -2099,11 +2114,13 @@ export function TaskDetailPage() {
                       ) : null}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
                         <DetailRow label="Model" value={line.modelCode?.trim() ? line.modelCode : '—'} />
-                        <DetailRow
-                          label="Hedef / üretilen / kalan"
-                          value={`${formatNumber(lineTarget)} / ${formatNumber(lineProduced)} / ${formatNumber(lineRemaining)}`}
-                        />
-                        <DetailRow label="Varyant" value={line.variant?.trim() ? line.variant : '—'} />
+                        <div className="flex flex-col gap-0.5 text-sm">
+                          <span className="text-xs uppercase text-muted-foreground">Hedef / üretilen / kalan</span>
+                          <span className="font-medium">Hedef: {formatNumber(lineTarget)} {unit}</span>
+                          <span className="font-medium">Üretilen: {formatNumber(lineProduced)} {unit}</span>
+                          <span className="font-medium">Kalan: {formatNumber(lineRemaining)} {unit}</span>
+                        </div>
+                        {showCncTechFields ? <DetailRow label="Varyant" value={line.variant?.trim() ? line.variant : '—'} /> : <div />}
                         <div className="sm:col-span-2 flex flex-wrap items-center gap-3 rounded border bg-muted/30 px-2 py-1.5">
                           {hex ? (
                             <span
@@ -2117,29 +2134,40 @@ export function TaskDetailPage() {
                             <DetailRow label="Renk kodu" value={line.productColorCode?.trim() ? line.productColorCode : '—'} />
                           </div>
                         </div>
-                        <DetailRow label="Bıçak" value={line.modelBladeDepth?.trim() ? line.modelBladeDepth : '—'} />
-                        <DetailRow
-                          label="Birim süre"
-                          value={
-                            line.modelDurationMinutes != null && Number(line.modelDurationMinutes) > 0
-                              ? `${line.modelDurationMinutes} dk`
-                              : '—'
-                          }
-                        />
-                        <DetailRow
-                          label="Satır plan (dk)"
-                          value={
-                            line.totalPlannedMinutes != null && Number(line.totalPlannedMinutes) > 0
-                              ? `${line.totalPlannedMinutes} dk`
-                              : '—'
-                          }
-                        />
-                        <div className="sm:col-span-2">
-                          <DetailRow
-                            label="Ölçüler"
-                            value={(line.modelSizes || []).length > 0 ? (line.modelSizes || []).join(', ') : '—'}
-                          />
-                        </div>
+                        {showCncTechFields ? (
+                          <>
+                            <DetailRow label="Bıçak" value={line.modelBladeDepth?.trim() ? line.modelBladeDepth : '—'} />
+                            <DetailRow
+                              label="Birim süre"
+                              value={
+                                line.modelDurationMinutes != null && Number(line.modelDurationMinutes) > 0
+                                  ? `${line.modelDurationMinutes} dk`
+                                  : '—'
+                              }
+                            />
+                            <DetailRow
+                              label="Satır plan (dk)"
+                              value={
+                                line.totalPlannedMinutes != null && Number(line.totalPlannedMinutes) > 0
+                                  ? `${line.totalPlannedMinutes} dk`
+                                  : '—'
+                              }
+                            />
+                            <div className="sm:col-span-2">
+                              <DetailRow
+                                label="Ölçüler"
+                                value={(line.modelSizes || []).length > 0 ? [...(line.modelSizes || [])].sort().join(', ') : '—'}
+                              />
+                            </div>
+                          </>
+                        ) : null}
+                        <DetailRow label="Fire" value={`${formatNumber(Number(line.fireQty ?? 0))} ${unit}`} />
+                        <DetailRow label="Fire sebebi" value={line.fireReason?.trim() ? line.fireReason : '—'} />
+                        {line.fireImageDataUrl ? (
+                          <div className="sm:col-span-2">
+                            <img src={line.fireImageDataUrl} alt="fire" className="h-20 w-20 rounded border object-cover" />
+                          </div>
+                        ) : null}
                       </div>
                       <div className="rounded-md border border-dashed bg-muted/20 px-2 py-2 space-y-2">
                         <p className="text-xs font-semibold uppercase text-muted-foreground">Üretim — bu kalem</p>
@@ -2149,13 +2177,14 @@ export function TaskDetailPage() {
                         </p>
                         <div className="flex flex-wrap gap-2 items-end">
                           <div>
-                            <Label className="text-xs">Toplam üretilen (mutlak)</Label>
+                            <Label className="text-xs">Toplam üretilen (mutlak, {unit})</Label>
                             <Input
                               type="text"
                               inputMode="numeric"
                               pattern="[0-9]*"
                               autoComplete="off"
                               className="h-8 w-24"
+                              disabled={task.status === 'done' || sequentialProdLocked || salesOrderFulfilled}
                               value={
                                 lineProdInput[lidx]?.q ?? String(Math.max(0, Number(lineProduced ?? 0)))
                               }
@@ -2175,6 +2204,7 @@ export function TaskDetailPage() {
                             <Input
                               type="date"
                               className="h-8 w-40"
+                              disabled={task.status === 'done' || sequentialProdLocked || salesOrderFulfilled}
                               value={lineProdInput[lidx]?.d ?? prodDate}
                               onChange={(e) => {
                                 setLineProdInput((prev) => ({
@@ -2186,8 +2216,14 @@ export function TaskDetailPage() {
                           </div>
                           <Button
                             size="sm"
-                            disabled={task.status === 'done' || sequentialProdLocked}
-                            title={sequentialProdLocked ? 'Önce usta başı görevi üstlenmeli' : undefined}
+                            disabled={task.status === 'done' || sequentialProdLocked || salesOrderFulfilled}
+                            title={
+                              salesOrderFulfilled
+                                ? 'Sipariş hedef adedine ulaşıldı'
+                                : sequentialProdLocked
+                                  ? 'Önce usta başı görevi üstlenmeli'
+                                  : undefined
+                            }
                             onClick={async () => {
                               const row = lineProdInput[lidx] || {
                                 q: String(Math.max(0, Number(lineProduced ?? 0))),
@@ -2208,6 +2244,7 @@ export function TaskDetailPage() {
                                   quantity,
                                   entry_date: row.d || prodDate,
                                   product_line_index: lidx,
+                                  ...(task.currentTeam ? { team: task.currentTeam } : {}),
                                 })
                                 await hydrateFromApi()
                                 setLineProdInput((prev) => {
@@ -2234,7 +2271,7 @@ export function TaskDetailPage() {
                             <ul className="text-[11px] space-y-0.5 max-h-28 overflow-y-auto text-muted-foreground">
                               {lineEntries.slice(0, 30).map((pe) => (
                                 <li key={pe.id}>
-                                  {pe.entryDate} • bildirilen {pe.quantity} ad • {pe.userName || pe.user || '—'}
+                                  {pe.entryDate} • bildirilen {pe.quantity} {unit} • {pe.userName || pe.user || '—'}
                                   {pe.teamName ? ` • ${pe.teamName}` : ''}
                                 </li>
                               ))}
@@ -2280,7 +2317,7 @@ export function TaskDetailPage() {
                 ) : null}
                 <DetailRow label="Hedef adet (toplam)" value={String(task.quantity ?? 1)} />
                 <DetailRow label="Model kodu" value={task.modelCode?.trim() ? task.modelCode : '—'} />
-                <DetailRow label="Varyant" value={task.variant?.trim() ? task.variant : '—'} />
+                {showCncTechFields ? <DetailRow label="Varyant" value={task.variant?.trim() ? task.variant : '—'} /> : <div />}
                 <div className="sm:col-span-2 flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 px-3 py-2">
                   {(() => {
                     const hex = cssColorFromProductCode(task.productColorCode)
@@ -2297,15 +2334,19 @@ export function TaskDetailPage() {
                     <DetailRow label="Renk kodu" value={task.productColorCode?.trim() ? task.productColorCode : '—'} />
                   </div>
                 </div>
-                <DetailRow label="Bıçak derinliği" value={task.modelBladeDepth?.trim() ? task.modelBladeDepth : '—'} />
-                <DetailRow
-                  label="Birim süre"
-                  value={
-                    task.modelDurationMinutes != null && Number(task.modelDurationMinutes) > 0
-                      ? `${task.modelDurationMinutes} dk`
-                      : '—'
-                  }
-                />
+                {showCncTechFields ? (
+                  <>
+                    <DetailRow label="Bıçak derinliği" value={task.modelBladeDepth?.trim() ? task.modelBladeDepth : '—'} />
+                    <DetailRow
+                      label="Birim süre"
+                      value={
+                        task.modelDurationMinutes != null && Number(task.modelDurationMinutes) > 0
+                          ? `${task.modelDurationMinutes} dk`
+                          : '—'
+                      }
+                    />
+                  </>
+                ) : null}
                 <DetailRow
                   label="Toplam planlanan süre"
                   value={
@@ -2331,6 +2372,42 @@ export function TaskDetailPage() {
             {(task.workflowTeamIds || []).length > 0 && (
               <div className="rounded border bg-background/70 p-3 space-y-2">
                 <p className="text-xs font-semibold uppercase text-muted-foreground">İş akışı — bölüm hedefleri</p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {(task.workflowTeamIds || []).map((tid, idx) => {
+                    const st = wfState[tid] || {}
+                    const isCurrent = String(task.currentTeam || '') === String(tid)
+                    const done = !!st?.stage_done
+                    return (
+                      <div
+                        key={`wf-step-${tid}`}
+                        className={cn(
+                          'rounded-lg border px-3 py-2 text-sm font-medium shadow-sm',
+                          done &&
+                            'border-emerald-300 bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-900 dark:border-emerald-800 dark:from-emerald-950/40 dark:to-emerald-900/20 dark:text-emerald-200',
+                          isCurrent &&
+                            !done &&
+                            'border-sky-300 bg-gradient-to-br from-sky-100 to-blue-100 text-sky-900 ring-2 ring-sky-400/50 dark:border-sky-700 dark:from-sky-900/50 dark:to-blue-900/40 dark:text-sky-100',
+                          !done &&
+                            !isCurrent &&
+                            'border-amber-300 bg-gradient-to-br from-amber-50 to-yellow-100 text-amber-900 dark:border-amber-700 dark:from-amber-950/30 dark:to-yellow-900/20 dark:text-amber-100'
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate">
+                            <span className="mr-1 font-bold">{idx + 1}.</span>
+                            {data.teams.find((t) => t.id === tid)?.name || tid}
+                          </span>
+                          <span className="shrink-0 text-base">{done ? '✓' : isCurrent ? '●' : '○'}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  <span className="font-medium text-primary">● Aktif</span> •{' '}
+                  <span className="font-medium text-emerald-700 dark:text-emerald-300">✓ Tamamlandı</span> •{' '}
+                  <span>○ Bekliyor</span>
+                </p>
                 <ul className="space-y-1.5 text-sm">
                   {(task.workflowTeamIds || []).map((tid, idx) => {
                     const tname = data.teams.find((t) => t.id === tid)?.name || tid
@@ -2704,7 +2781,7 @@ export function TaskDetailPage() {
               </div>
             )}
             <div className="rounded border p-3 space-y-2 mt-3">
-              <p className="text-sm font-semibold">Günlük üretim (adet)</p>
+              <p className="text-sm font-semibold">Günlük üretim ({defaultLineUnit})</p>
               <p className="text-xs text-muted-foreground">
                 Geçmiş satırlar denetim kaydıdır: her satırdaki adet, o anda bildirilen{' '}
                 <span className="font-medium text-foreground">mutlak</span> üretimdir. İlk ekip 81 bildirdiyse süreç bu
@@ -2725,17 +2802,19 @@ export function TaskDetailPage() {
               ) : null}
               {task.salesOrder && (
                 <p className="text-xs text-muted-foreground">
-                  Sipariş: {data.salesOrders.find((s) => s.id === task.salesOrder)?.number || task.salesOrder}
-                  {(() => {
-                    const so = data.salesOrders.find((s) => s.id === task.salesOrder)
-                    if (!so?.orderQuantity) return null
-                    return (
-                      <span>
-                        {' '}
-                        (sipariş: {so.orderQuantity}, üretilen: {so.quantityProduced ?? 0})
-                      </span>
-                    )
-                  })()}
+                  Sipariş: {linkedSalesOrder?.number || task.salesOrder}
+                  {salesOrderOrderQty > 0 ? (
+                    <span>
+                      {' '}
+                      (sipariş: {formatNumber(salesOrderOrderQty)}, üretilen: {formatNumber(salesOrderProduced)}
+                      {salesOrderRemaining != null ? `, kalan: ${formatNumber(salesOrderRemaining)}` : ''})
+                    </span>
+                  ) : null}
+                  {salesOrderFulfilled ? (
+                    <span className="block mt-1 font-medium text-amber-800 dark:text-amber-400">
+                      Sipariş hedef adedine ulaşıldı — yeni üretim girişi kapalıdır.
+                    </span>
+                  ) : null}
                 </p>
               )}
               {(!task.productLines || task.productLines.length === 0) && (
@@ -2749,6 +2828,7 @@ export function TaskDetailPage() {
                         pattern="[0-9]*"
                         autoComplete="off"
                         className="h-8 w-24"
+                        disabled={task.status === 'done' || sequentialProdLocked || salesOrderFulfilled}
                         value={prodQty}
                         onChange={(e) => {
                           const v = e.target.value
@@ -2758,15 +2838,23 @@ export function TaskDetailPage() {
                     </div>
                     <div>
                       <Label className="text-xs">Tarih</Label>
-                      <Input type="date" className="h-8 w-40" value={prodDate} onChange={(e) => setProdDate(e.target.value)} />
+                      <Input
+                        type="date"
+                        className="h-8 w-40"
+                        disabled={task.status === 'done' || sequentialProdLocked || salesOrderFulfilled}
+                        value={prodDate}
+                        onChange={(e) => setProdDate(e.target.value)}
+                      />
                     </div>
                     <Button
                       size="sm"
-                      disabled={task.status === 'done' || sequentialProdLocked}
+                      disabled={task.status === 'done' || sequentialProdLocked || salesOrderFulfilled}
                       title={
-                        sequentialProdLocked
-                          ? 'Önce usta başı görevi üstlenmeli'
-                          : undefined
+                        salesOrderFulfilled
+                          ? 'Sipariş hedef adedine ulaşıldı'
+                          : sequentialProdLocked
+                            ? 'Önce usta başı görevi üstlenmeli'
+                            : undefined
                       }
                       onClick={async () => {
                         const raw = prodQty.trim()
@@ -2783,6 +2871,7 @@ export function TaskDetailPage() {
                           await api.post(`/tasks/${task.id}/log-production/`, {
                             quantity,
                             entry_date: prodDate,
+                            ...(task.currentTeam ? { team: task.currentTeam } : {}),
                           })
                           await hydrateFromApi()
                           setProdQty('1')
@@ -2807,7 +2896,7 @@ export function TaskDetailPage() {
                       <ul className="text-xs space-y-1 max-h-36 overflow-y-auto text-muted-foreground">
                         {(task.productionEntries || []).slice(0, 40).map((pe) => (
                           <li key={pe.id}>
-                            {pe.entryDate} • bildirilen {pe.quantity} ad • {pe.userName || pe.user || '—'}
+                            {pe.entryDate} • bildirilen {pe.quantity} {defaultLineUnit} • {pe.userName || pe.user || '—'}
                             {pe.teamName ? ` • ${pe.teamName}` : ''}
                           </li>
                         ))}
@@ -2901,11 +2990,16 @@ export function TaskDetailPage() {
   )
 }
 
-function DetailRow({ label, value }: { label: string; value?: string }) {
+function DetailRow({ label, value, stackedValue }: { label: string; value?: string; stackedValue?: boolean }) {
   return (
-    <div className="flex items-center gap-2 text-sm">
+    <div
+      className={cn(
+        'flex gap-2 text-sm',
+        stackedValue ? 'flex-col items-start gap-0.5' : 'items-center'
+      )}
+    >
       <span className="text-xs uppercase text-muted-foreground">{label}</span>
-      <span className="font-medium">{value || '—'}</span>
+      <span className={cn('font-medium', stackedValue && 'text-base leading-none')}>{value || '—'}</span>
     </div>
   )
 }
@@ -3139,18 +3233,15 @@ function TaskModal({
             onSubmit={form.handleSubmit(async (values) => {
             try {
               const payload = { ...values }
-              if (payload.start) {
-                const sd = new Date(payload.start)
-                if (!Number.isNaN(sd.getTime())) payload.start = sd.toISOString()
+              const normalizeDateTime = (v: unknown): string | null => {
+                const s = String(v ?? '').trim()
+                if (!s) return null
+                const d = new Date(s)
+                return Number.isNaN(d.getTime()) ? null : d.toISOString()
               }
-              if (payload.end) {
-                const ed = new Date(payload.end)
-                if (!Number.isNaN(ed.getTime())) payload.end = ed.toISOString()
-              }
-              if (payload.due) {
-                const dd = new Date(payload.due)
-                if (!Number.isNaN(dd.getTime())) payload.due = dd.toISOString()
-              }
+              ;(payload as any).start = normalizeDateTime((payload as any).start)
+              ;(payload as any).end = normalizeDateTime((payload as any).end)
+              ;(payload as any).due = normalizeDateTime((payload as any).due)
               const normalizedLines = (values.productLines || []).map((line) => {
                 let row = { ...line }
                 if (row.mode === 'fixed') {

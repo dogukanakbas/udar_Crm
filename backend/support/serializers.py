@@ -140,7 +140,7 @@ class TaskSerializer(serializers.ModelSerializer):
             val = attrs.get(field)
             if val in (None, '', 'null'):
                 attrs[field] = 0
-        # workflow_team_ids varsa ilk ekip = team ve current_team; yeni görevde atanan = ilk ekip usta başı
+        # workflow_team_ids varsa ilk ekip = team/current_team; görev ekip havuzunda başlar (assignee boş)
         workflow_ids = attrs.get('workflow_team_ids')
         if workflow_ids is None and self.instance:
             workflow_ids = getattr(self.instance, 'workflow_team_ids', None)
@@ -153,20 +153,9 @@ class TaskSerializer(serializers.ModelSerializer):
                     attrs['team'] = first_team
                 if first_team and not attrs.get('current_team') and getattr(self.instance, 'current_team', None) is None:
                     attrs['current_team'] = first_team
-                if not self.instance and first_team:
-                    assignee_in = attrs.get('assignee')
-                    if assignee_in in (None, ''):
-                        lid = getattr(first_team, 'leader_id', None)
-                        if lid and first_team.members.filter(id=lid).exists():
-                            # DRF bu aşamada FK için User instance bekler (validated_data içi).
-                            from accounts.models import User
-
-                            leader = User.objects.filter(
-                                id=lid,
-                                organization_id=getattr(first_team, 'organization_id', None),
-                            ).first()
-                            if leader:
-                                attrs['assignee'] = leader
+                if not self.instance:
+                    # Workflow görevlerde ilk atama kişiye değil ekibe yapılır.
+                    attrs['assignee'] = None
         # current_team yoksa team'e eşitle
         if not attrs.get('current_team') and getattr(self.instance, 'current_team', None) is None:
             attrs['current_team'] = attrs.get('team') or getattr(self.instance, 'team', None)

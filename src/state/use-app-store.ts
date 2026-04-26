@@ -31,7 +31,7 @@ import { mapApiProductLineToTask, taskProductLinesToApiPayload } from '@/lib/tas
 type AppState = {
   data: MockDbSnapshot
   resetDemo: () => void
-  hydrateFromApi: () => Promise<void>
+  hydrateFromApi: (options?: { force?: boolean }) => Promise<void>
   startSse: () => void | (() => void)
   setRole: (role: Role) => void
   logAccess?: (action: string, meta?: Record<string, any>) => void
@@ -168,6 +168,14 @@ const mapQuote = (q: any, idx = 0) => ({
   terms: { payment: q.payment_terms || '', delivery: q.delivery_terms || '', notes: q.notes || '' },
 })
 
+const KNOWN_ROLES: Role[] = ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse', 'Worker']
+const isKnownRole = (v: unknown): v is Role => typeof v === 'string' && KNOWN_ROLES.includes(v as Role)
+const HYDRATE_COOLDOWN_MS = 15000
+
+let hydrateInFlight: Promise<void> | null = null
+let lastHydrateAt = 0
+let sseStopper: (() => void) | null = null
+
 const serializeCompanyPayload = (payload: Partial<Company>) => ({
   name: payload.name || '',
   group: payload.industry || '',
@@ -230,6 +238,7 @@ export const useAppStore = create<AppState>()(
     }
   },
   startSse: () => {
+    if (sseStopper) return sseStopper
     let timer: any
     const stop = startSseClient((ev) => {
       const t = ev?.type || ''
@@ -256,16 +265,28 @@ export const useAppStore = create<AppState>()(
         t.startsWith('orders.')
       if (shouldHydrate) {
         timer = setTimeout(() => {
-          get().hydrateFromApi()
+          get().hydrateFromApi({ force: false })
         }, 500)
       }
     })
-    return stop
+    sseStopper = () => {
+      if (timer) clearTimeout(timer)
+      stop?.()
+      sseStopper = null
+    }
+    return sseStopper
   },
-  hydrateFromApi: async () => {
-    try {
+  hydrateFromApi: async (options) => {
+    const force = options?.force ?? true
+    const now = Date.now()
+    if (hydrateInFlight) return hydrateInFlight
+    if (!force && now - lastHydrateAt < HYDRATE_COOLDOWN_MS) return
+
+    hydrateInFlight = (async () => {
+      try {
       const meRes = await api.get('/auth/me/')
-      const userRole = meRes.data?.role as Role | undefined
+      const userRoleRaw = meRes.data?.role
+      const userRole = isKnownRole(userRoleRaw) ? userRoleRaw : undefined
       // current user bilgilerini lokal sakla (UI tarafında filtre varsayılanları için)
       if (meRes.data?.id) {
         try {
@@ -274,19 +295,24 @@ export const useAppStore = create<AppState>()(
           /* ignore */
         }
       }
-      try {
-        localStorage.setItem('current-user-role', String(userRole || 'Worker'))
-      } catch {
-        /* ignore */
+      if (userRole) {
+        try {
+          localStorage.setItem('current-user-role', String(userRole))
+        } catch {
+          /* ignore */
+        }
+        // Role bilgisini hemen state'e yaz (UI guard’ları için)
+        set((state) => ({
+          data: { ...state.data, settings: { ...state.data.settings, role: userRole } },
+        }))
+      } else {
+        console.warn('hydrateFromApi: backend unknown/empty role döndürdü, mevcut rol korunuyor:', userRoleRaw)
       }
-      // Role bilgisini hemen state'e yaz (UI guard’ları için)
-      set((state) => ({
-        data: { ...state.data, settings: { ...state.data.settings, role: (userRole as Role) || 'Worker' } },
-      }))
 
       // Worker: gereksiz endpointlere gitme (403). Sıra ASLA değişmemeli — aşağıdaki dizi,
       // products → … → salesOrders → teams → users → tasks eşlemesiyle aynı olmalı.
-      const isWorkerRole = (userRole || 'Worker') === 'Worker'
+      const effectiveRole = userRole ?? get().data.settings.role
+      const isWorkerRole = effectiveRole === 'Worker'
       const emptyList = Promise.resolve({ data: [] })
       const settled = await Promise.allSettled([
         isWorkerRole ? emptyList : api.get('/products/'),
@@ -463,6 +489,23 @@ export const useAppStore = create<AppState>()(
         permissions: u.permissions || [],
         canPrepareQuotes: Boolean(u.can_prepare_quotes),
       }))
+      if (meRes?.data?.id && !users.some((u) => String(u.id) === String(meRes.data.id))) {
+        users.unshift({
+          id: String(meRes.data.id),
+          username: meRes.data.username || meRes.data.email || `user-${meRes.data.id}`,
+          email: meRes.data.email || '',
+          role: meRes.data.role || 'Worker',
+          firstName: meRes.data.first_name || '',
+          lastName: meRes.data.last_name || '',
+          fullName:
+            [meRes.data.first_name, meRes.data.last_name].filter(Boolean).join(' ') ||
+            meRes.data.username ||
+            meRes.data.email ||
+            `user-${meRes.data.id}`,
+          permissions: [],
+          canPrepareQuotes: false,
+        } as any)
+      }
       const currentUserPermissions =
         users.find((user) => String(user.id) === String(meRes.data?.id))?.permissions || []
       const tasks: Task[] = (tasksRes.data || []).map((t: any, idx: number) => ({
@@ -600,17 +643,23 @@ export const useAppStore = create<AppState>()(
           tasks,
         },
       }))
-    } catch (err: any) {
-      console.error('API hydrate failed', err)
-      const status = err?.response?.status
-      const isLogin = typeof window !== 'undefined' && window.location.pathname.startsWith('/login')
-      if ((status === 401 || status === 403) && getTokens() && !isLogin) {
-        try {
-          clearTokens()
-        } catch {}
-        window.location.replace('/login')
+      } catch (err: any) {
+        console.error('API hydrate failed', err)
+        const status = err?.response?.status
+        const isLogin = typeof window !== 'undefined' && window.location.pathname.startsWith('/login')
+        if ((status === 401 || status === 403) && getTokens() && !isLogin) {
+          try {
+            clearTokens()
+          } catch {}
+          window.location.replace('/login')
+        }
+      } finally {
+        lastHydrateAt = Date.now()
+        hydrateInFlight = null
       }
-    }
+    })()
+
+    return hydrateInFlight
   },
   setRole: (role) =>
     set((state) => ({
@@ -965,6 +1014,18 @@ export const useAppStore = create<AppState>()(
           payload.team = payload.teamId ? Number(payload.teamId) : null
           delete payload.teamId
         }
+        if ('start' in payload) {
+          const s = String(payload.start ?? '').trim()
+          payload.start = s ? s : null
+        }
+        if ('end' in payload) {
+          const s = String(payload.end ?? '').trim()
+          payload.end = s ? s : null
+        }
+        if ('due' in payload) {
+          const s = String(payload.due ?? '').trim()
+          payload.due = s ? s : null
+        }
         if ('plannedHours' in payload) payload.planned_hours = (payload as any).plannedHours
         if ('plannedCost' in payload) payload.planned_cost = (payload as any).plannedCost
         if ('mode' in payload) payload.mode = (payload as any).mode
@@ -1016,12 +1077,24 @@ export const useAppStore = create<AppState>()(
       } catch (err) {
         console.error('API updateTask failed', err)
         set((state) => ({ data: { ...state.data, tasks: prev } }))
-        
+
+        const e: any = err
+        const d = e?.response?.data
+        const detail =
+          (typeof d === 'object' && d && !Array.isArray(d)
+            ? Object.entries(d)
+                .map(([k, v]) => `${k}: ${Array.isArray(v) ? (v as any[]).join(', ') : String(v)}`)
+                .join(' • ')
+            : null) ||
+          d?.detail ||
+          e?.message ||
+          'Görev güncellenemedi, lütfen tekrar deneyin'
+
         // CRITICAL: Kullanıcıyı bilgilendir
         import('@/components/ui/use-toast').then(({ toast }) => {
           toast({
             title: 'Değişiklik Kaydedilemedi',
-            description: 'Görev güncellenemedi, lütfen tekrar deneyin',
+            description: String(detail),
             variant: 'destructive',
           })
         })

@@ -17,7 +17,8 @@ export function taskVisibleToWorkerTeamMember(t: Task, workerUserId: string | nu
   if (!ct) return false
   const teamRow = myTeams.find((tm) => tm.id === ct)
   if (!teamRow) return false
-  if (!t.assignee || String(t.assignee).trim() === '') return true
+  // Havuzdaki (assignee boş) görevler "Bana atanan" listesinde gösterilmez; sıralı akışta kuyruk yalnızca usta başı içindir.
+  if (!t.assignee || String(t.assignee).trim() === '') return false
   const aid = String(t.assignee)
   if (teamRow.memberIds?.some((m) => String(m) === aid)) return true
   if (teamRow.leaderId && String(teamRow.leaderId) === aid) return true
@@ -44,7 +45,9 @@ export function workerMayClaimTask(
       if (st?.stage_done) continue
       const aid = st?.assignee_id
       if (aid != null && String(aid) !== String(userId)) continue
-      if (row?.leaderId && String(row.leaderId) === String(userId)) return true
+      const isMember = row?.memberIds?.some((m) => String(m) === String(userId))
+      const isLeader = row?.leaderId && String(row.leaderId) === String(userId)
+      if (isMember || isLeader) return true
     }
     return false
   }
