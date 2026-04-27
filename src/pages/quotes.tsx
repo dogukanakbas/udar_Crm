@@ -31,7 +31,7 @@ import {
 } from '@/lib/location-data'
 import { cn, formatCurrency, formatDate, formatDateTime, formatExchangeRate, getCurrencyLabel, getCurrencySymbol, normalizeCurrency } from '@/lib/utils'
 import { useAppStore } from '@/state/use-app-store'
-import type { Product, Quote, SalesDocumentType } from '@/types'
+import type { Product, Quote, SalesDocumentType, SellerCompanyProfile } from '@/types'
 
 const QUOTE_STATUS_TR = {
   Draft: 'Taslak',
@@ -47,11 +47,43 @@ const DOCUMENT_TYPE_TR = {
   Contract: 'Sözleşme',
 }
 
-const SELLER_OPTIONS = [{ value: 'ORTKA', label: 'ORTKA' }, { value: 'AYKA', label: 'AYKA' }]
 const ADD_CUSTOMER_OPTION = '__add_company__'
 const DOCUMENT_CURRENCY_OPTIONS = getCompanyCurrencyOptions(DEFAULT_COMPANY_COUNTRY_LABEL)
+const CUSTOM_OPTION = '__custom__'
+const VALIDITY_PRESETS = [
+  { value: '3', label: '3 iş günü' },
+  { value: '5', label: '5 iş günü' },
+  { value: '7', label: '7 iş günü' },
+  { value: '10', label: '10 iş günü' },
+  { value: CUSTOM_OPTION, label: 'Manuel iş günü' },
+]
+const DELIVERY_TYPE_OPTIONS = [
+  'Fabrika teslim',
+  'Şantiye montaj dahil teslim',
+  'Nakliye dahil, montaj hariç',
+  'Ankara depo teslim',
+  'İstanbul depo teslim',
+  'Malatya depo teslim',
+  'Muş depo teslim',
+  'Ağrı depo teslim',
+]
+const PAYMENT_OPTION_OPTIONS = [
+  '%100 Nakit',
+  '%50 peşin / %50 teslimde',
+  '%30 peşin / %70 sevkiyat öncesi',
+  '%20 nakit / %80 çek 90 gün',
+  'Kredi kartı tek çekim',
+  'Kredi kartı 3 taksit',
+  'Kredi kartı 6 taksit',
+  'Barter',
+]
+const DEFAULT_SELLER_COMPANIES: SellerCompanyProfile[] = [
+  { key: 'ORTKA', shortName: 'ORTKA', displayName: 'ORTKA', bankAccounts: [], isActive: true, sortOrder: 0 },
+  { key: 'AYKA', shortName: 'AYKA', displayName: 'AYKA', bankAccounts: [], isActive: true, sortOrder: 1 },
+]
 
 const SECTION_OPTIONS = [
+  { value: 'SAFT_ROGAR_KAPAGI', label: 'Şaft / Rögar Kapağı' },
   { value: 'steel_door', label: 'Çelik Kapı' },
   { value: 'interior_door', label: 'İç Oda Kapısı' },
   { value: 'kitchen', label: 'Mutfak' },
@@ -61,6 +93,55 @@ const SECTION_OPTIONS = [
   { value: 'laminate', label: 'Laminant' },
   { value: 'service', label: 'Montaj / Hizmet' },
 ]
+
+const SPECIAL_PRODUCT_GROUPS = [
+  {
+    terms: ['saft kapagi', 'saft kapak', 'rogar kapagi', 'rogar kapak', 'menhol', 'menhole'],
+    sectionKey: 'SAFT_ROGAR_KAPAGI',
+  },
+]
+
+const normalizeProductGroupText = (value?: string) =>
+  String(value || '')
+    .replace(/ı/g, 'i')
+    .replace(/İ/g, 'I')
+    .replace(/ğ/g, 'g')
+    .replace(/Ğ/g, 'G')
+    .replace(/ü/g, 'u')
+    .replace(/Ü/g, 'U')
+    .replace(/ş/g, 's')
+    .replace(/Ş/g, 'S')
+    .replace(/ö/g, 'o')
+    .replace(/Ö/g, 'O')
+    .replace(/ç/g, 'c')
+    .replace(/Ç/g, 'C')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+
+const resolveSpecialProductGroup = (product?: Product) => {
+  const text = normalizeProductGroupText(`${product?.sku || ''} ${product?.name || ''}`)
+  return SPECIAL_PRODUCT_GROUPS.find((group) => group.terms.some((term) => text.includes(term)))
+}
+
+const getSectionOptionsFromCategories = (categories: any[] = []) => {
+  const dynamicOptions = categories
+    .map((category) => ({
+      value: String(category.templateDefaults?.section_key || '').trim(),
+      label: category.name || category.templateDefaults?.section_key || '',
+      order: Number(category.templateDefaults?.document_order ?? 999),
+    }))
+    .filter((item) => item.value && item.label)
+    .sort((left, right) => left.order - right.order || left.label.localeCompare(right.label, 'tr'))
+  const merged = new Map<string, { value: string; label: string }>()
+  for (const option of dynamicOptions) merged.set(option.value, { value: option.value, label: option.label })
+  for (const option of SECTION_OPTIONS) {
+    if (!merged.has(option.value)) merged.set(option.value, option)
+  }
+  return Array.from(merged.values())
+}
 
 const TEMPLATE_OPTIONS = {
   Quote: [
@@ -131,6 +212,8 @@ const documentSchema = z.object({
   templateKey: z.string().optional(),
   contractDate: z.string().optional(),
   validUntil: z.string().min(1, 'Geçerlilik tarihi zorunludur.'),
+  validityPreset: z.string().optional(),
+  validityCustomDays: z.coerce.number().min(1).max(365).optional(),
   validityLabel: z.string().optional(),
   priceListLabel: z.string().optional(),
   payment: z.string().optional(),
@@ -180,6 +263,30 @@ const getDefaultPreparerId = (preparers: any[], quote?: Quote) => {
   return preparers[0]?.id ?? ''
 }
 
+const getPreparerDisplayName = (preparers: any[], preparedById?: string, fallback?: string) => {
+  const preparer = preparers.find((user) => String(user.id) === String(preparedById))
+  if (preparer?.fullName) return preparer.fullName
+  if (preparer?.firstName || preparer?.lastName) return [preparer?.firstName, preparer?.lastName].filter(Boolean).join(' ')
+  if (preparer?.username) return preparer.username
+  return fallback || ''
+}
+
+const getSellerCompanyOptions = (sellerCompanies: SellerCompanyProfile[]) => {
+  const activeCompanies = sellerCompanies.filter((company) => company.isActive !== false)
+  const source = activeCompanies.length ? activeCompanies : DEFAULT_SELLER_COMPANIES
+  return source.map((company) => ({
+    value: company.key,
+    label: company.shortName || company.displayName || company.key,
+    description: company.displayName || company.legalName || company.key,
+  }))
+}
+
+const getDefaultSellerCompanyKey = (sellerCompanies: SellerCompanyProfile[], quote?: Quote) =>
+  quote?.sellerCompanyKey || getSellerCompanyOptions(sellerCompanies)[0]?.value || 'AYKA'
+
+const getSellerCompanyLabel = (sellerCompanies: SellerCompanyProfile[], key?: string) =>
+  getSellerCompanyOptions(sellerCompanies).find((company) => company.value === key)?.label || key || '-'
+
 const normalizeDateInputValue = (value?: string | null) => {
   if (!value) return ''
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
@@ -194,10 +301,31 @@ const normalizeDateInputValue = (value?: string | null) => {
   return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`
 }
 
+const toDateInputValue = (date: Date) => {
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+const addBusinessDaysFromToday = (days: number) => {
+  const next = new Date()
+  let remaining = Math.max(1, Math.min(365, Number(days) || 7))
+  while (remaining > 0) {
+    next.setDate(next.getDate() + 1)
+    if (next.getDay() !== 0 && next.getDay() !== 6) remaining -= 1
+  }
+  return toDateInputValue(next)
+}
+
+const normalizeValidityDays = (value: unknown, fallback = 7) => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed >= 1 && parsed <= 365 ? Math.floor(parsed) : fallback
+}
+
 const buildLineFromProduct = (product?: Product, previousLine?: any) => {
   const defaults = product?.templateDefaults || {}
   const categoryDefaults = product?.categoryTemplateDefaults || {}
-  const sectionKey = defaults.section_key || categoryDefaults.section_key || previousLine?.sectionKey || 'steel_door'
+  const specialGroup = resolveSpecialProductGroup(product)
+  const sectionKey = specialGroup?.sectionKey || defaults.section_key || categoryDefaults.section_key || previousLine?.sectionKey || 'steel_door'
 
   return {
     mode: product ? 'product' : 'manual',
@@ -266,22 +394,40 @@ const collectFirstError = (errors: any, parentPath = ''): { path: string; messag
   return null
 }
 
-const getInitialValues = (mode: SalesDocumentType, companies: any[], preparers: any[], products: Product[], quote?: Quote) => {
+const getInitialValues = (
+  mode: SalesDocumentType,
+  companies: any[],
+  preparers: any[],
+  products: Product[],
+  sellerCompanies: SellerCompanyProfile[],
+  quote?: Quote,
+  priceListLabel = ''
+) => {
   const customerSnapshot = quote?.contractConfig?.customerSnapshot || quote?.contractConfig?.customer_snapshot || {}
   const company = companies.find((item) => item.id === quote?.customerId) || companies[0]
   const preferredCurrency = resolveCompanyCurrency(company?.currency, company?.country)
   const initialCurrency = getDocumentCurrency(quote?.currency || preferredCurrency)
+  const storedValidityDays = normalizeValidityDays(quote?.contractConfig?.validityDays || quote?.contractConfig?.validity_days || 7, 7)
+  const storedValidityPreset = VALIDITY_PRESETS.some((item) => item.value === String(storedValidityDays))
+    ? String(storedValidityDays)
+    : CUSTOM_OPTION
+  const initialValidUntil = normalizeDateInputValue(quote?.validUntil) || addBusinessDaysFromToday(storedValidityDays)
 
   return {
     customerId: quote?.customerId || company?.id || '',
     preparedById: getDefaultPreparerId(preparers, quote),
-    sellerCompanyKey: quote?.sellerCompanyKey || 'AYKA',
+    sellerCompanyKey: getDefaultSellerCompanyKey(sellerCompanies, quote),
     currency: initialCurrency,
     exchangeRate: getDocumentExchangeRate(initialCurrency, quote?.contractConfig?.exchangeRate || quote?.contractConfig?.exchange_rate),
     templateKey: quote?.contractConfig?.templateKey || quote?.contractConfig?.template_key || '',
-      contractDate: normalizeDateInputValue(quote?.contractConfig?.contractDate || quote?.contractConfig?.contract_date) || new Date().toISOString().slice(0, 10),
-      validUntil: normalizeDateInputValue(quote?.validUntil),
-    validityLabel: '',
+      contractDate:
+        normalizeDateInputValue(quote?.contractConfig?.contractDate || quote?.contractConfig?.contract_date) ||
+        normalizeDateInputValue(quote?.createdAt) ||
+        new Date().toISOString().slice(0, 10),
+      validUntil: initialValidUntil,
+    validityPreset: storedValidityPreset,
+    validityCustomDays: storedValidityDays,
+    validityLabel: `${storedValidityDays} iş günü`,
     priceListLabel: quote?.contractConfig?.priceListLabel || quote?.contractConfig?.price_list_label || '2026/1. LİSTE',
     payment: quote?.terms?.payment || '',
     paymentOption: quote?.contractConfig?.paymentOption || quote?.contractConfig?.payment_option || '',
@@ -323,6 +469,9 @@ const getInitialValues = (mode: SalesDocumentType, companies: any[], preparers: 
   }
 }
 
+const resolveValidityDaysFromValues = (values: any) =>
+  normalizeValidityDays(values.validityPreset === CUSTOM_OPTION ? values.validityCustomDays : values.validityPreset, 7)
+
 const buildDocumentPayload = (values: any, mode: SalesDocumentType, status = 'Draft') => ({
   documentType: mode,
   customerId: values.customerId,
@@ -338,7 +487,9 @@ const buildDocumentPayload = (values: any, mode: SalesDocumentType, status = 'Dr
     templateMode: values.templateKey ? 'manual' : 'auto',
     templateKey: values.templateKey || '',
     contractDate: values.contractDate,
-    validityLabel: '',
+    validityPreset: values.validityPreset || '7',
+    validityDays: resolveValidityDaysFromValues(values),
+    validityLabel: `${resolveValidityDaysFromValues(values)} iş günü`,
     priceListLabel: values.priceListLabel,
     exchangeRate: getDocumentExchangeRate(values.currency, values.exchangeRate),
     deliveryType: values.deliveryType,
@@ -782,7 +933,7 @@ function NumericEditor({ value, onValueChange, min = 0, max }: { value?: number;
 }
 
 export function QuotesPage() {
-  const { data, deleteQuotes } = useAppStore()
+  const { data, deleteQuotes, convertQuote } = useAppStore()
   const { toast } = useToast()
   const [status, setStatus] = useState('all')
   const [customer, setCustomer] = useState('all')
@@ -832,6 +983,15 @@ export function QuotesPage() {
     }
   }
 
+  const handleConvert = async (quote: Quote) => {
+    try {
+      await convertQuote(quote.id)
+      toast({ title: 'Teklif sözleşmeye dönüştürüldü' })
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Sözleşmeye dönüştürme sırasında hata oluştu', variant: 'destructive' })
+    }
+  }
+
   const columns: ColumnDef<Quote>[] = [
     { accessorKey: 'documentType', header: 'Tür', cell: ({ row }) => <Badge variant="outline">{DOCUMENT_TYPE_TR[row.original.documentType]}</Badge> },
     { accessorKey: 'number', header: 'No' },
@@ -864,6 +1024,14 @@ export function QuotesPage() {
             <Download className="mr-2 h-4 w-4" />
             İndir
           </Button>
+          {row.original.documentType === 'Quote' ? (
+            <RbacGuard perm="quotes.edit">
+              <Button variant="ghost" size="sm" onClick={() => handleConvert(row.original)}>
+                <Check className="mr-2 h-4 w-4" />
+                Sözleşmeye dönüştür
+              </Button>
+            </RbacGuard>
+          ) : null}
           <RbacGuard perm="quotes.edit">
             <Button
               variant="ghost"
@@ -944,13 +1112,13 @@ export function QuotesPage() {
         </div>
 
         <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Müşteri</Label>
+          <Label className="text-xs text-muted-foreground">Cari</Label>
           <Select value={customer} onValueChange={setCustomer}>
             <SelectTrigger>
-              <SelectValue placeholder="Tüm müşteriler" />
+              <SelectValue placeholder="Tüm cariler" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Tüm müşteriler</SelectItem>
+              <SelectItem value="all">Tüm cariler</SelectItem>
               {companies.map((company) => <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>)}
             </SelectContent>
           </Select>
@@ -1012,13 +1180,30 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   const [customerModalOpen, setCustomerModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [activeTab, setActiveTab] = useState('customer')
+  const [orgPriceListLabel, setOrgPriceListLabel] = useState('2026/1. LİSTE')
   const companies = data.companies
+  const sellerCompanies = data.sellerCompanies || []
   const products = data.products
-  const preparers = useMemo(() => data.users.filter((user) => user.canPrepareQuotes || user.permissions?.includes('quotes.prepare')), [data.users])
+  const preparers = useMemo(() => data.users, [data.users])
+  const sellerOptions = useMemo(() => getSellerCompanyOptions(sellerCompanies), [sellerCompanies])
+  const sectionOptions = useMemo(() => getSectionOptionsFromCategories(data.categories || []), [data.categories])
   const documentMode = quote?.documentType ?? mode
   const isEditing = Boolean(quote)
-  const getFormDefaults = () => getInitialValues(documentMode, companies, preparers, products, quote)
+  const getFormDefaults = () => getInitialValues(documentMode, companies, preparers, products, sellerCompanies, quote, orgPriceListLabel)
   const form = useForm({ resolver: zodResolver(documentSchema) as any, defaultValues: getFormDefaults() })
+  const preparedById = form.watch('preparedById')
+  const preparedByDisplayName = getPreparerDisplayName(preparers, preparedById, quote?.preparedByName || quote?.owner)
+
+  useEffect(() => {
+    api
+      .get('/auth/organization-settings/')
+      .then((response) => setOrgPriceListLabel(response.data?.price_list_label || '2026/1. LİSTE'))
+      .catch(() => setOrgPriceListLabel('2026/1. LİSTE'))
+  }, [])
+
+  useEffect(() => {
+    form.setValue('priceListLabel', orgPriceListLabel, { shouldDirty: false })
+  }, [form, orgPriceListLabel, open])
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen)
@@ -1051,6 +1236,20 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
 
     if (options?.forceExchangeRate || !Number.isFinite(currentRate) || currentRate <= 0) {
       form.setValue('exchangeRate', 1, { shouldDirty: true, shouldValidate: true })
+    }
+  }
+
+  const applyValidityDays = (days: number) => {
+    const normalizedDays = normalizeValidityDays(days, 7)
+    form.setValue('validityCustomDays', normalizedDays, { shouldDirty: true, shouldValidate: true })
+    form.setValue('validityLabel', `${normalizedDays} iş günü`, { shouldDirty: true })
+    form.setValue('validUntil', addBusinessDaysFromToday(normalizedDays), { shouldDirty: true, shouldValidate: true })
+  }
+
+  const setValidityPreset = (preset: string) => {
+    form.setValue('validityPreset', preset, { shouldDirty: true, shouldValidate: true })
+    if (preset !== CUSTOM_OPTION) {
+      applyValidityDays(Number(preset))
     }
   }
 
@@ -1124,7 +1323,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
         )
 
     if (nextCompany) applyCustomerToForm(nextCompany, { includeCustomerId: true, forcePreferredCurrency: true })
-    toast({ title: 'Müşteri eklendi' })
+      toast({ title: 'Cari eklendi' })
   }
 
   const handleSave = form.handleSubmit(async (values) => {
@@ -1183,7 +1382,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
         <DialogHeader><DialogTitle>{isEditing ? `${DOCUMENT_TYPE_TR[documentMode]} düzenle` : documentMode === 'Contract' ? 'Sözleşme oluştur' : 'Teklif oluştur'}</DialogTitle></DialogHeader>
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-3 grid grid-cols-4">
-            <TabsTrigger value="customer">Müşteri</TabsTrigger>
+            <TabsTrigger value="customer">Cariler</TabsTrigger>
             <TabsTrigger value="document">Belge</TabsTrigger>
             <TabsTrigger value="lines">Kalemler</TabsTrigger>
             <TabsTrigger value="review">Özet</TabsTrigger>
@@ -1191,10 +1390,10 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
           <TabsContent value="customer" className="space-y-4">
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <Label>Müşteri</Label>
+                <Label>Cari seçiniz</Label>
                 <Button type="button" variant="ghost" size="sm" onClick={() => setCustomerModalOpen(true)}>
                   <Plus className="mr-2 h-4 w-4" />
-                  Müşteri ekle
+                  Cari ekle
                 </Button>
               </div>
               <Select
@@ -1207,13 +1406,13 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
                   form.setValue('customerId', value, { shouldDirty: true, shouldValidate: true })
                 }}
               >
-                <SelectTrigger><SelectValue placeholder="Müşteri seçin" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Cari seçiniz" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={ADD_CUSTOMER_OPTION}>Yeni müşteri / firma ekle</SelectItem>
+                  <SelectItem value={ADD_CUSTOMER_OPTION}>Yeni cari / firma ekle</SelectItem>
                   {companies.map((company) => <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">Listeden ayrılmadan yeni firma ekleyebilir ve eklediğiniz müşteriyi anında seçebilirsiniz.</p>
+              <p className="text-xs text-muted-foreground">Listeden ayrılmadan yeni cari ekleyebilir ve eklediğiniz firmayı anında seçebilirsiniz.</p>
               {selectedCustomer ? (
                 <p className="text-xs text-muted-foreground">
                   Varsayılan para birimi: {getCurrencySymbol(resolveCompanyCurrency(selectedCustomer.currency, selectedCustomer.country))}{' '}
@@ -1234,17 +1433,70 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
 
           <TabsContent value="document" className="space-y-4">
             <div className="grid gap-3 md:grid-cols-2">
-              <div><Label>Hazırlayan</Label><Select value={form.watch('preparedById') || '__none__'} onValueChange={(value) => form.setValue('preparedById', value === '__none__' ? '' : value)}><SelectTrigger><SelectValue placeholder="Hazırlayan seçin" /></SelectTrigger><SelectContent><SelectItem value="__none__">Seçili değil</SelectItem>{preparers.map((user) => <SelectItem key={user.id} value={user.id}>{user.fullName || user.username}</SelectItem>)}</SelectContent></Select></div>
-              <div><Label>Satıcı firma</Label><Select value={form.watch('sellerCompanyKey') || 'AYKA'} onValueChange={(value) => form.setValue('sellerCompanyKey', value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{SELLER_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
+              <div><Label>Hazırlayan</Label><Input value={preparedByDisplayName || '-'} readOnly disabled /></div>
+              <div><Label>Satıcı firma</Label><Select value={form.watch('sellerCompanyKey') || getDefaultSellerCompanyKey(sellerCompanies, quote)} onValueChange={(value) => form.setValue('sellerCompanyKey', value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{sellerOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
               <div><Label>Para birimi</Label><Select value={form.watch('currency') || 'TRY'} onValueChange={(value) => setDocumentCurrency(value, { forceExchangeRate: value !== form.getValues('currency') })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{selectedCustomerCurrencyOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select><p className="mt-1 text-xs text-muted-foreground">{selectedCustomer && !selectedCustomerAllowedCurrencies.includes('TRY') ? 'Yurt dışı müşterilerde yalnızca dolar veya euro kullanılır.' : 'Seçili müşterinin varsayılan para birimi otomatik doldurulur, isterseniz değiştirebilirsiniz.'}</p></div>
               <div><Label>{`Kur (${getCurrencySymbol(form.watch('currency'))} -> ₺)`}</Label><Input type="number" step="0.0001" min="1" disabled={(form.watch('currency') || 'TRY') === 'TRY'} value={form.watch('exchangeRate') ?? 1} onChange={(event) => form.setValue('exchangeRate', Number(event.target.value || 1), { shouldDirty: true })} /><p className="mt-1 text-xs text-muted-foreground">{(form.watch('currency') || 'TRY') === 'TRY' ? 'Türk Lirası seçildiğinde kur 1 kabul edilir.' : formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p></div>
               <div><Label>Şablon</Label><Select value={form.watch('templateKey') || '__auto__'} onValueChange={(value) => form.setValue('templateKey', value === '__auto__' ? '' : value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{TEMPLATE_OPTIONS[documentMode].map((option) => <SelectItem key={option.value || '__auto__'} value={option.value || '__auto__'}>{option.label}</SelectItem>)}</SelectContent></Select></div>
-              <div><Label>Belge tarihi</Label><Input type="date" value={form.watch('contractDate') || ''} onChange={(event) => form.setValue('contractDate', event.target.value)} /></div>
-              <div><Label>Geçerlilik tarihi</Label><Input type="date" value={form.watch('validUntil') || ''} onChange={(event) => form.setValue('validUntil', event.target.value, { shouldDirty: true, shouldValidate: true })} /></div>
-              <div><Label>Fiyat listesi etiketi</Label><Input value={form.watch('priceListLabel') || ''} onChange={(event) => form.setValue('priceListLabel', event.target.value)} /></div>
+              <div><Label>Oluşturulma tarihi</Label><Input type="date" value={form.watch('contractDate') || ''} readOnly disabled /></div>
+              <div>
+                <Label>Geçerlilik süresi</Label>
+                <Select value={form.watch('validityPreset') || '7'} onValueChange={setValidityPreset}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {VALIDITY_PRESETS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {form.watch('validityPreset') === CUSTOM_OPTION ? (
+                  <Input
+                    className="mt-2"
+                    type="number"
+                    min="1"
+                    max="365"
+                    value={form.watch('validityCustomDays') || 7}
+                    onChange={(event) => applyValidityDays(Number(event.target.value || 7))}
+                  />
+                ) : null}
+              </div>
+              <div><Label>Geçerlilik tarihi</Label><Input type="date" value={form.watch('validUntil') || ''} readOnly disabled /><p className="mt-1 text-xs text-muted-foreground">Seçilen iş gününe göre hafta sonları atlanarak otomatik hesaplanır.</p></div>
+              <div><Label>Fiyat listesi etiketi</Label><Input value={form.watch('priceListLabel') || ''} readOnly disabled /><p className="mt-1 text-xs text-muted-foreground">Bu alan şablon yönetiminde Admin tarafından belirlenir.</p></div>
               <div><Label>İmza etiketi</Label><Input value={form.watch('signatureCustomerLabel') || ''} onChange={(event) => form.setValue('signatureCustomerLabel', event.target.value)} /></div>
-                <div><Label>Teslim tipi</Label><Input value={form.watch('deliveryType') || ''} onChange={(event) => form.setValue('deliveryType', event.target.value)} /></div>
-                <div><Label>Ödeme tipi</Label><Input value={form.watch('paymentOption') || ''} onChange={(event) => form.setValue('paymentOption', event.target.value)} /></div>
+                <div>
+                  <Label>Teslim tipi</Label>
+                  <Select
+                    value={DELIVERY_TYPE_OPTIONS.includes(form.watch('deliveryType') || '') ? form.watch('deliveryType') : CUSTOM_OPTION}
+                    onValueChange={(value) => form.setValue('deliveryType', value === CUSTOM_OPTION ? '' : value, { shouldDirty: true })}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Teslim tipi seçin" /></SelectTrigger>
+                    <SelectContent>
+                      {DELIVERY_TYPE_OPTIONS.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
+                      <SelectItem value={CUSTOM_OPTION}>Manuel giriş</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {!DELIVERY_TYPE_OPTIONS.includes(form.watch('deliveryType') || '') ? (
+                    <Input className="mt-2" value={form.watch('deliveryType') || ''} onChange={(event) => form.setValue('deliveryType', event.target.value)} placeholder="Teslim tipini yazın" />
+                  ) : null}
+                </div>
+                <div>
+                  <Label>Ödeme tipi</Label>
+                  <Select
+                    value={PAYMENT_OPTION_OPTIONS.includes(form.watch('paymentOption') || '') ? form.watch('paymentOption') : CUSTOM_OPTION}
+                    onValueChange={(value) => {
+                      const nextValue = value === CUSTOM_OPTION ? '' : value
+                      form.setValue('paymentOption', nextValue, { shouldDirty: true })
+                      if (nextValue) form.setValue('payment', nextValue, { shouldDirty: true })
+                    }}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Ödeme tipi seçin" /></SelectTrigger>
+                    <SelectContent>
+                      {PAYMENT_OPTION_OPTIONS.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
+                      <SelectItem value={CUSTOM_OPTION}>Manuel giriş</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {!PAYMENT_OPTION_OPTIONS.includes(form.watch('paymentOption') || '') ? (
+                    <Input className="mt-2" value={form.watch('paymentOption') || ''} onChange={(event) => form.setValue('paymentOption', event.target.value)} placeholder="Ödeme tipini yazın" />
+                  ) : null}
+                </div>
                 <div><Label>Ödeme metni</Label><Input value={form.watch('payment') || ''} onChange={(event) => form.setValue('payment', event.target.value)} /></div>
                 <div><Label>Teslim tarihi</Label><Input type="date" value={form.watch('delivery') || ''} onChange={(event) => form.setValue('delivery', event.target.value, { shouldDirty: true, shouldValidate: true })} /></div>
             </div>
@@ -1272,8 +1524,8 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
                     </CardHeader>
                     <CardContent className="grid gap-3 md:grid-cols-3">
                       <div><Label>Ürün modu</Label><Select value={line.mode || 'manual'} onValueChange={(value) => value === 'manual' ? setManualMode(index) : undefined}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="manual">Manuel giriş</SelectItem><SelectItem value="product">Listeden seç</SelectItem></SelectContent></Select></div>
-                      <div className="md:col-span-2"><Label>Ürün</Label><Select value={line.productId || '__manual__'} onValueChange={(value) => value === '__manual__' ? setManualMode(index) : applyProduct(index, value)}><SelectTrigger><SelectValue placeholder="Ürün seçin" /></SelectTrigger><SelectContent><SelectItem value="__manual__">Manuel giriş</SelectItem>{products.map((product) => <SelectItem key={product.id} value={product.id}>{product.sku} - {product.name}</SelectItem>)}</SelectContent></Select></div>
-                      <div><Label>Grup</Label><Select value={line.sectionKey} onValueChange={(value) => form.setValue(`lines.${index}.sectionKey`, value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{SECTION_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
+                      <div className="md:col-span-2"><Label>Ürün</Label><Select value={line.productId || '__manual__'} onValueChange={(value) => value === '__manual__' ? setManualMode(index) : applyProduct(index, value)}><SelectTrigger><SelectValue placeholder="Ürün seçin" /></SelectTrigger><SelectContent className="max-h-[22rem] overflow-y-auto"><SelectItem value="__manual__">Manuel giriş</SelectItem>{products.map((product) => <SelectItem key={product.id} value={product.id}>{product.sku} - {product.name}</SelectItem>)}</SelectContent></Select></div>
+                      <div><Label>Grup</Label><Select value={line.sectionKey} onValueChange={(value) => form.setValue(`lines.${index}.sectionKey`, value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{sectionOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
                       <div><Label>Ürün kodu</Label><Input value={line.details?.code || line.sku || ''} onChange={(event) => form.setValue(`lines.${index}.details.code`, event.target.value)} /></div>
                       <div><Label>Birim</Label><Input value={line.unit || ''} onChange={(event) => form.setValue(`lines.${index}.unit`, event.target.value)} /></div>
                       <div className="md:col-span-3"><Label>Açıklama / satış birimi</Label><Input value={line.name} onChange={(event) => form.setValue(`lines.${index}.name`, event.target.value)} /></div>
@@ -1294,7 +1546,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
           </TabsContent>
 
             <TabsContent value="review" className="space-y-3">
-              <Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Belge türü: {DOCUMENT_TYPE_TR[documentMode]}</p><p>Müşteri: {form.watch('customerName') || selectedCustomer?.name || '-'}</p><p>Hazırlayan: {preparers.find((user) => user.id === form.watch('preparedById'))?.fullName || '-'}</p><p>Satıcı firma: {form.watch('sellerCompanyKey') || '-'}</p><p>Para birimi: {getCurrencySymbol(form.watch('currency'))} {getCurrencyLabel(form.watch('currency'))}</p><p>Kur: {formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p><p>Teslim tarihi: {form.watch('delivery') ? formatDate(form.watch('delivery')) : '-'}</p><p>Şablon: {templateLabel(documentMode, form.watch('templateKey'))}</p><p>Satır sayısı: {lines.length}</p><p>Ara toplam: {formatDocumentAmount(subtotal, form.watch('currency'))}</p><p>Toplam iskonto: {formatDocumentAmount(discountTotal, form.watch('currency'))}</p><p>KDV: {formatDocumentAmount(taxTotal, form.watch('currency'))}</p><p>Genel toplam: {formatDocumentAmount(total, form.watch('currency'))}</p></CardContent></Card>
+              <Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Belge türü: {DOCUMENT_TYPE_TR[documentMode]}</p><p>Müşteri: {form.watch('customerName') || selectedCustomer?.name || '-'}</p><p>Hazırlayan: {preparedByDisplayName || '-'}</p><p>Satıcı firma: {getSellerCompanyLabel(sellerCompanies, form.watch('sellerCompanyKey'))}</p><p>Para birimi: {getCurrencySymbol(form.watch('currency'))} {getCurrencyLabel(form.watch('currency'))}</p><p>Kur: {formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p><p>Teslim tarihi: {form.watch('delivery') ? formatDate(form.watch('delivery')) : '-'}</p><p>Şablon: {templateLabel(documentMode, form.watch('templateKey'))}</p><p>Satır sayısı: {lines.length}</p><p>Ara toplam: {formatDocumentAmount(subtotal, form.watch('currency'))}</p><p>Toplam iskonto: {formatDocumentAmount(discountTotal, form.watch('currency'))}</p><p>KDV: {formatDocumentAmount(taxTotal, form.watch('currency'))}</p><p>Genel toplam: {formatDocumentAmount(total, form.watch('currency'))}</p></CardContent></Card>
           </TabsContent>
         </Tabs>
         <DialogFooter><Button type="button" onClick={handleSaveClick} disabled={saving}>{saving ? 'Kaydediliyor...' : isEditing ? 'Değişiklikleri kaydet' : 'Kaydet'}</Button></DialogFooter>
@@ -1307,7 +1559,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
 export function QuoteDetailPage() {
   const params = useParams({ from: '/crm/quotes/$quoteId' })
   const navigate = useNavigate()
-  const { data, updateQuote, convertQuote, deleteQuotes } = useAppStore()
+  const { data, sendQuote, requestQuoteApproval, convertQuote, deleteQuotes } = useAppStore()
   const { toast } = useToast()
   const [auditLogs, setAuditLogs] = useState<QuoteAuditLogItem[]>([])
   const [approvalSteps, setApprovalSteps] = useState<{ id: string; role: string; status: string; comment?: string; acted_by?: string; updated_at?: string }[]>([])
@@ -1315,6 +1567,7 @@ export function QuoteDetailPage() {
   const [deleting, setDeleting] = useState(false)
   const quote = data.quotes.find((item) => item.id === params.quoteId) ?? data.quotes[0]
   const company = data.companies.find((item) => item.id === quote?.customerId)
+  const sellerCompanies = data.sellerCompanies || []
   if (!quote) return <p className="text-muted-foreground">Belge bulunamadı</p>
 
   useEffect(() => {
@@ -1327,15 +1580,35 @@ export function QuoteDetailPage() {
   const termsLines = getTermsText(quote.contractConfig).split('\n').map((line) => line.trim()).filter(Boolean)
   const contractNotesLines = getContractNotesText(quote.contractConfig).split('\n').map((line) => line.trim()).filter(Boolean)
 
-  const approve = async (role: any) => {
+  const handleSend = async () => {
     try {
-      await updateQuote(quote.id, {
-        approval: (quote.approval || []).map((step) => (step.role === role ? { ...step, status: 'Approved', updatedAt: new Date().toISOString() } : step)),
-        status: role === 'Finance' ? 'Approved' : quote.status,
-      })
-      toast({ title: `${role} onayı alındı` })
+      await sendQuote(quote.id)
+      toast({ title: 'Belge gönderildi olarak işaretlendi' })
     } catch (error: any) {
-      toast({ title: error?.response?.data?.detail || 'Onay durumu güncellenemedi', variant: 'destructive' })
+      toast({ title: error?.response?.data?.detail || 'Gönderim durumu güncellenemedi', variant: 'destructive' })
+    }
+  }
+
+  const handleRequestApproval = async () => {
+    try {
+      await requestQuoteApproval(quote.id)
+      const refreshed = await api.get('/approvals/', { params: { quote_id: quote.id } })
+      setApprovalSteps(refreshed.data?.[0]?.steps || [])
+      toast({ title: 'Belge onay sürecine gönderildi' })
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Onay süreci başlatılamadı', variant: 'destructive' })
+    }
+  }
+
+  const handleConvert = async () => {
+    try {
+      const contract = await convertQuote(quote.id)
+      toast({ title: 'Teklif sözleşmeye dönüştürüldü' })
+      if (contract?.id) {
+        navigate({ to: '/crm/quotes/$quoteId', params: { quoteId: contract.id } })
+      }
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Sözleşmeye dönüştürme sırasında hata oluştu', variant: 'destructive' })
     }
   }
 
@@ -1381,10 +1654,10 @@ export function QuoteDetailPage() {
                 }
               />
             </RbacGuard>
-            <RbacGuard perm="quotes.edit"><Button size="sm" variant="outline" onClick={async () => { try { await updateQuote(quote.id, { status: 'Sent' }); toast({ title: 'Belge gönderildi olarak işaretlendi' }) } catch (error: any) { toast({ title: error?.response?.data?.detail || 'Durum güncellenemedi', variant: 'destructive' }) } }}><Send className="mr-2 h-4 w-4" />Gönder</Button></RbacGuard>
+            <RbacGuard perm="quotes.edit"><Button size="sm" variant="outline" onClick={handleSend}><Send className="mr-2 h-4 w-4" />Gönderildi işaretle</Button></RbacGuard>
             <Button onClick={handleDownload}><Download className="mr-2 h-4 w-4" />İndir</Button>
-            <RbacGuard perm="quotes.edit"><Button size="sm" variant="outline" onClick={() => approve('Manager')}><Shield className="mr-2 h-4 w-4" />Onay iste</Button></RbacGuard>
-            <RbacGuard perm="quotes.edit"><Button size="sm" onClick={() => { convertQuote(quote.id); toast({ title: 'Satış siparişine dönüştürüldü' }) }}><Check className="mr-2 h-4 w-4" />Satış siparişi</Button></RbacGuard>
+            <RbacGuard perm="quotes.edit"><Button size="sm" variant="outline" onClick={handleRequestApproval}><Shield className="mr-2 h-4 w-4" />Onay iste</Button></RbacGuard>
+            {quote.documentType === 'Quote' ? <RbacGuard perm="quotes.edit"><Button size="sm" onClick={handleConvert}><Check className="mr-2 h-4 w-4" />Sözleşmeye dönüştür</Button></RbacGuard> : null}
             <RbacGuard perm="quotes.edit"><Button size="sm" variant="destructive" disabled={deleting} onClick={handleDelete}><Trash2 className="mr-2 h-4 w-4" />Sil</Button></RbacGuard>
           </div>
         }
@@ -1402,7 +1675,7 @@ export function QuoteDetailPage() {
 
         <TabsContent value="overview"><Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Müşteri: {quote.customerName || company?.name}</p><p>Sahip: {quote.owner}</p><p>Hazırlayan: {quote.preparedByName || '-'}</p><p>Oluşturulma: {formatDateTime(quote.createdAt)}</p><p>Geçerlilik: {formatDate(quote.validUntil)}</p><p>Para birimi: {getCurrencySymbol(quote.currency)} {getCurrencyLabel(quote.currency)}</p><p>Kur: {formatExchangeRate(quote.contractConfig?.exchangeRate || quote.contractConfig?.exchange_rate, quote.currency)}</p><p>Ödeme: {quote.terms.payment || '-'}</p><p>Teslim tarihi: {quote.terms.delivery ? formatDate(quote.terms.delivery) : '-'}</p><p>KDV oranı: %{quote.vatRate ?? 20}</p><p>Toplam: {formatCurrency(quote.total, quote.currency)}</p></CardContent></Card></TabsContent>
         <TabsContent value="lines"><Card><CardContent className="space-y-3 pt-4">{quote.lines.map((line, index) => <div key={`${line.name}-${index}`} className="rounded-md border p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold">{line.name}</p><p className="text-muted-foreground">{sectionLabel(line.sectionKey)} - Kod: {line.details?.code || line.sku || '-'}</p></div><p>{formatCurrency(line.unitPrice, quote.currency)} / {line.unit || 'Adet'}</p></div><div className="mt-2 grid gap-1 md:grid-cols-3"><span>Detay 1: {line.details?.primary || '-'}</span><span>Detay 2: {line.details?.secondary || '-'}</span><span>Miktar: {line.qty}</span><span>İskonto 1: %{line.discount || 0}</span><span>İskonto 2: %{line.discountSecondary || 0}</span><span>KDV: %{line.tax || 0}</span><span>Etkin iskonto: %{getEffectiveDiscountRate(line).toFixed(2)}</span><span>Net tutar: {formatCurrency(getLineDiscountedBase(line), quote.currency)}</span><span>Tutar: {formatCurrency(getLineBase(line), quote.currency)}</span></div>{line.details?.attributes && Object.keys(line.details.attributes).length > 0 && <div className="mt-3 grid gap-2 rounded-md bg-muted/30 p-3 md:grid-cols-2">{Object.entries(line.details.attributes).map(([key, value]) => <span key={key}>{key}: {String(value)}</span>)}</div>}</div>)}</CardContent></Card></TabsContent>
-        <TabsContent value="document"><Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Satıcı firma: {quote.sellerCompanyKey || '-'}</p><p>Şablon: {templateLabel(quote.documentType, quote.contractConfig?.templateKey || quote.contractConfig?.template_key)}</p><p>Cari ünvanı: {customerSnapshot.name || quote.customerName || company?.name || '-'}</p><p>Vergi bilgisi: {[customerSnapshot.tax_office || customerSnapshot.taxOffice, customerSnapshot.tax_number || customerSnapshot.taxNumber].filter(Boolean).join(' / ') || '-'}</p><p>Yetkili: {customerSnapshot.authorized_person || customerSnapshot.authorizedPerson || '-'}</p><p>Telefon / mail: {[customerSnapshot.phone, customerSnapshot.email].filter(Boolean).join(' / ') || '-'}</p><p>Adres: {customerSnapshot.address || '-'}</p>{termsLines.length > 0 && <div className="space-y-2 pt-2"><p className="font-medium">Maddeler</p>{termsLines.map((term, index) => <p key={`term-${index}`}>{term}</p>)}</div>}{contractNotesLines.length > 0 && <div className="space-y-2 pt-2"><p className="font-medium">Sözleşme notları</p>{contractNotesLines.map((term, index) => <p key={`contract-note-${index}`}>{term}</p>)}</div>}</CardContent></Card></TabsContent>
+        <TabsContent value="document"><Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Satıcı firma: {getSellerCompanyLabel(sellerCompanies, quote.sellerCompanyKey)}</p><p>Şablon: {templateLabel(quote.documentType, quote.contractConfig?.templateKey || quote.contractConfig?.template_key)}</p><p>Cari ünvanı: {customerSnapshot.name || quote.customerName || company?.name || '-'}</p><p>Vergi bilgisi: {[customerSnapshot.tax_office || customerSnapshot.taxOffice, customerSnapshot.tax_number || customerSnapshot.taxNumber].filter(Boolean).join(' / ') || '-'}</p><p>Yetkili: {customerSnapshot.authorized_person || customerSnapshot.authorizedPerson || '-'}</p><p>Telefon / mail: {[customerSnapshot.phone, customerSnapshot.email].filter(Boolean).join(' / ') || '-'}</p><p>Adres: {customerSnapshot.address || '-'}</p>{termsLines.length > 0 && <div className="space-y-2 pt-2"><p className="font-medium">Maddeler</p>{termsLines.map((term, index) => <p key={`term-${index}`}>{term}</p>)}</div>}{contractNotesLines.length > 0 && <div className="space-y-2 pt-2"><p className="font-medium">Sözleşme notları</p>{contractNotesLines.map((term, index) => <p key={`contract-note-${index}`}>{term}</p>)}</div>}</CardContent></Card></TabsContent>
         <TabsContent value="pricing"><Card><CardContent className="pt-4 space-y-2 text-sm"><p>Fiyatlama kuralları müşteri, ürün kategorisi ve hacim bazlı uygulanır.</p><div className="flex gap-2"><Badge>VIP müşteri %8</Badge><Badge>Donanım %5</Badge><Badge>50k+ %3</Badge></div></CardContent></Card></TabsContent>
         <TabsContent value="approval"><Card><CardContent className="pt-4 space-y-2"><CardDescription>Satır içi onay akışı</CardDescription>{approvalSteps.length === 0 && <p className="text-sm text-muted-foreground">Onay kaydı yok</p>}{approvalSteps.map((step) => <div key={step.id} className="flex items-center justify-between rounded-md border p-2"><div><p className="font-semibold">{step.role}</p><p className="text-xs text-muted-foreground">Durum: {step.status}</p>{step.comment && <p className="text-xs text-muted-foreground">Not: {step.comment}</p>}</div>{step.status === 'Waiting' && <div className="flex gap-2"><RbacGuard perm="quotes.approve"><Button size="sm" disabled={busyStep === step.id} onClick={async () => { setBusyStep(step.id); await api.post(`/approvals/step/${step.id}/action/`, { action: 'approve' }); const refreshed = await api.get('/approvals/', { params: { quote_id: quote.id } }); setApprovalSteps(refreshed.data?.[0]?.steps || []); setBusyStep(null) }}>Onayla</Button></RbacGuard><RbacGuard perm="quotes.approve"><Button size="sm" variant="outline" disabled={busyStep === step.id} onClick={async () => { const reason = prompt('Ret nedeni:'); setBusyStep(step.id); await api.post(`/approvals/step/${step.id}/action/`, { action: 'reject', comment: reason || '' }); const refreshed = await api.get('/approvals/', { params: { quote_id: quote.id } }); setApprovalSteps(refreshed.data?.[0]?.steps || []); setBusyStep(null) }}>Reddet</Button></RbacGuard></div>}</div>)}<RbacGuard perm="quotes.edit"><Button size="sm" variant="ghost" disabled={busyStep !== null} onClick={async () => { setBusyStep('resubmit'); if (approvalSteps[0]) { await api.post(`/approvals/step/${approvalSteps[0].id}/action/`, { action: 'resubmit' }); const refreshed = await api.get('/approvals/', { params: { quote_id: quote.id } }); setApprovalSteps(refreshed.data?.[0]?.steps || []) } setBusyStep(null) }}>Yeniden gönder</Button></RbacGuard></CardContent></Card></TabsContent>
         <TabsContent value="history"><AuditHistoryList logs={auditLogs} companies={data.companies} users={data.users} currency={quote.currency} /></TabsContent>

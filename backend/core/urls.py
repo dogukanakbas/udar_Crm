@@ -14,12 +14,14 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework import routers
 
-from crm.views import QuoteViewSet, PricingRuleViewSet, BusinessPartnerViewSet, LeadViewSet, OpportunityViewSet, ContactViewSet
+from crm.views import QuoteViewSet, PricingRuleViewSet, SellerCompanyViewSet, BusinessPartnerViewSet, LeadViewSet, OpportunityViewSet, ContactViewSet
 from erp.views import ProductViewSet as ERPProductViewSet, CategoryViewSet, InvoiceViewSet, SalesOrderViewSet, PurchaseOrderViewSet, StockMovementViewSet, VehicleViewSet
 from accounts.views import TeamViewSet, TeamAssociateViewSet
 from core.views import DashboardKPIView, GlobalSearchView, CalendarICSView, SSEView
@@ -46,6 +48,7 @@ from tenants.views import AdminTenantViewSet, AdminPlanViewSet, AdminSubscriptio
 
 router = routers.DefaultRouter()
 router.register(r'quotes', QuoteViewSet, basename='quotes')
+router.register(r'seller-companies', SellerCompanyViewSet, basename='seller-companies')
 router.register(r'pricing-rules', PricingRuleViewSet, basename='pricing-rules')
 router.register(r'partners', BusinessPartnerViewSet, basename='partners')
 router.register(r'contacts', ContactViewSet, basename='contacts')
@@ -103,3 +106,6 @@ urlpatterns = [
     # NEW: Contact form (public, rate limited)
     path('api/v1/contact/', contact_form_submit, name='contact-submit'),
 ]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

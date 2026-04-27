@@ -14,6 +14,7 @@ export function startSse(onEvent: SseHandler) {
 
   const connect = () => {
     if (isStopped) return
+
     const tokens = getTokens()
     if (!tokens?.access) return
     const base = (api.defaults.baseURL || '').replace(/\/$/, '')

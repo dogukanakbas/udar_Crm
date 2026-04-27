@@ -1,31 +1,344 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Download, Upload } from 'lucide-react'
+import { Download, GripVertical, Plus, Save, Upload } from 'lucide-react'
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 import api from '@/lib/api'
 import { RbacGuard } from '@/components/rbac'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
+import { useAppStore } from '@/state/use-app-store'
 
 type DocumentTemplateLibraryItem = {
   template_key: string
-  document_type: 'Quote' | 'Contract'
+  document_type?: 'Quote' | 'Contract' | 'Master'
   label: string
   default_filename: string
   current_filename: string
   has_custom: boolean
   source_type: 'default' | 'custom'
   uploaded_at?: string | null
+  seller_company_key?: string
+  uses_shared_custom?: boolean
+}
+
+type SellerTemplateGroup = {
+  seller_company_key: string
+  seller_short_name: string
+  seller_display_name: string
+  master_template?: DocumentTemplateLibraryItem
+}
+
+type TemplatePlaceholderGroup = {
+  group: string
+  description: string
+  items: Array<{
+    token: string
+    label: string
+  }>
+}
+
+const DEFAULT_DOCUMENT_COLUMNS = ['Kod', 'Satış Birimi', 'Ölçü / Gövde', 'Renk / Kapak', 'Miktar', 'Liste Fiyatı', 'Birim', 'Birim Net Fiyatı', 'Tutar']
+const SELLER_MASTER_TEMPLATE_KEY = 'seller_master'
+const DEFAULT_MASTER_TEMPLATE_ITEM: DocumentTemplateLibraryItem = {
+  template_key: SELLER_MASTER_TEMPLATE_KEY,
+  document_type: 'Master',
+  label: 'Firma ana Excel şablonu',
+  default_filename: 'seller-master-template.xlsx',
+  current_filename: 'seller-master-template.xlsx',
+  has_custom: false,
+  source_type: 'default',
+}
+
+const normalizeDocumentGroup = (category: any, index: number) => {
+  const defaults = category.templateDefaults || {}
+  const columns = Array.isArray(defaults.document_columns) && defaults.document_columns.length
+    ? defaults.document_columns
+    : DEFAULT_DOCUMENT_COLUMNS
+  const technicalItems = Array.isArray(defaults.technical_items) ? defaults.technical_items : []
+  return {
+    id: String(category.id || `new-${index}`),
+    name: category.name || '',
+    templateDefaults: {
+      section_key: defaults.section_key || '',
+      unit: defaults.unit || 'Adet',
+      tax: Number(defaults.tax ?? 20),
+      discount: Number(defaults.discount ?? 0),
+      discount_secondary: Number(defaults.discount_secondary ?? 0),
+      template_family: defaults.template_family || '',
+      document_order: Number(defaults.document_order ?? index),
+      document_columns: columns,
+      technical_items: technicalItems,
+    },
+    attributeSchema: category.attributeSchema || [],
+  }
+}
+
+function SortableProductGroupCard({
+  item,
+  onPatch,
+  onSave,
+  saving,
+}: {
+  item: any
+  onPatch: (id: string, patch: any) => void
+  onSave: (item: any) => void
+  saving: boolean
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: item.id })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+  const defaults = item.templateDefaults || {}
+
+  const setTemplate = (key: string, value: any) =>
+    onPatch(item.id, { templateDefaults: { ...defaults, [key]: value } })
+
+  return (
+    <div ref={setNodeRef} style={style} className="rounded-xl border border-border/70 bg-background/60 p-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex min-w-0 flex-1 gap-3">
+          <button
+            type="button"
+            className="mt-8 rounded-md border border-border/70 p-2 text-muted-foreground hover:text-foreground"
+            aria-label="Ürün grubunu sırala"
+            {...attributes}
+            {...listeners}
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
+          <div className="grid flex-1 gap-3 md:grid-cols-3">
+            <div className="space-y-1">
+              <Label>Ürün grubu adı</Label>
+              <Input value={item.name} onChange={(event) => onPatch(item.id, { name: event.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <Label>Belge grup anahtarı</Label>
+              <Input value={defaults.section_key || ''} onChange={(event) => setTemplate('section_key', event.target.value)} placeholder="steel_door" />
+            </div>
+            <div className="space-y-1">
+              <Label>Şablon ailesi</Label>
+              <Input value={defaults.template_family || ''} onChange={(event) => setTemplate('template_family', event.target.value)} placeholder="steel" />
+            </div>
+            <div className="space-y-1">
+              <Label>Varsayılan birim</Label>
+              <Input value={defaults.unit || ''} onChange={(event) => setTemplate('unit', event.target.value)} placeholder="Adet / Metre" />
+            </div>
+            <div className="space-y-1">
+              <Label>Varsayılan KDV</Label>
+              <Input type="number" value={defaults.tax ?? 20} onChange={(event) => setTemplate('tax', Number(event.target.value || 0))} />
+            </div>
+            <div className="space-y-1">
+              <Label>Belge sırası</Label>
+              <Input type="number" value={defaults.document_order ?? 0} onChange={(event) => setTemplate('document_order', Number(event.target.value || 0))} />
+            </div>
+          </div>
+        </div>
+        <RbacGuard perm="products.edit">
+          <Button size="sm" onClick={() => onSave(item)} disabled={saving}>
+            <Save className="mr-2 h-4 w-4" />
+            Kaydet
+          </Button>
+        </RbacGuard>
+      </div>
+
+      <details className="mt-4 rounded-lg border border-dashed border-border/70 p-3">
+        <summary className="cursor-pointer text-sm font-medium">Tablo kolonları ve teknik alt maddeler</summary>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div className="space-y-1">
+            <Label>Tablo kolonları</Label>
+            <Textarea
+              rows={5}
+              value={(defaults.document_columns || DEFAULT_DOCUMENT_COLUMNS).join(', ')}
+              onChange={(event) =>
+                setTemplate(
+                  'document_columns',
+                  event.target.value.split(',').map((value) => value.trim()).filter(Boolean)
+                )
+              }
+            />
+            <p className="text-xs text-muted-foreground">Excel tablo başlıkları soldan sağa bu sırayla yorumlanır.</p>
+          </div>
+          <div className="space-y-1">
+            <Label>Teknik alt maddeler</Label>
+            <Textarea
+              rows={5}
+              value={(defaults.technical_items || []).join('\n')}
+              onChange={(event) =>
+                setTemplate(
+                  'technical_items',
+                  event.target.value.split('\n').map((value) => value.trim()).filter(Boolean)
+                )
+              }
+              placeholder="Kasa 1,2 mm&#10;TSE 12655 belgeli"
+            />
+            <p className="text-xs text-muted-foreground">Her satır yalnızca bu ürün grubunun teknik maddesi olarak saklanır.</p>
+          </div>
+        </div>
+      </details>
+    </div>
+  )
+}
+
+export function DocumentProductGroupManager() {
+  const { data, upsertCategory } = useAppStore()
+  const { toast } = useToast()
+  const [items, setItems] = useState<any[]>([])
+  const [savingId, setSavingId] = useState<string | null>(null)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
+
+  useEffect(() => {
+    const normalized = (data.categories || [])
+      .map((category, index) => normalizeDocumentGroup(category, index))
+      .sort((left, right) => Number(left.templateDefaults.document_order ?? 999) - Number(right.templateDefaults.document_order ?? 999) || left.name.localeCompare(right.name, 'tr'))
+    setItems(normalized)
+  }, [data.categories])
+
+  const patchItem = (id: string, patch: any) => {
+    setItems((current) =>
+      current.map((item) =>
+        item.id === id
+          ? { ...item, ...patch, templateDefaults: patch.templateDefaults || item.templateDefaults }
+          : item
+      )
+    )
+  }
+
+  const saveItem = async (item: any) => {
+    setSavingId(item.id)
+    try {
+      const isNew = String(item.id).startsWith('new-')
+      await upsertCategory({
+        id: isNew ? undefined : item.id,
+        name: item.name || 'Yeni ürün grubu',
+        templateDefaults: item.templateDefaults,
+        attributeSchema: item.attributeSchema || [],
+      } as any)
+      toast({ title: 'Ürün grubu kaydedildi' })
+    } catch (error: any) {
+      toast({
+        title: 'Ürün grubu kaydedilemedi',
+        description: error?.response?.data?.detail || 'Lütfen bilgileri kontrol edip tekrar deneyin.',
+        variant: 'destructive',
+      })
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  const saveAllOrder = async () => {
+    setSavingId('__order__')
+    try {
+      await Promise.all(
+        items.map((item, index) =>
+          upsertCategory({
+            id: String(item.id).startsWith('new-') ? undefined : item.id,
+            name: item.name || 'Yeni ürün grubu',
+            templateDefaults: { ...item.templateDefaults, document_order: index },
+            attributeSchema: item.attributeSchema || [],
+          } as any)
+        )
+      )
+      toast({ title: 'Ürün grubu sırası kaydedildi' })
+    } catch {
+      toast({ title: 'Sıralama kaydedilemedi', variant: 'destructive' })
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    setItems((current) => {
+      const oldIndex = current.findIndex((item) => item.id === active.id)
+      const newIndex = current.findIndex((item) => item.id === over.id)
+      return arrayMove(current, oldIndex, newIndex).map((item, index) => ({
+        ...item,
+        templateDefaults: { ...item.templateDefaults, document_order: index },
+      }))
+    })
+  }
+
+  const addGroup = () => {
+    const id = `new-${Date.now()}`
+    setItems((current) => [
+      ...current,
+      normalizeDocumentGroup(
+        {
+          id,
+          name: 'Yeni ürün grubu',
+          templateDefaults: {
+            section_key: `custom_${current.length + 1}`,
+            unit: 'Adet',
+            tax: 20,
+            template_family: 'custom',
+            document_order: current.length,
+            document_columns: DEFAULT_DOCUMENT_COLUMNS,
+            technical_items: [],
+          },
+          attributeSchema: [],
+        },
+        current.length
+      ),
+    ])
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Ürün Grupları</CardTitle>
+        <CardDescription>
+          Belge tablolarının ürün grubu sırasını, varsayılan birim/KDV bilgisini ve her gruba özel teknik alt maddeleri buradan yönetin.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap gap-2">
+          <RbacGuard perm="products.edit">
+            <Button size="sm" variant="outline" onClick={addGroup}>
+              <Plus className="mr-2 h-4 w-4" />
+              Ürün grubu ekle
+            </Button>
+            <Button size="sm" onClick={saveAllOrder} disabled={savingId === '__order__'}>
+              {savingId === '__order__' ? 'Sıra kaydediliyor...' : 'Ürün sırasını kaydet'}
+            </Button>
+          </RbacGuard>
+        </div>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
+            <div className="space-y-3">
+              {items.map((item) => (
+                <SortableProductGroupCard
+                  key={item.id}
+                  item={item}
+                  onPatch={patchItem}
+                  onSave={saveItem}
+                  saving={savingId === item.id}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+      </CardContent>
+    </Card>
+  )
 }
 
 async function downloadTemplateFile(
   templateKey: string,
   variant: 'current' | 'default',
-  expectedFilename: string
+  expectedFilename: string,
+  sellerCompanyKey?: string
 ) {
   const response = await api.get('/quotes/template-library-download/', {
-    params: { template_key: templateKey, variant },
+    params: { template_key: templateKey, variant, seller_company_key: sellerCompanyKey || undefined },
     responseType: 'blob',
   })
   const blob = new Blob([response.data], {
@@ -44,18 +357,22 @@ async function downloadTemplateFile(
 }
 
 export function DocumentTemplateLibrary() {
+  const { data } = useAppStore()
   const { toast } = useToast()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [templates, setTemplates] = useState<DocumentTemplateLibraryItem[]>([])
+  const [sellerTemplateGroups, setSellerTemplateGroups] = useState<SellerTemplateGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [uploadingKey, setUploadingKey] = useState<string | null>(null)
-  const [pendingTemplateKey, setPendingTemplateKey] = useState<string | null>(null)
+  const [pendingTemplate, setPendingTemplate] = useState<{ templateKey: string; sellerCompanyKey: string } | null>(null)
+  const [priceListLabel, setPriceListLabel] = useState('2026/1. LİSTE')
+  const [savingSettings, setSavingSettings] = useState(false)
+  const [placeholderGroups, setPlaceholderGroups] = useState<TemplatePlaceholderGroup[]>([])
 
   const fetchTemplates = async () => {
     setLoading(true)
     try {
       const response = await api.get('/quotes/template-library/')
-      setTemplates(response.data?.templates || [])
+      setSellerTemplateGroups(response.data?.seller_templates || [])
     } catch {
       toast({
         title: 'Şablonlar alınamadı',
@@ -71,29 +388,50 @@ export function DocumentTemplateLibrary() {
     fetchTemplates()
   }, [])
 
-  const groupedTemplates = useMemo(
-    () => ({
-      Quote: templates.filter((item) => item.document_type === 'Quote'),
-      Contract: templates.filter((item) => item.document_type === 'Contract'),
-    }),
-    [templates]
+  useEffect(() => {
+    api
+      .get('/auth/organization-settings/')
+      .then((response) => setPriceListLabel(response.data?.price_list_label || '2026/1. LİSTE'))
+      .catch(() => setPriceListLabel('2026/1. LİSTE'))
+  }, [])
+
+  useEffect(() => {
+    api
+      .get('/quotes/template-placeholders/')
+      .then((response) => setPlaceholderGroups(response.data?.groups || []))
+      .catch(() => setPlaceholderGroups([]))
+  }, [])
+
+  const fallbackSellerTemplateGroups = useMemo<SellerTemplateGroup[]>(
+    () =>
+      sellerTemplateGroups.length
+        ? sellerTemplateGroups
+        : (data.sellerCompanies || []).map((seller) => ({
+            seller_company_key: seller.key,
+            seller_short_name: seller.shortName || seller.key,
+            seller_display_name: seller.displayName || seller.legalName || seller.key,
+            master_template: { ...DEFAULT_MASTER_TEMPLATE_ITEM, seller_company_key: seller.key },
+          })),
+    [data.sellerCompanies, sellerTemplateGroups]
   )
 
-  const openUploadPicker = (templateKey: string) => {
-    setPendingTemplateKey(templateKey)
+  const openUploadPicker = (templateKey: string, sellerCompanyKey = '') => {
+    setPendingTemplate({ templateKey, sellerCompanyKey })
     fileInputRef.current?.click()
   }
 
   const handleUploadChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     event.target.value = ''
-    if (!file || !pendingTemplateKey) return
+    if (!file || !pendingTemplate) return
 
     const formData = new FormData()
-    formData.append('template_key', pendingTemplateKey)
+    formData.append('template_key', pendingTemplate.templateKey)
+    formData.append('seller_company_key', pendingTemplate.sellerCompanyKey)
     formData.append('file', file)
 
-    setUploadingKey(pendingTemplateKey)
+    const activeUploadKey = `${pendingTemplate.sellerCompanyKey}:${pendingTemplate.templateKey}`
+    setUploadingKey(activeUploadKey)
     try {
       await api.post('/quotes/template-library-upload/', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -111,7 +449,7 @@ export function DocumentTemplateLibrary() {
       })
     } finally {
       setUploadingKey(null)
-      setPendingTemplateKey(null)
+      setPendingTemplate(null)
     }
   }
 
@@ -124,6 +462,86 @@ export function DocumentTemplateLibrary() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        <Card className="border-dashed">
+          <CardHeader>
+            <CardTitle>Belge sabitleri</CardTitle>
+            <CardDescription>
+              Fiyat listesi etiketi gibi kilitli şablon sabitlerini yalnızca Admin değiştirebilir. Belge oluşturma ekranında bu alan salt okunur görünür.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-2">
+              <Label>Fiyat listesi etiketi</Label>
+              <Input
+                value={priceListLabel}
+                onChange={(event) => setPriceListLabel(event.target.value)}
+                disabled={data.settings.role !== 'Admin' || savingSettings}
+              />
+              <p className="text-xs text-muted-foreground">Örn. `2026/2. LİSTE`. Burada ne yazıyorsa teklifler ve sözleşmeler o etiketi kullanır.</p>
+            </div>
+            <RbacGuard perm="quotes.edit">
+              <Button
+                onClick={async () => {
+                  setSavingSettings(true)
+                  try {
+                    const response = await api.patch('/auth/organization-settings/', {
+                      price_list_label: priceListLabel,
+                    })
+                    setPriceListLabel(response.data?.price_list_label || priceListLabel)
+                    toast({
+                      title: 'Belge sabitleri güncellendi',
+                      description: 'Fiyat listesi etiketi artık yeni belge kayıtlarında otomatik kullanılacak.',
+                    })
+                  } catch (error: any) {
+                    toast({
+                      title: 'Ayar kaydedilemedi',
+                      description: error?.response?.data?.detail || 'Fiyat listesi etiketi güncellenemedi.',
+                      variant: 'destructive',
+                    })
+                  } finally {
+                    setSavingSettings(false)
+                  }
+                }}
+                disabled={data.settings.role !== 'Admin' || savingSettings}
+              >
+                {savingSettings ? 'Kaydediliyor...' : 'Belge sabitlerini kaydet'}
+              </Button>
+            </RbacGuard>
+          </CardContent>
+        </Card>
+
+        <Card className="border-dashed">
+          <CardHeader>
+            <CardTitle>Dinamik placeholder rehberi</CardTitle>
+            <CardDescription>
+              Excel şablonuna süslü parantez ile placeholder yazabilirsiniz. Sistem dışa aktarım sırasında bunları otomatik doldurur.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-lg border border-border/70 bg-muted/20 p-3 text-xs text-muted-foreground">
+              Örnek kullanım: bir hücreye {'{'}cariUnvani{'}'} veya {'{'}saticiFirma1.banka1.iban{'}'} yazın. Şablonu sisteme yüklediğinizde belge oluşturulurken gerçek verilerle yer değiştirir.
+            </div>
+            <div className="space-y-4">
+              {placeholderGroups.map((group) => (
+                <div key={group.group} className="rounded-lg border border-border/70 p-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold">{group.group}</p>
+                    <p className="text-xs text-muted-foreground">{group.description}</p>
+                  </div>
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    {group.items.map((item) => (
+                      <div key={item.token} className="rounded-md border border-border/60 bg-background/40 p-3">
+                        <p className="font-mono text-xs text-primary">{item.token}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{item.label}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
         <input
           ref={fileInputRef}
           type="file"
@@ -136,73 +554,77 @@ export function DocumentTemplateLibrary() {
           <p className="text-sm text-muted-foreground">Şablonlar yükleniyor...</p>
         ) : (
           <>
-            {([
-              { key: 'Quote', title: 'Teklif şablonları' },
-              { key: 'Contract', title: 'Sözleşme şablonları' },
-            ] as const).map((group) => (
-              <section key={group.key} className="space-y-3">
-                <div>
-                  <h3 className="text-sm font-semibold">{group.title}</h3>
-                  <p className="text-xs text-muted-foreground">
-                    Bu gruptaki dosyalar belge dışa aktarımında doğrudan kaynak şablon olarak kullanılır.
-                  </p>
-                </div>
+            {fallbackSellerTemplateGroups.map((sellerGroup) => {
+              const template = sellerGroup.master_template || { ...DEFAULT_MASTER_TEMPLATE_ITEM, seller_company_key: sellerGroup.seller_company_key }
+              const templateUploadKey = `${sellerGroup.seller_company_key}:${template.template_key}`
+              return (
+                <section key={sellerGroup.seller_company_key} className="space-y-4 rounded-2xl border border-border/70 p-4">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <h3 className="text-base font-semibold">{sellerGroup.seller_short_name || sellerGroup.seller_company_key}</h3>
+                      <p className="text-xs text-muted-foreground">
+                        {sellerGroup.seller_display_name || sellerGroup.seller_company_key} için tek ana Excel şablonu. Logo için {'{'}saticiLogo{'}'}, ürün tabloları için {'{'}urunGruplari{'}'} alanını kullanın.
+                      </p>
+                    </div>
+                    <Badge variant={template.has_custom ? 'default' : 'secondary'}>
+                      {template.has_custom ? 'Firma şablonu yüklü' : 'Varsayılan ana şablon'}
+                    </Badge>
+                  </div>
 
-                <div className="space-y-3">
-                  {groupedTemplates[group.key].map((template) => (
-                    <div key={template.template_key} className="rounded-xl border border-border/70 p-4">
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="space-y-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-medium">{template.label}</p>
-                            <Badge variant={template.has_custom ? 'default' : 'secondary'}>
-                              {template.has_custom ? 'Özel şablon yüklü' : 'Varsayılan şablon'}
-                            </Badge>
-                          </div>
-                          <div className="space-y-1 text-xs text-muted-foreground">
-                            <p>Varsayılan dosya: {template.default_filename}</p>
-                            <p>Kullanılan dosya: {template.current_filename}</p>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              downloadTemplateFile(template.template_key, 'default', template.default_filename)
-                            }
-                          >
-                            <Download className="mr-2 h-4 w-4" />
-                            Varsayılanı indir
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              downloadTemplateFile(template.template_key, 'current', template.current_filename)
-                            }
-                          >
-                            <Download className="mr-2 h-4 w-4" />
-                            Kullanılanı indir
-                          </Button>
-                          <RbacGuard perm="quotes.edit">
-                            <Button
-                              size="sm"
-                              onClick={() => openUploadPicker(template.template_key)}
-                              disabled={uploadingKey === template.template_key}
-                            >
-                              <Upload className="mr-2 h-4 w-4" />
-                              {uploadingKey === template.template_key ? 'Yükleniyor...' : 'Şablon yükle'}
-                            </Button>
-                          </RbacGuard>
+                  <div className="rounded-xl border border-border/70 p-4">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="space-y-2">
+                        <p className="font-medium">Ana Excel şablonu</p>
+                        <div className="space-y-1 text-xs text-muted-foreground">
+                          <p>Varsayılan dosya: {template.default_filename}</p>
+                          <p>Kullanılan dosya: {template.current_filename}</p>
+                          <p>Logo noktası: {'{'}saticiLogo{'}'}</p>
+                          <p>Dinamik tablo noktası: {'{'}urunGruplari{'}'}</p>
                         </div>
                       </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            downloadTemplateFile(template.template_key, 'default', template.default_filename, sellerGroup.seller_company_key)
+                          }
+                        >
+                          <Download className="mr-2 h-4 w-4" />
+                          Varsayılanı indir
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            downloadTemplateFile(template.template_key, 'current', template.current_filename, sellerGroup.seller_company_key)
+                          }
+                        >
+                          <Download className="mr-2 h-4 w-4" />
+                          Kullanılanı indir
+                        </Button>
+                        <RbacGuard perm="quotes.edit">
+                          <Button
+                            size="sm"
+                            onClick={() => openUploadPicker(template.template_key, sellerGroup.seller_company_key)}
+                            disabled={uploadingKey === templateUploadKey}
+                          >
+                            <Upload className="mr-2 h-4 w-4" />
+                            {uploadingKey === templateUploadKey ? 'Yükleniyor...' : 'Şablon yükle'}
+                          </Button>
+                        </RbacGuard>
+                      </div>
                     </div>
-                  ))}
-                </div>
-              </section>
-            ))}
+                  </div>
+                </section>
+              )
+            })}
+            {fallbackSellerTemplateGroups.length === 0 && (
+              <p className="rounded-xl border border-dashed border-border/70 p-4 text-sm text-muted-foreground">
+                Aktif satıcı firma bulunamadı. Önce Satıcı Firmalar sayfasından firma ekleyin.
+              </p>
+            )}
           </>
         )}
       </CardContent>

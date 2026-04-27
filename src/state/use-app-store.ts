@@ -17,6 +17,7 @@ import type {
   Vehicle,
   Team,
   UserLite,
+  SellerCompanyProfile,
   Role,
   Ticket,
   Task,
@@ -87,8 +88,10 @@ type AppState = {
   addTimeEntry: (payload: { task: string; started_at: string; ended_at?: string; note?: string }) => void
   createQuote: (payload: Omit<Quote, 'id' | 'number' | 'createdAt' | 'updatedAt'>) => Promise<void>
   updateQuote: (id: string, patch: Partial<Quote>) => Promise<void>
+  sendQuote: (id: string) => Promise<void>
+  requestQuoteApproval: (id: string) => Promise<void>
   deleteQuotes: (ids: string[]) => Promise<void>
-  convertQuote: (id: string) => Promise<SalesOrder | undefined>
+  convertQuote: (id: string) => Promise<Quote | undefined>
   upsertPricingRule: (rule: PricingRule) => void
   deletePricingRule: (id: string) => void
 }
@@ -98,6 +101,7 @@ const emptySnapshot: MockDbSnapshot = {
   leads: [],
   opportunities: [],
   companies: [],
+  sellerCompanies: [],
   contacts: [],
   categories: [],
   products: [],
@@ -185,6 +189,38 @@ const serializeCompanyPayload = (payload: Partial<Company>) => ({
   authorized_person: payload.authorizedPerson || '',
   phone: payload.phone || '',
   email: payload.email || '',
+})
+
+const mapSellerCompany = (profile: any, idx = 0): SellerCompanyProfile => ({
+  key: String(profile.key || profile.short_name || `SELLER_${idx + 1}`).toUpperCase(),
+  shortName: profile.short_name || profile.shortName || profile.key || '',
+  displayName: profile.display_name || profile.displayName || '',
+  legalName: profile.legal_name || profile.legalName || '',
+  taxOffice: profile.tax_office || profile.taxOffice || '',
+  taxNumber: profile.tax_number || profile.taxNumber || '',
+  mersisNumber: profile.mersis_number || profile.mersisNumber || '',
+  tradeRegistryNumber: profile.trade_registry_number || profile.tradeRegistryNumber || '',
+  address: profile.address || '',
+  city: profile.city || '',
+  country: profile.country || '',
+  phone: profile.phone || '',
+  email: profile.email || '',
+  website: profile.website || '',
+  kepAddress: profile.kep_address || profile.kepAddress || '',
+  logoUrl: profile.logo_url || profile.logoUrl || '',
+  signatureName: profile.signature_name || profile.signatureName || '',
+  signatureTitle: profile.signature_title || profile.signatureTitle || '',
+  signatureLabel: profile.signature_label || profile.signatureLabel || '',
+  notes: profile.notes || '',
+  isActive: profile.is_active !== false,
+  sortOrder: Number(profile.sort_order ?? profile.sortOrder ?? idx),
+  bankAccounts: (profile.bank_accounts || profile.bankAccounts || []).map((account: any) => ({
+    bank: account.bank || '',
+    iban: account.iban || '',
+    currency: account.currency || 'TRY',
+    branch: account.branch || '',
+    accountHolder: account.account_holder || account.accountHolder || '',
+  })),
 })
 
 export const useAppStore = create<AppState>()(
@@ -282,6 +318,7 @@ export const useAppStore = create<AppState>()(
         isWorkerRole ? emptyList : api.get('/products/'),
         isWorkerRole ? emptyList : api.get('/categories/'),
         isWorkerRole ? emptyList : api.get('/quotes/'),
+        isWorkerRole ? emptyList : api.get('/seller-companies/'),
         isWorkerRole ? emptyList : api.get('/partners/'),
         isWorkerRole ? emptyList : api.get('/contacts/'),
         isWorkerRole ? emptyList : api.get('/leads/'),
@@ -297,6 +334,7 @@ export const useAppStore = create<AppState>()(
         productsRes,
         categoriesRes,
         quotesRes,
+        sellerCompaniesRes,
         partnersRes,
         contactsRes,
         leadsRes,
@@ -352,6 +390,7 @@ export const useAppStore = create<AppState>()(
         phone: c.phone || '',
         email: c.email || '',
       }))
+      const sellerCompanies = (sellerCompaniesRes.data || []).map((profile: any, idx: number) => mapSellerCompany(profile, idx))
       const quotes = (quotesRes.data || []).map((q: any, idx: number) => mapQuote(q, idx))
       const leads = (leadsRes.data || []).map((l: any, idx: number) => ({
         id: String(l.id ?? idx),
@@ -590,6 +629,7 @@ export const useAppStore = create<AppState>()(
           rolePermissions: currentUserPermissions,
           products,
           companies,
+          sellerCompanies,
           contacts,
           categories,
           quotes,
@@ -1211,6 +1251,39 @@ export const useAppStore = create<AppState>()(
       throw err
     }
   },
+  sendQuote: async (id) => {
+    try {
+      const response = await api.post(`/quotes/${id}/send/`)
+      const updatedQuote = response.data?.quote ? mapQuote(response.data.quote) : null
+      set((state) => ({
+        data: {
+          ...state.data,
+          quotes: state.data.quotes.map((quote) =>
+            quote.id === id ? updatedQuote || { ...quote, status: 'Sent' as Quote['status'] } : quote
+          ),
+        },
+      }))
+    } catch (err) {
+      console.error('API sendQuote failed', err)
+      throw err
+    }
+  },
+  requestQuoteApproval: async (id) => {
+    try {
+      await api.post(`/quotes/${id}/request_approval/`)
+      set((state) => ({
+        data: {
+          ...state.data,
+          quotes: state.data.quotes.map((quote) =>
+            quote.id === id ? { ...quote, status: 'Under Review' as Quote['status'] } : quote
+          ),
+        },
+      }))
+    } catch (err) {
+      console.error('API requestQuoteApproval failed', err)
+      throw err
+    }
+  },
   deleteQuotes: async (ids) => {
     try {
       await Promise.all(ids.map((id) => api.delete(`/quotes/${id}/`)))
@@ -1227,12 +1300,27 @@ export const useAppStore = create<AppState>()(
   },
   convertQuote: async (id) => {
     try {
-      await api.post(`/quotes/${id}/convert/`)
-      await get().hydrateFromApi()
-      return undefined
+      const response = await api.post(`/quotes/${id}/convert/`)
+      const sourceQuote = response.data?.source ? mapQuote(response.data.source) : null
+      const contractQuote = response.data?.contract ? mapQuote(response.data.contract) : null
+      set((state) => {
+        const withoutSource: Quote[] = state.data.quotes.map((quote) =>
+          quote.id === id ? (sourceQuote || { ...quote, status: 'Converted' as Quote['status'] }) : quote
+        )
+        const mergedQuotes = contractQuote
+          ? [contractQuote, ...withoutSource.filter((quote) => quote.id !== contractQuote.id)]
+          : withoutSource
+        return {
+          data: {
+            ...state.data,
+            quotes: mergedQuotes,
+          },
+        }
+      })
+      return contractQuote || undefined
     } catch (err) {
       console.error('API convertQuote failed', err)
-      return undefined
+      throw err
     }
   },
   upsertPricingRule: async (rule) => {

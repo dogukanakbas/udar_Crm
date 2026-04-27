@@ -2,6 +2,8 @@ import axios from 'axios'
 import { clearTokens, getTokens, saveTokens, type Tokens } from './auth'
 
 const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
+export const apiBaseUrl = baseURL
+export const apiOrigin = new URL(baseURL).origin
 
 export const api = axios.create({
   baseURL,

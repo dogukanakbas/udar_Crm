@@ -477,6 +477,40 @@ export interface PricingRule {
   description: string
 }
 
+export interface SellerBankAccount {
+  bank: string
+  iban: string
+  currency?: string
+  branch?: string
+  accountHolder?: string
+}
+
+export interface SellerCompanyProfile {
+  key: string
+  shortName: string
+  displayName: string
+  legalName?: string
+  taxOffice?: string
+  taxNumber?: string
+  mersisNumber?: string
+  tradeRegistryNumber?: string
+  address?: string
+  city?: string
+  country?: string
+  phone?: string
+  email?: string
+  website?: string
+  kepAddress?: string
+  logoUrl?: string
+  signatureName?: string
+  signatureTitle?: string
+  signatureLabel?: string
+  notes?: string
+  isActive?: boolean
+  sortOrder?: number
+  bankAccounts: SellerBankAccount[]
+}
+
 export interface Vehicle {
   id: string
   name: string
@@ -505,6 +539,7 @@ export interface MockDbSnapshot {
   leads: Lead[]
   opportunities: Opportunity[]
   companies: Company[]
+  sellerCompanies: SellerCompanyProfile[]
   contacts: Contact[]
   categories?: Category[]
   products: Product[]

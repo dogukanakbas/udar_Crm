@@ -86,6 +86,72 @@ class DeleteUserView(APIView):
 
   permission_classes = [IsAuthenticated]
 
+  def patch(self, request, pk):
+    if getattr(request.user, "role", "") != "Admin":
+      return Response({"detail": "Yalnızca Admin kullanıcı güncelleyebilir"}, status=status.HTTP_403_FORBIDDEN)
+
+    User = get_user_model()
+    org = getattr(request.user, "organization", None)
+    if not org:
+      return Response({"detail": "Organizasyon bulunamadı"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+      user = User.objects.get(pk=pk, organization=org)
+    except User.DoesNotExist:
+      return Response({"detail": "Kullanıcı bulunamadı"}, status=status.HTTP_404_NOT_FOUND)
+
+    username = (request.data.get("username") or user.username or "").strip()
+    email = (request.data.get("email") or "").strip()
+    role = (request.data.get("role") or user.role or "").strip()
+    first_name = (request.data.get("first_name") or "").strip()
+    last_name = (request.data.get("last_name") or "").strip()
+    full_name = (request.data.get("full_name") or "").strip()
+
+    if full_name and not first_name and not last_name:
+      first_name, last_name = split_full_name(full_name)
+
+    if not username:
+      return Response({"detail": "Kullanıcı adı zorunludur"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+      UnicodeUsernameValidator()(username)
+    except DjangoValidationError as e:
+      return Response({"detail": " ".join(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+    existing = User.objects.filter(username=username).exclude(pk=user.pk).first()
+    if existing:
+      if existing.organization_id != org.id:
+        return Response(
+            {"detail": "Bu kullanıcı adı başka bir organizasyonda kayıtlı."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+      return Response(
+          {"detail": "Bu kullanıcı adı organizasyonda zaten var."},
+          status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    user.username = username
+    user.email = email
+    user.role = role or user.role
+    user.first_name = first_name
+    user.last_name = last_name
+    user.save(update_fields=["username", "email", "role", "first_name", "last_name"])
+    log_entity_action(user, "updated", user=request.user)
+
+    return Response(
+        {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email or "",
+            "role": user.role,
+            "first_name": user.first_name or "",
+            "last_name": user.last_name or "",
+            "full_name": f"{(user.first_name or '').strip()} {(user.last_name or '').strip()}".strip() or user.username,
+            "permissions": get_effective_permissions(user),
+            "can_prepare_quotes": user_has_perm(user, "quotes.prepare"),
+        }
+    )
+
   def delete(self, request, pk):
     if getattr(request.user, "role", "") != "Admin":
       return Response({"detail": "Yalnızca Admin kullanıcı silebilir"}, status=status.HTTP_403_FORBIDDEN)
@@ -559,9 +625,10 @@ class OrganizationSettingsView(APIView):
         "working_hours_start": s.working_hours_start.strftime("%H:%M"),
         "working_hours_end": s.working_hours_end.strftime("%H:%M"),
         "working_days": s.working_days or [0, 1, 2, 3, 4],
+        "price_list_label": s.price_list_label or "2026/1. LİSTE",
       })
     except OrganizationSettings.DoesNotExist:
-      return Response({"working_hours_start": "08:00", "working_hours_end": "18:00", "working_days": [0, 1, 2, 3, 4]})
+      return Response({"working_hours_start": "08:00", "working_hours_end": "18:00", "working_days": [0, 1, 2, 3, 4], "price_list_label": "2026/1. LİSTE"})
 
   def patch(self, request):
     if getattr(request.user, "role", "") != "Admin":
@@ -573,6 +640,7 @@ class OrganizationSettingsView(APIView):
     start = request.data.get("working_hours_start")
     end = request.data.get("working_hours_end")
     days = request.data.get("working_days")
+    price_list_label = request.data.get("price_list_label")
     if start:
       from datetime import datetime
       try:
@@ -587,9 +655,13 @@ class OrganizationSettingsView(APIView):
         pass
     if days is not None:
       s.working_days = [int(x) for x in days if str(x).isdigit()]
+    if price_list_label is not None:
+      value = str(price_list_label).strip()
+      s.price_list_label = value or "2026/1. LİSTE"
     s.save()
     return Response({
       "working_hours_start": s.working_hours_start.strftime("%H:%M"),
       "working_hours_end": s.working_hours_end.strftime("%H:%M"),
       "working_days": s.working_days,
+      "price_list_label": s.price_list_label or "2026/1. LİSTE",
     })
