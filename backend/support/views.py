@@ -32,9 +32,6 @@ from openpyxl import load_workbook
 
 from .workflow_utils import (
     apply_product_line_to_task,
-    apply_effective_production_quantity_to_task,
-    cascade_downstream_targets_after_shortfall,
-    default_workflow_qty_target,
     ensure_workflow_state,
     format_shortfall_reason_for_storage,
     workflow_team_id_list,
@@ -149,6 +146,23 @@ def _extract_color(*texts):
         if has_letter and not looks_code and not looks_size:
             return seg
     return ''
+
+
+def _task_has_fire_record(task):
+    """Eksik üretim kapanışı için en az bir kalemde fire adedi+sebebi girilmiş olmalı."""
+    lines = list(getattr(task, 'product_lines', None) or [])
+    if not lines:
+        return False
+    for ln in lines:
+        row = ln or {}
+        try:
+            fq = float(row.get('fire_qty') or 0)
+        except (TypeError, ValueError):
+            fq = 0.0
+        fr = str(row.get('fire_reason') or '').strip()
+        if fq > 0 and fr:
+            return True
+    return False
 
 class TicketViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = TicketSerializer
@@ -770,6 +784,11 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 return Response({'detail': 'Bu aşama zaten usta başı onayı bekliyor'}, status=status.HTTP_400_BAD_REQUEST)
             st_e['pending_approval'] = True
             if shortfall_reason:
+                if not _task_has_fire_record(task):
+                    return Response(
+                        {'detail': 'Eksik üretimde aşama kapatmak için kalemlerden birine fire adedi ve fire sebebi girin.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 done_e = int(st_e.get('qty_done') or 0)
                 st_e['production_shortfall_reason'] = format_shortfall_reason_for_storage(done_e, shortfall_reason)
             else:
@@ -834,6 +853,11 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             st['stage_done'] = True
             st['assignee_id'] = None
             if shortfall_p:
+                if not _task_has_fire_record(task):
+                    return Response(
+                        {'detail': 'Eksik üretimde aşama kapatmak için kalemlerden birine fire adedi ve fire sebebi girin.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 done_p = int(st.get('qty_done') or 0)
                 st['production_shortfall_reason'] = format_shortfall_reason_for_storage(done_p, shortfall_p)
             else:
@@ -1037,37 +1061,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         state[str(team_id)] = st
         task.workflow_stage_state = state
 
-        try:
-            wf_idx = wf.index(team_id)
-        except ValueError:
-            wf_idx = -1
-
         qty_adjust_fields = []
-        if not wf_parallel and wf_idx >= 0:
-            st_chk = dict((task.workflow_stage_state or {}).get(str(team_id), {}) or {})
-            done_here = int(st_chk.get('qty_done') or 0)
-            tgt_here = int(st_chk.get('qty_target') or 0)
-            if tgt_here <= 0:
-                tgt_here = default_workflow_qty_target(task)
-            reason_here = (st_chk.get('production_shortfall_reason') or '').strip()
-            if reason_here and done_here > 0 and done_here < tgt_here:
-                if wf_idx < len(wf) - 1:
-                    cascade_downstream_targets_after_shortfall(task, wf_idx, done_here)
-                    qty_adjust_fields = [
-                        'workflow_stage_targets',
-                        'quantity',
-                        'product_lines',
-                        'total_planned_minutes',
-                        'planned_hours',
-                    ]
-                else:
-                    apply_effective_production_quantity_to_task(task, done_here)
-                    qty_adjust_fields = [
-                        'quantity',
-                        'product_lines',
-                        'total_planned_minutes',
-                        'planned_hours',
-                    ]
 
         if wf_parallel:
             fresh = task.workflow_stage_state or {}
