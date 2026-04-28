@@ -1306,8 +1306,12 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         is_staff_u = role_u in ('Admin', 'Manager')
         is_member_u = team_row.members.filter(id=user.id).exists()
         is_leader_u = bool(getattr(team_row, 'leader_id', None) and str(team_row.leader_id) == str(user.id))
-        if not (is_staff_u or is_member_u or is_leader_u):
-            raise PermissionDenied("Bu ekibin üyesi/lideri değilsiniz")
+        is_assignee_u = bool(task.assignee_id and str(task.assignee_id) == str(user.id))
+        if not (is_staff_u or is_member_u or is_leader_u or is_assignee_u):
+            # Sıralı akışta aktif aşamaya yeni geçen ekipte üyelik senkronu gecikirse
+            # (özellikle canlıda), aktif ekip için üretim girişini 403 yerine kabul et.
+            if not (wf and not getattr(task, 'workflow_parallel', False) and task.current_team_id and int(tid) == int(task.current_team_id)):
+                raise PermissionDenied("Bu ekibin üyesi/lideri değilsiniz")
         if (
             wf
             and not getattr(task, 'workflow_parallel', False)
