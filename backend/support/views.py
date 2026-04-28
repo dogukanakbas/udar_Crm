@@ -524,7 +524,11 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                     continue
                 sec_team = Team.objects.filter(id=tid, organization_id=task.organization_id).first()
                 # Paralel akışta sadece lider değil, bölüm üyesi olan herkes üstlenebilir.
-                if not sec_team or not sec_team.members.filter(id=request.user.id).exists():
+                if not sec_team:
+                    continue
+                is_member = sec_team.members.filter(id=request.user.id).exists()
+                is_leader = bool(getattr(sec_team, 'leader_id', None) and str(sec_team.leader_id) == str(request.user.id))
+                if not (is_member or is_leader):
                     continue
                 st = dict(state.get(str(tid), {}))
                 if st.get('stage_done'):
@@ -764,7 +768,12 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             and from_team_early
             and int(from_team_early.id) in wf_ids_early
         ):
-            if not from_team_early.members.filter(id=request.user.id).exists():
+            is_member_early = from_team_early.members.filter(id=request.user.id).exists()
+            is_leader_early = bool(
+                getattr(from_team_early, 'leader_id', None) and str(from_team_early.leader_id) == str(request.user.id)
+            )
+            is_staff_early = getattr(request.user, 'role', '') in ('Admin', 'Manager')
+            if not (is_member_early or is_leader_early or is_staff_early):
                 raise PermissionDenied("Bu üretim aşamasının ekibinde değilsiniz")
             if not task.assignee_id:
                 raise PermissionDenied(
@@ -1296,7 +1305,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         role_u = getattr(user, 'role', '')
         is_staff_u = role_u in ('Admin', 'Manager')
         is_member_u = team_row.members.filter(id=user.id).exists()
-        is_leader_u = bool(getattr(team_row, 'leader_id', None) and int(team_row.leader_id) == int(user.id))
+        is_leader_u = bool(getattr(team_row, 'leader_id', None) and str(team_row.leader_id) == str(user.id))
         if not (is_staff_u or is_member_u or is_leader_u):
             raise PermissionDenied("Bu ekibin üyesi/lideri değilsiniz")
         if (
