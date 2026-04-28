@@ -1436,10 +1436,29 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 task.workflow_stage_state = state
                 all_done = all((state.get(str(t)) or {}).get('stage_done') for t in wf)
                 upd = ['workflow_stage_state', 'updated_at']
+                next_tid = None
+                if not all_done:
+                    try:
+                        i_cur = wf.index(int(tid))
+                    except (TypeError, ValueError):
+                        i_cur = -1
+                    if i_cur >= 0:
+                        for cand in wf[i_cur + 1:]:
+                            if not (state.get(str(cand)) or {}).get('stage_done'):
+                                next_tid = cand
+                                break
                 if all_done:
                     task.status = 'done'
                     task.assignee = None
                     upd.extend(['status', 'assignee'])
+                elif next_tid is not None:
+                    next_team = Team.objects.filter(id=next_tid, organization_id=task.organization_id).first()
+                    if next_team:
+                        task.current_team = next_team
+                        task.team = next_team
+                        task.assignee = None
+                        task.status = 'in-progress'
+                        upd.extend(['current_team', 'team', 'assignee', 'status'])
                 task.save(update_fields=list(dict.fromkeys(upd)))
                 workflow_checklist_dirty = True
                 TaskComment.objects.create(
@@ -1448,6 +1467,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                     type='activity',
                     text=(
                         f"{user.username} üretim girişi ile bölüm hedefini tamamladı — adım otomatik kapatıldı"
+                        + (f" — {next_team.name} ekibine devredildi" if (not all_done and next_tid is not None and 'next_team' in locals() and next_team) else "")
                         + (" — görev tamamlandı" if all_done else "")
                     ),
                 )
