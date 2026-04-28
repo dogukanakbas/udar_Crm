@@ -100,6 +100,13 @@ def workflow_stage_production_met(task, team_id):
     st = (task.workflow_stage_state or {}).get(str(int(team_id)), {})
     tgt = int(st.get('qty_target') or 0)
     done = int(st.get('qty_done') or 0)
+    # Çoklu kalemde, aşama kapanmadan önce tüm kalemler için en az bir veri girilmiş olmalı.
+    lines = list(getattr(task, 'product_lines', None) or [])
+    if len(lines) > 1:
+        qmap = dict(st.get('qty_done_by_line') or {})
+        for idx in range(len(lines)):
+            if str(idx) not in qmap:
+                return False
     if tgt <= 0:
         tgt = default_workflow_qty_target(task)
     return done >= tgt
