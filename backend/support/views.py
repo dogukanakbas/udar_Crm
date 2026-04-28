@@ -1287,6 +1287,13 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                             break
         if tid is None:
             return Response({'detail': 'Bölüm (ekip) belirlenemedi'}, status=status.HTTP_400_BAD_REQUEST)
+        # Sıralı akışta ekip seçimi istemciden bağımsız olarak daima aktif aşamadır.
+        # Böylece bir önceki aşamadan kalan/stale `team` değeri yanlış yetki hatası üretmez.
+        if wf and not getattr(task, 'workflow_parallel', False) and task.current_team_id:
+            try:
+                tid = int(task.current_team_id)
+            except (TypeError, ValueError):
+                return Response({'detail': 'Aktif bölüm bilgisi geçersiz'}, status=status.HTTP_400_BAD_REQUEST)
         if wf and tid not in wf:
             return Response({'detail': 'Bu görev akışında bu ekip yok'}, status=status.HTTP_400_BAD_REQUEST)
         team_row = Team.objects.filter(id=tid, organization_id=task.organization_id).first()
