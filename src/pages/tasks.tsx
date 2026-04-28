@@ -1697,6 +1697,7 @@ export function TaskDetailPage() {
   const [lineProdInput, setLineProdInput] = useState<Record<number, { q: string; d: string }>>({})
   const [lineFireInput, setLineFireInput] = useState<Record<number, { q: string; reason: string }>>({})
   const [lineFireSaving, setLineFireSaving] = useState<Record<number, boolean>>({})
+  const [lineFireOpen, setLineFireOpen] = useState<Record<number, boolean>>({})
   const [claimBusy, setClaimBusy] = useState(false)
   const [productionShortfallNote, setProductionShortfallNote] = useState('')
   useEffect(() => {
@@ -1705,6 +1706,7 @@ export function TaskDetailPage() {
     setLineProdInput({})
     setLineFireInput({})
     setLineFireSaving({})
+    setLineFireOpen({})
   }, [taskId])
   if (!task) {
     return (
@@ -2162,7 +2164,7 @@ export function TaskDetailPage() {
                   const lineTarget = Math.max(1, Number(line.quantity ?? 1))
                   // Workflow'ta "üretilen" ekip/aşama bazındadır. Sıralı akışta aktif ekip değişince üretilen 0'dan başlar.
                   const stageProduced =
-                    sequentialFlow && hasWfTeams && task.currentTeam
+                    hasWfTeams && task.currentTeam
                       ? (() => {
                           const st: any = wfState?.[task.currentTeam] || {}
                           const byLine = st?.qty_done_by_line || st?.qtyDoneByLine
@@ -2264,86 +2266,113 @@ export function TaskDetailPage() {
                         ) : null}
                       </div>
                       <div className="rounded-md border border-dashed bg-muted/20 px-2 py-2 space-y-2">
-                        <p className="text-xs font-semibold uppercase text-muted-foreground">Fire — bu kalem</p>
-                        <div className="flex flex-wrap gap-2 items-end">
-                          <div>
-                            <Label className="text-xs">Fire adeti ({unit})</Label>
-                            <Input
-                              type="text"
-                              inputMode="decimal"
-                              autoComplete="off"
-                              className="h-8 w-24"
-                              disabled={task.status === 'done' || !!lineFireSaving[lidx]}
-                              value={lineFireInput[lidx]?.q ?? String(Math.max(0, Number(line.fireQty ?? 0)))}
-                              onChange={(e) => {
-                                const v = e.target.value.replace(',', '.')
-                                if (v === '' || /^\d*(?:\.\d{0,2})?$/.test(v)) {
-                                  setLineFireInput((prev) => ({
-                                    ...prev,
-                                    [lidx]: { q: v, reason: prev[lidx]?.reason ?? String(line.fireReason ?? '') },
-                                  }))
-                                }
-                              }}
-                            />
-                          </div>
-                          <div className="min-w-[220px] flex-1">
-                            <Label className="text-xs">Fire sebebi</Label>
-                            <Input
-                              className="h-8"
-                              disabled={task.status === 'done' || !!lineFireSaving[lidx]}
-                              value={lineFireInput[lidx]?.reason ?? String(line.fireReason ?? '')}
-                              onChange={(e) =>
-                                setLineFireInput((prev) => ({
-                                  ...prev,
-                                  [lidx]: { q: prev[lidx]?.q ?? String(Math.max(0, Number(line.fireQty ?? 0))), reason: e.target.value },
-                                }))
-                              }
-                              placeholder="Kısa açıklama"
-                            />
-                          </div>
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-semibold uppercase text-muted-foreground">Fire — bu kalem</p>
                           <Button
                             size="sm"
-                            disabled={task.status === 'done' || !!lineFireSaving[lidx]}
-                            onClick={async () => {
-                              const raw = (lineFireInput[lidx]?.q ?? String(Math.max(0, Number(line.fireQty ?? 0)))).trim()
-                              const parsed = Number(raw === '' ? 0 : raw)
-                              if (!Number.isFinite(parsed) || parsed < 0) {
-                                toast({ title: 'Fire adeti geçersiz', description: '0 veya daha büyük sayı girin.', variant: 'destructive' })
-                                return
-                              }
-                              const reason = String(lineFireInput[lidx]?.reason ?? line.fireReason ?? '').trim().slice(0, 300)
-                              const formLines = (task.productLines || []).map((pl) => mapApiProductLineToTask(pl))
-                              formLines[lidx] = {
-                                ...formLines[lidx],
-                                fireQty: Number(parsed.toFixed(2)),
-                                fireReason: reason,
-                              }
-                              setLineFireSaving((prev) => ({ ...prev, [lidx]: true }))
-                              try {
-                                await api.patch(`/tasks/${task.id}/`, {
-                                  product_lines: taskProductLinesToApiPayload(formLines as any),
-                                })
-                                await hydrateFromApi()
-                                setLineFireInput((prev) => {
-                                  const next = { ...prev }
-                                  delete next[lidx]
-                                  return next
-                                })
-                                toast({ title: 'Fire kaydedildi', description: `Ürün ${lidx + 1}` })
-                              } catch (e: any) {
-                                toast({
-                                  title: 'Fire kaydedilemedi',
-                                  description: e?.response?.data?.detail || 'Kayıt başarısız',
-                                  variant: 'destructive',
-                                })
-                              } finally {
-                                setLineFireSaving((prev) => ({ ...prev, [lidx]: false }))
-                              }
-                            }}
+                            className="h-8 bg-red-600 text-white hover:bg-red-700"
+                            disabled={task.status === 'done'}
+                            onClick={() =>
+                              setLineFireOpen((prev) => ({
+                                ...prev,
+                                [lidx]: !prev[lidx],
+                              }))
+                            }
                           >
-                            {lineFireSaving[lidx] ? 'Kaydediliyor...' : 'Fire kaydet'}
+                            {lineFireOpen[lidx] ? 'Fire kapat' : 'Fire'}
                           </Button>
                         </div>
+                        {lineFireOpen[lidx] ? (
+                          <div className="flex flex-wrap gap-2 items-end">
+                            <div>
+                              <Label className="text-xs">Fire adeti ({unit})</Label>
+                              <Input
+                                type="text"
+                                inputMode="decimal"
+                                autoComplete="off"
+                                className="h-8 w-24"
+                                disabled={task.status === 'done' || !!lineFireSaving[lidx]}
+                                value={lineFireInput[lidx]?.q ?? String(Math.max(0, Number(line.fireQty ?? 0)))}
+                                onChange={(e) => {
+                                  const v = e.target.value.replace(',', '.')
+                                  if (v === '' || /^\d*(?:\.\d{0,2})?$/.test(v)) {
+                                    setLineFireInput((prev) => ({
+                                      ...prev,
+                                      [lidx]: { q: v, reason: prev[lidx]?.reason ?? String(line.fireReason ?? '') },
+                                    }))
+                                  }
+                                }}
+                              />
+                            </div>
+                            <div className="min-w-[220px] flex-1">
+                              <Label className="text-xs">Fire sebebi</Label>
+                              <Input
+                                className="h-8"
+                                disabled={task.status === 'done' || !!lineFireSaving[lidx]}
+                                value={lineFireInput[lidx]?.reason ?? String(line.fireReason ?? '')}
+                                onChange={(e) =>
+                                  setLineFireInput((prev) => ({
+                                    ...prev,
+                                    [lidx]: {
+                                      q: prev[lidx]?.q ?? String(Math.max(0, Number(line.fireQty ?? 0))),
+                                      reason: e.target.value,
+                                    },
+                                  }))
+                                }
+                                placeholder="Kısa açıklama"
+                              />
+                            </div>
+                            <Button
+                              size="sm"
+                              disabled={task.status === 'done' || !!lineFireSaving[lidx]}
+                              onClick={async () => {
+                                const raw = (lineFireInput[lidx]?.q ?? String(Math.max(0, Number(line.fireQty ?? 0)))).trim()
+                                const parsed = Number(raw === '' ? 0 : raw)
+                                if (!Number.isFinite(parsed) || parsed < 0) {
+                                  toast({
+                                    title: 'Fire adeti geçersiz',
+                                    description: '0 veya daha büyük sayı girin.',
+                                    variant: 'destructive',
+                                  })
+                                  return
+                                }
+                                const reason = String(lineFireInput[lidx]?.reason ?? line.fireReason ?? '').trim().slice(0, 300)
+                                const formLines = (task.productLines || []).map((pl) => mapApiProductLineToTask(pl))
+                                formLines[lidx] = {
+                                  ...formLines[lidx],
+                                  fireQty: Number(parsed.toFixed(2)),
+                                  fireReason: reason,
+                                }
+                                setLineFireSaving((prev) => ({ ...prev, [lidx]: true }))
+                                try {
+                                  await api.patch(`/tasks/${task.id}/`, {
+                                    product_lines: taskProductLinesToApiPayload(formLines as any),
+                                  })
+                                  await hydrateFromApi()
+                                  setLineFireInput((prev) => {
+                                    const next = { ...prev }
+                                    delete next[lidx]
+                                    return next
+                                  })
+                                  setLineFireOpen((prev) => ({ ...prev, [lidx]: false }))
+                                  toast({ title: 'Fire kaydedildi', description: `Ürün ${lidx + 1}` })
+                                } catch (e: any) {
+                                  toast({
+                                    title: 'Fire kaydedilemedi',
+                                    description: e?.response?.data?.detail || 'Kayıt başarısız',
+                                    variant: 'destructive',
+                                  })
+                                } finally {
+                                  setLineFireSaving((prev) => ({ ...prev, [lidx]: false }))
+                                }
+                              }}
+                            >
+                              {lineFireSaving[lidx] ? 'Kaydediliyor...' : 'Fire kaydet'}
+                            </Button>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">Fire bilgisi girmek için kırmızı Fire butonuna basın.</p>
+                        )}
                         <p className="text-xs font-semibold uppercase text-muted-foreground">Üretim — bu kalem</p>
                         <p className="text-xs text-muted-foreground">
                           Girilen değer <span className="font-medium text-foreground">bu kalem için toplam üretilmiş adet</span>

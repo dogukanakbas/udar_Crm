@@ -1289,8 +1289,15 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             return Response({'detail': 'Bölüm (ekip) belirlenemedi'}, status=status.HTTP_400_BAD_REQUEST)
         if wf and tid not in wf:
             return Response({'detail': 'Bu görev akışında bu ekip yok'}, status=status.HTTP_400_BAD_REQUEST)
-        if not Team.objects.filter(id=tid, members=user).exists():
-            raise PermissionDenied("Bu ekibin üyesi değilsiniz")
+        team_row = Team.objects.filter(id=tid, organization_id=task.organization_id).first()
+        if not team_row:
+            return Response({'detail': 'Ekip bulunamadı'}, status=status.HTTP_400_BAD_REQUEST)
+        role_u = getattr(user, 'role', '')
+        is_staff_u = role_u in ('Admin', 'Manager')
+        is_member_u = team_row.members.filter(id=user.id).exists()
+        is_leader_u = bool(getattr(team_row, 'leader_id', None) and int(team_row.leader_id) == int(user.id))
+        if not (is_staff_u or is_member_u or is_leader_u):
+            raise PermissionDenied("Bu ekibin üyesi/lideri değilsiniz")
         if (
             wf
             and not getattr(task, 'workflow_parallel', False)
