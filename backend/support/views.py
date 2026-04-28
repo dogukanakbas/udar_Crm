@@ -28,6 +28,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.utils import timezone
 from datetime import datetime as dt_datetime
+from openpyxl import load_workbook
 
 from .workflow_utils import (
     apply_product_line_to_task,
@@ -102,6 +103,53 @@ FACTORY_CHECKLIST = [
     "Paketleme",
 ]
 
+SIZE_TOKEN_RE = re.compile(r'\d+(?:[.,]\d+)?(?:\s*[*xX]\s*\d+(?:[.,]\d+)?){1,2}')
+
+
+def _norm_text(v):
+    return str(v or '').strip()
+
+
+def _parse_int_qty(v):
+    s = _norm_text(v).replace(',', '.')
+    if not s:
+        return 1
+    try:
+        n = float(s)
+    except (TypeError, ValueError):
+        return 1
+    if n <= 0:
+        return 1
+    return int(round(n)) if n >= 1 else 1
+
+
+def _extract_sizes(*texts):
+    out = []
+    seen = set()
+    merged = " / ".join([_norm_text(t) for t in texts if _norm_text(t)])
+    for m in SIZE_TOKEN_RE.finditer(merged):
+        raw = m.group(0)
+        norm = re.sub(r'\s+', '', raw).replace('X', '*').replace('x', '*')
+        if norm and norm not in seen:
+            seen.add(norm)
+            out.append(norm)
+    return out
+
+
+def _extract_color(*texts):
+    merged = " / ".join([_norm_text(t) for t in texts if _norm_text(t)])
+    if not merged:
+        return ''
+    segs = [s.strip() for s in merged.split('/') if s and s.strip()]
+    # Sondan başlayarak ölçü/seri olmayan ve harf içeren ilk parçayı renk kabul et.
+    for seg in reversed(segs):
+        has_letter = bool(re.search(r'[A-Za-zÇĞİÖŞÜçğıöşü]', seg))
+        looks_code = bool(re.fullmatch(r'[A-Za-z]-?\d+(?:[.,]\d+)?', seg))
+        looks_size = bool(SIZE_TOKEN_RE.search(seg))
+        if has_letter and not looks_code and not looks_size:
+            return seg
+    return ''
+
 class TicketViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = TicketSerializer
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, ViewOnlyRestriction, CommentOnlyRestriction, HasAPIPermission]
@@ -168,6 +216,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         'update': 'tasks.edit',
         'partial_update': 'tasks.edit',
         'destroy': 'tasks.edit',
+        'import_excel': 'tasks.edit',
     }
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['title', 'status', 'priority']
@@ -332,6 +381,115 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 "by": getattr(self.request.user, "email", None),
                 "changes": changes,
             }
+        )
+
+    @action(detail=False, methods=['post'], url_path='import-excel')
+    def import_excel(self, request):
+        """
+        Excel'den tek görev + çoklu ürün kalemi taslağı üretir.
+        Her satır: 1 ürün kalemi.
+        """
+        if getattr(request.user, 'role', '') == 'Worker':
+            raise PermissionDenied("Worker rolündeki kullanıcılar görev içe aktaramaz")
+        up = request.FILES.get('file')
+        if not up:
+            return Response({'detail': 'file gerekli'}, status=status.HTTP_400_BAD_REQUEST)
+        fname = _norm_text(getattr(up, 'name', ''))
+        if not fname.lower().endswith('.xlsx'):
+            return Response({'detail': 'Yalnızca .xlsx kabul edilir'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            wb = load_workbook(up, data_only=True, read_only=True)
+            ws = wb.active
+        except Exception:
+            return Response({'detail': 'Excel okunamadı'}, status=status.HTTP_400_BAD_REQUEST)
+
+        rows = ws.iter_rows(min_row=1, max_row=1, values_only=True)
+        headers_row = next(rows, None)
+        headers = [_norm_text(h) for h in (headers_row or [])]
+        idx = {h: i for i, h in enumerate(headers) if h}
+        required = [
+            'ÜRETİLECEK ÜRÜN İSMİ',
+            'KATEGORİ KODU',
+            'SİPARİŞ SERİ',
+            'SİPARİŞ SIRA',
+            'ÜRETİM MİKTARI',
+            'SİPARİŞ AÇIKLAMA_1',
+            'SİPARİŞ AÇIKLAMA_2',
+        ]
+        missing = [k for k in required if k not in idx]
+        if missing:
+            return Response(
+                {'detail': f'Eksik başlık(lar): {", ".join(missing)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        product_lines = []
+        refs = []
+        for r in ws.iter_rows(min_row=2, values_only=True):
+            prod_name = _norm_text(r[idx['ÜRETİLECEK ÜRÜN İSMİ']]) if idx['ÜRETİLECEK ÜRÜN İSMİ'] < len(r) else ''
+            qty_raw = r[idx['ÜRETİM MİKTARI']] if idx['ÜRETİM MİKTARI'] < len(r) else None
+            if not prod_name and qty_raw in (None, ''):
+                continue
+            cat_code = _norm_text(r[idx['KATEGORİ KODU']]) if idx['KATEGORİ KODU'] < len(r) else ''
+            s_seri = _norm_text(r[idx['SİPARİŞ SERİ']]) if idx['SİPARİŞ SERİ'] < len(r) else ''
+            s_sira = _norm_text(r[idx['SİPARİŞ SIRA']]) if idx['SİPARİŞ SIRA'] < len(r) else ''
+            ac1 = _norm_text(r[idx['SİPARİŞ AÇIKLAMA_1']]) if idx['SİPARİŞ AÇIKLAMA_1'] < len(r) else ''
+            ac2 = _norm_text(r[idx['SİPARİŞ AÇIKLAMA_2']]) if idx['SİPARİŞ AÇIKLAMA_2'] < len(r) else ''
+            sizes = _extract_sizes(ac1, ac2)
+            color = _extract_color(ac1, ac2)
+            qty = _parse_int_qty(qty_raw)
+            unit_type = 'metre' if 'pvc' in prod_name.lower() else 'adet'
+            brief = " / ".join([x for x in [prod_name, ac1, ac2] if x]).strip()[:600]
+            if s_seri or s_sira:
+                refs.append(f'{s_seri}-{s_sira}'.strip('-'))
+            product_lines.append(
+                {
+                    'mode': 'manual',
+                    'unit_type': unit_type,
+                    'model_code': cat_code,
+                    'variant': '',
+                    'quantity': qty,
+                    'model_duration_minutes': 0,
+                    'total_planned_minutes': 0,
+                    'model_blade_depth': '',
+                    'model_sizes': sizes,
+                    'product_color': color,
+                    'product_color_code': '',
+                    'brief_intro': brief,
+                    'fire_qty': 0,
+                    'fire_reason': '',
+                    'fire_image_data_url': '',
+                    'qty_produced': 0,
+                }
+            )
+
+        if not product_lines:
+            return Response({'detail': 'Excel içinde içe aktarılacak satır bulunamadı'}, status=status.HTTP_400_BAD_REQUEST)
+
+        uniq_refs = [x for i, x in enumerate(refs) if x and x not in refs[:i]]
+        ref_text = ", ".join(uniq_refs[:5]) if uniq_refs else fname
+        title = f'Excel Sipariş: {ref_text} ({len(product_lines)} kalem)'
+        qty_total = max(1, sum(int(pl.get('quantity') or 1) for pl in product_lines))
+        return Response(
+            {
+                'draft': {
+                    'title': title,
+                    'status': 'todo',
+                    'priority': 'medium',
+                    'planned_hours': 0,
+                    'planned_cost': 0,
+                    'workflow_team_ids': [],
+                    'workflow_parallel': False,
+                    'workflow_stage_targets': [],
+                    'quantity': qty_total,
+                    'tags': [f'excel-import', f'kalem:{len(product_lines)}'] + ([f'ref:{uniq_refs[0]}'] if uniq_refs else []),
+                    'product_lines': product_lines,
+                },
+                'imported_lines': len(product_lines),
+                'refs': uniq_refs,
+            },
+            status=status.HTTP_200_OK,
         )
 
     @action(detail=True, methods=['post'])
@@ -574,7 +732,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='complete-stage')
     def complete_stage(self, request, pk=None):
         """
-        Paralel akış: bölüm tamamlanınca usta başı onayına düşer (pending_approval).
+        Paralel akış: aktif ekipte bölüm tamamlanınca otomatik olarak sıradaki ekibe geçer.
         Sıralı iş akışı (workflow_team_ids, workflow_parallel kapalı): ekip üyesi «bitir» ile
         onaya gönderir; usta başı approve_section ile sıradaki ekibe devreder veya görevi kapatır.
         İş akışı tanımsızsa fabrika sırası ile devretme / tamamlama (önceki davranış).
@@ -629,7 +787,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             sync_workflow_checklist(task)
             return Response(TaskSerializer(task, context={'request': request}).data)
 
-        if task.assignee_id != request.user.id:
+        if not getattr(task, 'workflow_parallel', False) and task.assignee_id != request.user.id:
             raise PermissionDenied("Sadece size atanan görevi bitirebilirsiniz")
 
         from_team_pre = task.current_team or task.team
@@ -646,14 +804,23 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             ensure_workflow_state(task)
             state = dict(task.workflow_stage_state or {})
             active_tid = None
-            for tid in wf:
-                if tid not in user_teams:
-                    continue
-                st = state.get(str(tid), {})
-                if st.get('stage_done'):
-                    continue
-                aid = st.get('assignee_id')
-                if aid == request.user.id or aid in (None, ''):
+            try:
+                current_tid = int(task.current_team_id) if task.current_team_id is not None else None
+            except (TypeError, ValueError):
+                current_tid = None
+            # Otomatik paralel mod: yalnızca aktif akış ekibi çalışır; ekipten herhangi bir üye bitirebilir.
+            if current_tid is not None and current_tid in wf and current_tid in user_teams:
+                st_cur = state.get(str(current_tid), {}) or {}
+                if not st_cur.get('stage_done'):
+                    active_tid = current_tid
+            if active_tid is None:
+                # current_team boş/bozuksa güvenli geri dönüş: ilk açık ekipten devam et.
+                for tid in wf:
+                    if tid not in user_teams:
+                        continue
+                    st = state.get(str(tid), {}) or {}
+                    if st.get('stage_done'):
+                        continue
                     active_tid = tid
                     break
             if active_tid is None:
@@ -673,20 +840,36 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 st.pop('production_shortfall_reason', None)
             state[str(active_tid)] = st
             task.workflow_stage_state = state
+            try:
+                active_idx = wf.index(active_tid)
+            except ValueError:
+                active_idx = -1
             all_done = all((state.get(str(tid)) or {}).get('stage_done') for tid in wf)
+            next_tid = wf[active_idx + 1] if active_idx >= 0 and active_idx < len(wf) - 1 else None
             update_fields = ['workflow_stage_state', 'updated_at']
-            if all_done:
+            task.assignee = None
+            update_fields.append('assignee')
+            if next_tid is not None:
+                next_team = Team.objects.filter(id=next_tid, organization=request.user.organization).first()
+                if next_team:
+                    task.current_team = next_team
+                    task.team = next_team
+                    task.status = 'in-progress'
+                    update_fields.extend(['current_team', 'team', 'status'])
+            elif all_done:
                 task.status = 'done'
-                task.assignee = None
-                update_fields.extend(['status', 'assignee'])
+                update_fields.append('status')
             task.save(update_fields=list(dict.fromkeys(update_fields)))
             note_p = " (hedef altı tamamlama — gerekçe kayıtlı)" if shortfall_p else ""
             TaskComment.objects.create(
                 task=task,
                 author=request.user,
                 type='activity',
-                text=f"{request.user.username} bölüm çalışmasını tamamladı{note_p}"
-                + (" — görev tamamlandı" if all_done else ""),
+                text=(
+                    f"{request.user.username} bölüm çalışmasını tamamladı{note_p}"
+                    + (f" — sıradaki ekip devreye alındı" if next_tid is not None else "")
+                    + (" — görev tamamlandı" if next_tid is None and all_done else "")
+                ),
             )
             if all_done:
                 push_event(

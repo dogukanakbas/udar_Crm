@@ -271,7 +271,17 @@ def parallel_queue_visible(task, user, user_team_ids):
     role = getattr(user, 'role', '')
     staff = role in ('Admin', 'Manager')
     org_id = task.organization_id
-    for tid in ids:
+    # Otomatik paralel modda öncelik aktif akış ekibidir.
+    active_first = []
+    try:
+        ctid = int(getattr(task, 'current_team_id', None) or 0)
+    except (TypeError, ValueError):
+        ctid = 0
+    if ctid and ctid in ids:
+        active_first.append(ctid)
+    ordered_ids = active_first + [tid for tid in ids if tid not in active_first]
+
+    for tid in ordered_ids:
         if not staff and tid not in user_set:
             continue
         team = Team.objects.filter(id=tid, organization_id=org_id).first()
@@ -283,5 +293,8 @@ def parallel_queue_visible(task, user, user_team_ids):
             continue
         aid = st.get('assignee_id')
         if aid is None or aid == uid:
+            return True
+        # current_team'de atama başka üyeye yapılmış olsa bile ekip kuyruğu görünürlüğü korunur.
+        if ctid and tid == ctid and not staff:
             return True
     return False

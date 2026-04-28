@@ -33,6 +33,8 @@ import { taskProductLineSchema } from '@/lib/task-product-schema'
 import {
   initialProductLinesForForm,
   emptyProductLineRow,
+  mapApiProductLineToTask,
+  taskProductLinesToApiPayload,
   sumProductLineQuantities,
   sumProductLineQtyProduced,
   workflowTargetFallbackQty,
@@ -285,6 +287,11 @@ export function TasksPage() {
     { name: string; wip: Record<Task['status'], number>; status: string; assignee: string; team: string }[]
   >([])
   const [boardPick, setBoardPick] = useState('none')
+  const [excelImportOpen, setExcelImportOpen] = useState(false)
+  const [excelFile, setExcelFile] = useState<File | null>(null)
+  const [excelImporting, setExcelImporting] = useState(false)
+  const [excelDraft, setExcelDraft] = useState<Partial<z.infer<typeof taskSchema>> | null>(null)
+  const [createTaskModalOpen, setCreateTaskModalOpen] = useState(false)
 
   useEffect(() => {
     const raw = localStorage.getItem('wip-limits')
@@ -752,6 +759,50 @@ export function TasksPage() {
     setBoardPick('none')
   }
 
+  const handleImportExcel = async () => {
+    if (!excelFile) {
+      toast({ title: 'Dosya gerekli', description: '.xlsx dosyası seçin', variant: 'destructive' })
+      return
+    }
+    const fd = new FormData()
+    fd.append('file', excelFile)
+    setExcelImporting(true)
+    try {
+      const res = await api.post('/tasks/import-excel/', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      const draft = res?.data?.draft || {}
+      const apiLines = Array.isArray(draft?.product_lines) ? draft.product_lines : []
+      const mappedLines = apiLines.map((ln: any) => mapApiProductLineToTask(ln))
+      setExcelDraft({
+        title: String(draft?.title || ''),
+        status: draft?.status === 'done' || draft?.status === 'in-progress' ? draft.status : 'todo',
+        priority: draft?.priority === 'high' || draft?.priority === 'low' ? draft.priority : 'medium',
+        plannedHours: Number(draft?.planned_hours || 0),
+        plannedCost: Number(draft?.planned_cost || 0),
+        workflowTeamIds: [],
+        workflowParallel: false,
+        workflowStageTargets: [],
+        productLines: mappedLines.length ? mappedLines : [emptyProductLineRow()],
+      })
+      setExcelImportOpen(false)
+      setExcelFile(null)
+      setCreateTaskModalOpen(true)
+      toast({
+        title: 'Excel taslağı hazır',
+        description: 'Kalemler forma aktarıldı. Ekip/tarih bilgilerini girip kaydedin.',
+      })
+    } catch (e: any) {
+      toast({
+        title: 'İçe aktarılamadı',
+        description: e?.response?.data?.detail || e?.message || 'Excel içe aktarma başarısız',
+        variant: 'destructive',
+      })
+    } finally {
+      setExcelImporting(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -768,39 +819,76 @@ export function TasksPage() {
             </Tabs>
             {data.settings.role !== 'Worker' && (
               <RbacGuard perm="tasks.edit">
-                <TaskModal
-                  users={data.users}
-                  teams={data.teams}
-                  salesOrders={data.salesOrders}
-                  uploading={uploading}
-                  setUploading={setUploading}
-                  onSubmit={async (values) => {
-                    try {
-                      await createTask(values as any)
-                      toast({ title: 'Görev oluşturuldu' })
-                    } catch (err: any) {
-                      const d = err?.response?.data
-                      const msg =
-                        (typeof d === 'object' && d && !Array.isArray(d)
-                          ? Object.entries(d)
-                              .map(([k, v]) => `${k}: ${Array.isArray(v) ? (v as string[])[0] : v}`)
-                              .join('; ')
-                          : null) ||
-                        d?.detail ||
-                        err?.message
-                      toast({
-                        title: 'Görev oluşturulamadı',
-                        description: msg || 'Kayıt başarısız veya sunucu hatası',
-                        variant: 'destructive',
-                      })
-                    }
-                  }}
-                >
-                  <Button size="sm">
-                    <Plus className="mr-2 h-4 w-4" />
-                    Görev oluştur
-                  </Button>
-                </TaskModal>
+                <div className="flex items-center gap-2">
+                  <Dialog open={excelImportOpen} onOpenChange={setExcelImportOpen}>
+                    <DialogTrigger asChild>
+                      <Button size="sm" variant="outline">
+                        Excel ile içe aktar
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Excel ile otomatik görev oluştur</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-3">
+                        <p className="text-sm text-muted-foreground">
+                          Her satır 1 ürün kalemi olarak tek görev altında oluşturulur.
+                        </p>
+                        <Input
+                          type="file"
+                          accept=".xlsx"
+                          onChange={(e) => setExcelFile(e.target.files?.[0] || null)}
+                        />
+                      </div>
+                      <DialogFooter>
+                        <Button variant="ghost" onClick={() => setExcelImportOpen(false)}>
+                          İptal
+                        </Button>
+                        <Button onClick={handleImportExcel} disabled={excelImporting}>
+                          {excelImporting ? 'Aktarılıyor...' : 'İçe aktar'}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                  <TaskModal
+                    key={excelDraft ? `excel-draft-${(excelDraft.productLines as any[])?.length || 0}-${excelDraft.title || ''}` : 'task-create'}
+                    open={createTaskModalOpen}
+                    onOpenChange={setCreateTaskModalOpen}
+                    users={data.users}
+                    teams={data.teams}
+                    salesOrders={data.salesOrders}
+                    prefill={excelDraft || undefined}
+                    uploading={uploading}
+                    setUploading={setUploading}
+                    onSubmit={async (values) => {
+                      try {
+                        await createTask(values as any)
+                        setExcelDraft(null)
+                        toast({ title: 'Görev oluşturuldu' })
+                      } catch (err: any) {
+                        const d = err?.response?.data
+                        const msg =
+                          (typeof d === 'object' && d && !Array.isArray(d)
+                            ? Object.entries(d)
+                                .map(([k, v]) => `${k}: ${Array.isArray(v) ? (v as string[])[0] : v}`)
+                                .join('; ')
+                            : null) ||
+                          d?.detail ||
+                          err?.message
+                        toast({
+                          title: 'Görev oluşturulamadı',
+                          description: msg || 'Kayıt başarısız veya sunucu hatası',
+                          variant: 'destructive',
+                        })
+                      }
+                    }}
+                  >
+                    <Button size="sm">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Görev oluştur
+                    </Button>
+                  </TaskModal>
+                </div>
               </RbacGuard>
             )}
           <Button size="sm" variant="outline" onClick={exportCsv}>
@@ -1607,12 +1695,16 @@ export function TaskDetailPage() {
   const [prodQty, setProdQty] = useState('1')
   const [prodDate, setProdDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [lineProdInput, setLineProdInput] = useState<Record<number, { q: string; d: string }>>({})
+  const [lineFireInput, setLineFireInput] = useState<Record<number, { q: string; reason: string }>>({})
+  const [lineFireSaving, setLineFireSaving] = useState<Record<number, boolean>>({})
   const [claimBusy, setClaimBusy] = useState(false)
   const [productionShortfallNote, setProductionShortfallNote] = useState('')
   useEffect(() => {
     setProdQty('1')
     setProdDate(new Date().toISOString().slice(0, 10))
     setLineProdInput({})
+    setLineFireInput({})
+    setLineFireSaving({})
   }, [taskId])
   if (!task) {
     return (
@@ -1759,6 +1851,7 @@ export function TaskDetailPage() {
   const curStageSt = task.currentTeam ? task.workflowStageState?.[task.currentTeam] : undefined
   const mayClaimTask =
     task.status !== 'done' && workerMayClaimTask(task, currentUserId, data.teams, data.settings.role)
+  const canCompleteParallelStage = !!(task.workflowParallel && inCurrentWorkflowTeam && task.status === 'in-progress')
   const canSubmitSequentialApproval =
     sequentialFlow &&
     task.status === 'in-progress' &&
@@ -1786,11 +1879,12 @@ export function TaskDetailPage() {
       const done = Number(st.qty_done ?? 0)
       return done < tgt
     }
-    if (task.workflowParallel && isAssignee) {
+    if (task.workflowParallel && inCurrentWorkflowTeam) {
       const uid = currentUserId ? Number(currentUserId) : NaN
       for (const tid of task.workflowTeamIds || []) {
         const st = wfStateForGate[tid] || {}
-        if (st.assignee_id != null && Number(st.assignee_id) === uid && !st.stage_done && !st.pending_approval) {
+        if (!st.stage_done && !st.pending_approval) {
+          if (!Number.isNaN(uid) && st.assignee_id != null && Number(st.assignee_id) !== uid) continue
           const tgt = Number(st.qty_target ?? 0) || workflowQtyFallback || 1
           const done = Number(st.qty_done ?? 0)
           return done < tgt
@@ -1829,7 +1923,7 @@ export function TaskDetailPage() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                {(isAssignee || canSubmitSequentialApproval) && task.status !== 'done' ? (
+                {(isAssignee || canSubmitSequentialApproval || canCompleteParallelStage) && task.status !== 'done' ? (
                   <>
                     {isAssignee && task.status === 'todo' && (
                       <Button
@@ -1843,7 +1937,7 @@ export function TaskDetailPage() {
                       </Button>
                     )}
                     {task.status === 'in-progress' &&
-                      ((task.workflowParallel && inCurrentWorkflowTeam) ||
+                      ((task.workflowParallel && canCompleteParallelStage) ||
                         canSubmitSequentialApproval ||
                         (!hasWfTeams && isAssignee)) && (
                         <div className="flex flex-col gap-2 w-full sm:w-auto">
@@ -2170,6 +2264,86 @@ export function TaskDetailPage() {
                         ) : null}
                       </div>
                       <div className="rounded-md border border-dashed bg-muted/20 px-2 py-2 space-y-2">
+                        <p className="text-xs font-semibold uppercase text-muted-foreground">Fire — bu kalem</p>
+                        <div className="flex flex-wrap gap-2 items-end">
+                          <div>
+                            <Label className="text-xs">Fire adeti ({unit})</Label>
+                            <Input
+                              type="text"
+                              inputMode="decimal"
+                              autoComplete="off"
+                              className="h-8 w-24"
+                              disabled={task.status === 'done' || !!lineFireSaving[lidx]}
+                              value={lineFireInput[lidx]?.q ?? String(Math.max(0, Number(line.fireQty ?? 0)))}
+                              onChange={(e) => {
+                                const v = e.target.value.replace(',', '.')
+                                if (v === '' || /^\d*(?:\.\d{0,2})?$/.test(v)) {
+                                  setLineFireInput((prev) => ({
+                                    ...prev,
+                                    [lidx]: { q: v, reason: prev[lidx]?.reason ?? String(line.fireReason ?? '') },
+                                  }))
+                                }
+                              }}
+                            />
+                          </div>
+                          <div className="min-w-[220px] flex-1">
+                            <Label className="text-xs">Fire sebebi</Label>
+                            <Input
+                              className="h-8"
+                              disabled={task.status === 'done' || !!lineFireSaving[lidx]}
+                              value={lineFireInput[lidx]?.reason ?? String(line.fireReason ?? '')}
+                              onChange={(e) =>
+                                setLineFireInput((prev) => ({
+                                  ...prev,
+                                  [lidx]: { q: prev[lidx]?.q ?? String(Math.max(0, Number(line.fireQty ?? 0))), reason: e.target.value },
+                                }))
+                              }
+                              placeholder="Kısa açıklama"
+                            />
+                          </div>
+                          <Button
+                            size="sm"
+                            disabled={task.status === 'done' || !!lineFireSaving[lidx]}
+                            onClick={async () => {
+                              const raw = (lineFireInput[lidx]?.q ?? String(Math.max(0, Number(line.fireQty ?? 0)))).trim()
+                              const parsed = Number(raw === '' ? 0 : raw)
+                              if (!Number.isFinite(parsed) || parsed < 0) {
+                                toast({ title: 'Fire adeti geçersiz', description: '0 veya daha büyük sayı girin.', variant: 'destructive' })
+                                return
+                              }
+                              const reason = String(lineFireInput[lidx]?.reason ?? line.fireReason ?? '').trim().slice(0, 300)
+                              const formLines = (task.productLines || []).map((pl) => mapApiProductLineToTask(pl))
+                              formLines[lidx] = {
+                                ...formLines[lidx],
+                                fireQty: Number(parsed.toFixed(2)),
+                                fireReason: reason,
+                              }
+                              setLineFireSaving((prev) => ({ ...prev, [lidx]: true }))
+                              try {
+                                await api.patch(`/tasks/${task.id}/`, {
+                                  product_lines: taskProductLinesToApiPayload(formLines as any),
+                                })
+                                await hydrateFromApi()
+                                setLineFireInput((prev) => {
+                                  const next = { ...prev }
+                                  delete next[lidx]
+                                  return next
+                                })
+                                toast({ title: 'Fire kaydedildi', description: `Ürün ${lidx + 1}` })
+                              } catch (e: any) {
+                                toast({
+                                  title: 'Fire kaydedilemedi',
+                                  description: e?.response?.data?.detail || 'Kayıt başarısız',
+                                  variant: 'destructive',
+                                })
+                              } finally {
+                                setLineFireSaving((prev) => ({ ...prev, [lidx]: false }))
+                              }
+                            }}
+                          >
+                            {lineFireSaving[lidx] ? 'Kaydediliyor...' : 'Fire kaydet'}
+                          </Button>
+                        </div>
                         <p className="text-xs font-semibold uppercase text-muted-foreground">Üretim — bu kalem</p>
                         <p className="text-xs text-muted-foreground">
                           Girilen değer <span className="font-medium text-foreground">bu kalem için toplam üretilmiş adet</span>
@@ -3024,6 +3198,9 @@ function TaskModal({
   teams,
   salesOrders,
   onSubmit,
+  prefill,
+  open,
+  onOpenChange,
   task,
   uploading,
   setUploading,
@@ -3033,12 +3210,16 @@ function TaskModal({
   teams: { id: string; name: string }[]
   salesOrders?: { id: string; number: string; customerName?: string }[]
   onSubmit: (values: z.infer<typeof taskSchema>) => void | Promise<void>
+  prefill?: Partial<z.infer<typeof taskSchema>>
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   task?: Task
   uploading: boolean
   setUploading: (v: boolean) => void
 }) {
-  const initialLines = initialProductLinesForForm(task)
-  const wfIds = (task?.workflowTeamIds ?? []).filter(Boolean)
+  const prefillLines = Array.isArray(prefill?.productLines) ? prefill.productLines : []
+  const initialLines = task ? initialProductLinesForForm(task) : prefillLines.length ? prefillLines : [emptyProductLineRow()]
+  const wfIds = (task?.workflowTeamIds ?? prefill?.workflowTeamIds ?? []).filter(Boolean)
   const activeIdxInit = Math.min(
     Math.max(0, task?.activeProductIndex ?? 0),
     Math.max(0, initialLines.length - 1)
@@ -3052,12 +3233,12 @@ function TaskModal({
   const form = useForm<z.infer<typeof taskSchema>>({
     resolver: zodResolver(taskSchema) as any,
     defaultValues: {
-      title: task?.title ?? '',
+      title: task?.title ?? prefill?.title ?? '',
       owner: pickDefaultTaskOwner(users, task?.owner),
       assignee: task?.assignee ?? '',
       teamId: task?.teamId ?? '',
-      status: task?.status ?? 'todo',
-      priority: task?.priority ?? 'medium',
+      status: task?.status ?? prefill?.status ?? 'todo',
+      priority: task?.priority ?? prefill?.priority ?? 'medium',
       start: task?.start ? toDatetimeLocalFromISO(task.start) : toDatetimeLocalValue(new Date()),
       end: task?.end ? toDatetimeLocalFromISO(task.end) : toDatetimeLocalValue(new Date(Date.now() + 86400000)),
       due: task?.due ? toDatetimeLocalFromISO(task.due) : '',
@@ -3065,13 +3246,13 @@ function TaskModal({
       plannedHours:
         initialPlannedMinutesSum > 0
           ? Number((initialPlannedMinutesSum / 60).toFixed(2))
-          : task?.plannedHours ?? 0,
-      plannedCost: task?.plannedCost ?? 0,
+          : task?.plannedHours ?? prefill?.plannedHours ?? 0,
+      plannedCost: task?.plannedCost ?? prefill?.plannedCost ?? 0,
       productLines: initialLines,
       activeProductIndex: task?.activeProductIndex ?? 0,
-      workflowTeamIds: task?.workflowTeamIds ?? [],
+      workflowTeamIds: task?.workflowTeamIds ?? prefill?.workflowTeamIds ?? [],
       workflowStageTargets: wfTargets,
-      workflowParallel: task ? task.workflowParallel === true : false,
+      workflowParallel: task ? task.workflowParallel === true : prefill?.workflowParallel === true,
       salesOrderId: task?.salesOrder ? String(task.salesOrder) : '',
     },
   })
@@ -3110,6 +3291,10 @@ function TaskModal({
   const watchActiveLineIdx =
     useWatch({ control: form.control, name: 'activeProductIndex', defaultValue: task?.activeProductIndex ?? 0 }) ?? 0
   const watchWorkflowParallel = useWatch({ control: form.control, name: 'workflowParallel' }) === true
+  const totalOrderQty = useMemo(
+    () => (watchLines || []).reduce((s, l) => s + Math.max(0, Number((l as { quantity?: unknown })?.quantity) || 0), 0),
+    [watchLines]
+  )
   const workflowDefaultTargetQty = useMemo(() => {
     const lines = watchLines || []
     if (!lines.length) return 1
@@ -3222,7 +3407,7 @@ function TaskModal({
   }
 
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
@@ -3283,6 +3468,7 @@ function TaskModal({
                 await uploadAttachments(task.id, buffered)
                 setDroppedFiles([])
               }
+              onOpenChange?.(false)
               toast({ title: task ? 'Güncellendi' : 'Oluşturuldu' })
             } catch (err: any) {
               const detail = err?.response?.data
@@ -3332,7 +3518,7 @@ function TaskModal({
             {fields.length > 1 && (
               <p className="text-xs text-muted-foreground">
                 Toplam sipariş adeti (kalemler toplamı):{' '}
-                <span className="font-medium tabular-nums text-foreground">{formatNumber(workflowDefaultTargetQty)}</span> adet
+                <span className="font-medium tabular-nums text-foreground">{formatNumber(totalOrderQty)}</span> adet
               </p>
             )}
             {totalMinutesSum > 0 && (

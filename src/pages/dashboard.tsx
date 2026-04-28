@@ -492,7 +492,7 @@ export function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent className="h-72 min-h-[280px] min-w-0">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
               <AreaChart data={revenueTrend}>
                 <defs>
                   <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
@@ -518,7 +518,7 @@ export function DashboardPage() {
               <CardDescription>Segment toplamları</CardDescription>
             </CardHeader>
             <CardContent className="h-72 min-h-[280px] min-w-0">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
                 <BarChart data={Object.entries(pipelineByStage).map(([stage, value]) => ({ stage, value }))}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                   <XAxis dataKey="stage" />
@@ -595,7 +595,7 @@ export function DashboardPage() {
               <CardDescription>Planlanan giriş / çıkış</CardDescription>
             </CardHeader>
           <CardContent className="h-72 min-h-[280px] min-w-0">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
                 <LineChart data={cashflow}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                   <XAxis dataKey="month" />
@@ -618,7 +618,7 @@ export function DashboardPage() {
             <CardDescription>Depolara göre hız</CardDescription>
           </CardHeader>
           <CardContent className="h-72 min-h-[280px] min-w-0">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
               <BarChart data={topProducts}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                 <XAxis dataKey="name" hide />

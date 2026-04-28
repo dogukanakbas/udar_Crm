@@ -435,7 +435,7 @@ export function ReportsPage() {
                 {monthlyChartData.length === 0 ? (
                   <p className="text-sm text-muted-foreground">Veri yok</p>
                 ) : (
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
                     <BarChart data={monthlyChartData}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="label" tick={{ fontSize: 10 }} />
@@ -558,7 +558,7 @@ export function ReportsPage() {
             <CardDescription>Seçilen yapılandırmanın canlı önizlemesi</CardDescription>
           </CardHeader>
           <CardContent className="h-80 min-h-[320px] min-w-0">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
               <AreaChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="key" />
@@ -602,7 +602,7 @@ export function ReportsPage() {
             <CardDescription>Son 6 ay tamamlanan görev</CardDescription>
           </CardHeader>
           <CardContent className="h-56 min-h-[240px] min-w-0">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
               <BarChart data={throughputByMonthLocal}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="month" />

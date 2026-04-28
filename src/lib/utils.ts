@@ -52,21 +52,27 @@ export const formatExchangeRate = (rate: number | string, currency?: string) => 
 export const formatNumber = (value: number) =>
   new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 1 }).format(value)
 
-export const formatDate = (value: string | number | Date) =>
-  new Intl.DateTimeFormat('tr-TR', {
+export const formatDate = (value: string | number | Date) => {
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return '—'
+  return new Intl.DateTimeFormat('tr-TR', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
-  }).format(new Date(value))
+  }).format(d)
+}
 
-export const formatDateTime = (value: string | number | Date) =>
-  new Intl.DateTimeFormat('tr-TR', {
+export const formatDateTime = (value: string | number | Date) => {
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return '—'
+  return new Intl.DateTimeFormat('tr-TR', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value))
+  }).format(d)
+}
 
 /** datetime-local input için yerel tarih-saat (UTC ISO kullanmayın). */
 export function toDatetimeLocalValue(d: Date): string {
