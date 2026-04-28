@@ -1396,21 +1396,13 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             if lines_count <= 1 or line_idx is None:
                 st['qty_done'] = qty
             else:
-                if getattr(task, 'workflow_parallel', False):
-                    total_done = 0
-                    for v in qmap.values():
-                        try:
-                            total_done += max(0, int(v or 0))
-                        except (TypeError, ValueError):
-                            continue
-                    st['qty_done'] = total_done
-                else:
+                total_done = 0
+                for v in qmap.values():
                     try:
-                        ai = int(getattr(task, 'active_product_index', 0) or 0)
+                        total_done += max(0, int(v or 0))
                     except (TypeError, ValueError):
-                        ai = 0
-                    if line_idx == ai:
-                        st['qty_done'] = qty
+                        continue
+                st['qty_done'] = total_done
             state[str(tid)] = st
             task.workflow_stage_state = state
             state_changed = True
