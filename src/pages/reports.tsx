@@ -117,20 +117,7 @@ export function ReportsPage() {
       if (reportUser !== 'all') params.assignee_id = reportUser
       if (reportStatus !== 'all') params.status = reportStatus
       if (template) params.template = template
-      let res
-      try {
-        res = await api.get('/task-reports/export/', { params, responseType: 'blob' })
-      } catch (e: any) {
-        if (e?.response?.status === 404 && template) {
-          // Fallback endpoint: eski deploylarda task-reports/export henüz publish edilmemiş olabilir.
-          res = await api.get('/tasks/daily-production-report/', {
-            params: { date: new Date().toISOString().slice(0, 10) },
-            responseType: 'json',
-          })
-          throw new Error('Günlük rapor endpointi bulunamadı. Backend deploy güncel değil.')
-        }
-        throw e
-      }
+      const res = await api.get('/task-reports/export/', { params, responseType: 'blob' })
       const blob = new Blob([res.data], {
         type:
           format === 'xlsx'
@@ -151,9 +138,12 @@ export function ReportsPage() {
         description: template === 'daily' ? 'Günlük üretim raporu' : format === 'xlsx' ? 'Excel dosyası' : 'Word dosyası',
       })
     } catch (e: any) {
+      const is404 = e?.response?.status === 404
       toast({
         title: 'İndirilemedi',
-        description: e?.response?.data?.detail || 'Dosya oluşturulamadı',
+        description: is404
+          ? 'Rapor export endpointi bulunamadı. Backend deploy güncel değil.'
+          : e?.response?.data?.detail || 'Dosya oluşturulamadı',
         variant: 'destructive',
       })
     }
