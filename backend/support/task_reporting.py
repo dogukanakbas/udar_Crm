@@ -318,6 +318,7 @@ def build_full_report(org_id: int, year: int, month: int | None, filters: dict) 
     fire_rows: list[dict[str, Any]] = []
     stage_rows: list[dict[str, Any]] = []
     stage_qty_rows: list[dict[str, Any]] = []
+    category_breakdown_map: dict[str, dict[str, Any]] = {}
     team_perf_map: dict[str, dict[str, Any]] = {}
 
     for t in tasks_for_master:
@@ -377,6 +378,33 @@ def build_full_report(org_id: int, year: int, month: int | None, filters: dict) 
             }
         )
         for idx, ln in enumerate(lines):
+            cat = str((ln or {}).get('model_code') or '').strip() or 'Kategori Yok'
+            try:
+                line_target = max(0, int((ln or {}).get('quantity') or 0))
+            except (TypeError, ValueError):
+                line_target = 0
+            # Kalem bazlı gerçekleşen: workflow varsa tüm ekiplerdeki minimum değer (hattı geçen net adet)
+            if wf_ids:
+                vals = []
+                for tid in wf_ids:
+                    st_tid = dict(stage_state.get(str(tid), {}) or {})
+                    qmap_tid = dict(st_tid.get('qty_done_by_line') or {})
+                    try:
+                        vals.append(max(0, int(qmap_tid.get(str(idx), 0) or 0)))
+                    except (TypeError, ValueError):
+                        vals.append(0)
+                line_realized = min(vals) if vals else 0
+            else:
+                try:
+                    line_realized = max(0, int((ln or {}).get('qty_produced') or 0))
+                except (TypeError, ValueError):
+                    line_realized = 0
+            cat_row = category_breakdown_map.setdefault(
+                cat,
+                {'category_code': cat, 'target_total': 0, 'realized_total': 0},
+            )
+            cat_row['target_total'] += line_target
+            cat_row['realized_total'] += line_realized
             fq = float((ln or {}).get('fire_qty') or 0)
             fr = str((ln or {}).get('fire_reason') or '').strip()
             fi = str((ln or {}).get('fire_image_data_url') or '').strip()
@@ -453,6 +481,19 @@ def build_full_report(org_id: int, year: int, month: int | None, filters: dict) 
             }
         )
     team_perf_rows.sort(key=lambda x: -x['avg_duration_hours'])
+    category_rows = []
+    for v in category_breakdown_map.values():
+        tgt = int(v.get('target_total') or 0)
+        done = int(v.get('realized_total') or 0)
+        category_rows.append(
+            {
+                'category_code': v.get('category_code') or 'Kategori Yok',
+                'target_total': tgt,
+                'realized_total': done,
+                'remaining_total': max(0, tgt - done),
+            }
+        )
+    category_rows.sort(key=lambda x: x['category_code'])
 
     return {
         'year': year,
@@ -471,6 +512,7 @@ def build_full_report(org_id: int, year: int, month: int | None, filters: dict) 
             'fire_analysis': fire_rows,
             'stage_durations': sorted(stage_rows, key=lambda r: (r['task_id'], r['at'])),
             'stage_qty_detail': stage_qty_rows,
+            'category_breakdown': category_rows,
         },
     }
 
@@ -499,6 +541,7 @@ def export_xlsx_bytes(data: dict[str, Any]) -> bytes:
     ws0.append(['Toplam görev satırı', len(master.get('task_detail') or [])])
     ws0.append(['Fire kayıt satırı', len(master.get('fire_analysis') or [])])
     ws0.append(['Aşama geçiş satırı', len(master.get('stage_durations') or [])])
+    ws0.append(['Kategori kırılım satırı', len(master.get('category_breakdown') or [])])
     # Görev Detayı
     ws1 = wb.create_sheet('Görev Detayı')
     ws1.append(
@@ -603,6 +646,12 @@ def export_xlsx_bytes(data: dict[str, Any]) -> bytes:
                 'Var' if r['pending_approval'] else 'Yok',
             ]
         )
+
+    # Kategori kırılımı (Kasa/Pervaz/Çıta/Panel vb.)
+    ws7 = wb.create_sheet('Kategori Kırılımı')
+    ws7.append(['Kategori Kodu', 'Toplam Hedef', 'Gerçekleşen', 'Kalan'])
+    for r in master.get('category_breakdown', []):
+        ws7.append([r['category_code'], r['target_total'], r['realized_total'], r['remaining_total']])
 
     # Legacy detay (geri uyumluluk)
     ws6 = wb.create_sheet('Görev detay (legacy)')
@@ -747,26 +796,54 @@ def export_cnc_docx_bytes(data: dict[str, Any]) -> bytes:
     master = data.get('master') or {}
     task_rows = master.get('task_detail') or []
     fire_rows = master.get('fire_analysis') or []
-    worker_rows = master.get('worker_line_performance') or []
+    stage_qty_rows = master.get('stage_qty_detail') or []
+    category_rows = master.get('category_breakdown') or []
 
     doc.add_paragraph(
         f"Donem: {data.get('period_start', '')} - {data.get('period_end', '')}\n"
         f"Toplam gorev: {len(task_rows)}"
     )
 
-    doc.add_heading('CALISAN OZETI', level=1)
-    t_workers = doc.add_table(rows=1, cols=4)
-    h = t_workers.rows[0].cells
-    h[0].text = 'KULLANICI'
-    h[1].text = 'BOLUM'
-    h[2].text = 'GIRIS SAYISI'
-    h[3].text = 'BILDIRILEN TOPLAM'
-    for r in worker_rows[:300]:
-        rr = t_workers.add_row().cells
-        rr[0].text = str(r.get('username') or '')
-        rr[1].text = str(r.get('team_name') or '')
-        rr[2].text = str(r.get('entry_count') or 0)
-        rr[3].text = str(r.get('reported_quantity_sum') or 0)
+    # Ekip bazli ozet: kac ekip calismis, ne kadar uretmis, kac gorevde bulunmus
+    team_agg: dict[str, dict[str, Any]] = {}
+    for r in stage_qty_rows:
+        tname = str(r.get('team_name') or '—')
+        row = team_agg.setdefault(
+            tname,
+            {'team_name': tname, 'produced_total': 0, 'tasks': set()},
+        )
+        row['produced_total'] += max(0, int(r.get('qty_done') or 0))
+        row['tasks'].add(int(r.get('task_id') or 0))
+    teams_worked = len(team_agg)
+    doc.add_paragraph(f"Calisan ekip sayisi: {teams_worked}")
+
+    doc.add_heading('KATEGORI KIRILIMI', level=1)
+    t_cat = doc.add_table(rows=1, cols=4)
+    hc = t_cat.rows[0].cells
+    hc[0].text = 'KATEGORI KODU'
+    hc[1].text = 'TOPLAM HEDEF'
+    hc[2].text = 'GERCEKLESEN'
+    hc[3].text = 'KALAN'
+    for r in category_rows[:200]:
+        rr = t_cat.add_row().cells
+        rr[0].text = str(r.get('category_code') or '')
+        rr[1].text = str(r.get('target_total') or 0)
+        rr[2].text = str(r.get('realized_total') or 0)
+        rr[3].text = str(r.get('remaining_total') or 0)
+
+    doc.add_heading('EKIP BAZLI OZET', level=1)
+    t_team = doc.add_table(rows=1, cols=4)
+    h = t_team.rows[0].cells
+    h[0].text = 'BOLUM'
+    h[1].text = 'URETILEN TOPLAM'
+    h[2].text = 'BULUNDUGU GOREV SAYISI'
+    h[3].text = 'ACIKLAMA'
+    for r in sorted(team_agg.values(), key=lambda x: (-x['produced_total'], x['team_name']))[:200]:
+        rr = t_team.add_row().cells
+        rr[0].text = str(r.get('team_name') or '')
+        rr[1].text = str(r.get('produced_total') or 0)
+        rr[2].text = str(len(r.get('tasks') or []))
+        rr[3].text = 'Gunluk ekip performansi'
 
     doc.add_heading('SIPARIS / GOREV DETAYI', level=1)
     t_tasks = doc.add_table(rows=1, cols=8)
