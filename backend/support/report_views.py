@@ -58,6 +58,9 @@ class TaskReportSummaryView(APIView):
 
 class TaskReportExportView(APIView):
     permission_classes = [IsOrgMember]
+    # DRF'in ?format=... query override mekanizmasi bu endpointte 404 üretiyor.
+    # Export tipi için query parami biz yönettiğimizden burada kapatıyoruz.
+    format_kwarg = None
 
     def get(self, request):
         if not _report_roles(request.user):
@@ -66,9 +69,9 @@ class TaskReportExportView(APIView):
         if not org:
             return Response({'detail': 'Organizasyon yok'}, status=status.HTTP_400_BAD_REQUEST)
 
-        fmt = (request.query_params.get('format') or 'xlsx').lower()
+        fmt = (request.query_params.get('file_format') or request.query_params.get('format') or 'xlsx').lower()
         if fmt not in ('xlsx', 'docx', 'doc'):
-            return Response({'detail': 'format=xlsx veya docx olmalı'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': 'file_format=xlsx veya docx olmalı'}, status=status.HTTP_400_BAD_REQUEST)
         if fmt == 'doc':
             fmt = 'docx'
 

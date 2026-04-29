@@ -111,7 +111,7 @@ export function ReportsPage() {
   const downloadExport = async (format: 'xlsx' | 'docx', template?: 'daily') => {
     if (!canReports) return
     try {
-      const params: Record<string, string> = { year: String(reportYear), format }
+      const params: Record<string, string> = { year: String(reportYear), file_format: format }
       if (reportMonth !== 'all') params.month = reportMonth
       if (reportTeam !== 'all') params.team_id = reportTeam
       if (reportUser !== 'all') params.assignee_id = reportUser
