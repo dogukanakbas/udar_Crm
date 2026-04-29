@@ -108,7 +108,7 @@ export function ReportsPage() {
     loadProdReport()
   }, [loadProdReport])
 
-  const downloadExport = async (format: 'xlsx' | 'docx', template?: 'cnc') => {
+  const downloadExport = async (format: 'xlsx' | 'docx', template?: 'daily') => {
     if (!canReports) return
     try {
       const params: Record<string, string> = { year: String(reportYear), format }
@@ -117,7 +117,20 @@ export function ReportsPage() {
       if (reportUser !== 'all') params.assignee_id = reportUser
       if (reportStatus !== 'all') params.status = reportStatus
       if (template) params.template = template
-      const res = await api.get('/task-reports/export/', { params, responseType: 'blob' })
+      let res
+      try {
+        res = await api.get('/task-reports/export/', { params, responseType: 'blob' })
+      } catch (e: any) {
+        if (e?.response?.status === 404 && template) {
+          // Fallback endpoint: eski deploylarda task-reports/export henüz publish edilmemiş olabilir.
+          res = await api.get('/tasks/daily-production-report/', {
+            params: { date: new Date().toISOString().slice(0, 10) },
+            responseType: 'json',
+          })
+          throw new Error('Günlük rapor endpointi bulunamadı. Backend deploy güncel değil.')
+        }
+        throw e
+      }
       const blob = new Blob([res.data], {
         type:
           format === 'xlsx'
@@ -128,14 +141,14 @@ export function ReportsPage() {
       const a = document.createElement('a')
       a.href = url
       a.download =
-        template === 'cnc'
-          ? `cnc_gunluk_faaliyet_raporu_${reportYear}_${reportMonth === 'all' ? 'yillik' : reportMonth}.docx`
+        template === 'daily'
+          ? `gunluk_uretim_faaliyet_raporu_${reportYear}_${reportMonth === 'all' ? 'yillik' : reportMonth}.docx`
           : `gorev_raporu_${reportYear}_${reportMonth === 'all' ? 'yillik' : reportMonth}.${format === 'xlsx' ? 'xlsx' : 'docx'}`
       a.click()
       window.URL.revokeObjectURL(url)
       toast({
         title: 'İndirme başladı',
-        description: template === 'cnc' ? 'CNC şablon raporu' : format === 'xlsx' ? 'Excel dosyası' : 'Word dosyası',
+        description: template === 'daily' ? 'Günlük üretim raporu' : format === 'xlsx' ? 'Excel dosyası' : 'Word dosyası',
       })
     } catch (e: any) {
       toast({
@@ -342,9 +355,9 @@ export function ReportsPage() {
                 <FileText className="mr-2 h-4 w-4" />
                 Word (.docx)
               </Button>
-              <Button variant="outline" size="sm" onClick={() => downloadExport('docx', 'cnc')}>
+              <Button variant="outline" size="sm" onClick={() => downloadExport('docx', 'daily')}>
                 <FileText className="mr-2 h-4 w-4" />
-                CNC Şablon (.docx)
+                Günlük Üretim Şablon (.docx)
               </Button>
             </div>
           </div>

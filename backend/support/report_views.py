@@ -103,9 +103,9 @@ class TaskReportExportView(APIView):
             resp = HttpResponse(body, content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             resp['Content-Disposition'] = f'attachment; filename="{name}"'
             return resp
-        if template_key == 'cnc':
+        if template_key in ('cnc', 'daily', 'daily-production'):
             body = export_cnc_docx_bytes(payload)
-            name = f"cnc_gunluk_faaliyet_raporu_{year}_{month or 'yillik'}.docx"
+            name = f"gunluk_uretim_faaliyet_raporu_{year}_{month or 'yillik'}.docx"
         else:
             body = export_docx_bytes(payload)
             name = f"gorev_raporu_{year}_{month or 'yillik'}.docx"

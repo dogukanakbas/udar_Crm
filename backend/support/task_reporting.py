@@ -722,7 +722,7 @@ def export_docx_bytes(data: dict[str, Any], title: str = 'Görev Raporu') -> byt
 
 def export_cnc_docx_bytes(data: dict[str, Any]) -> bytes:
     """
-    CNC gunluk faaliyet formatinda doldurulmus DOCX uretir.
+    Gunluk uretim faaliyet formatinda doldurulmus DOCX uretir.
     Sunucuda sablon dosyasi bulunursa onu baz alir; yoksa ayni duzen koddan kurulur.
     """
     from docx import Document
@@ -741,8 +741,8 @@ def export_cnc_docx_bytes(data: dict[str, Any]) -> bytes:
                 doc = None
     if doc is None:
         doc = Document()
-        doc.add_heading('GUNLUK CALISMA FAALIYET RAPORU', 0)
-        doc.add_paragraph('BOLUM: CNC')
+        doc.add_heading('GUNLUK URETIM FAALIYET RAPORU', 0)
+        doc.add_paragraph('BOLUM: TUM URETIM EKIPLERI')
 
     master = data.get('master') or {}
     task_rows = master.get('task_detail') or []
