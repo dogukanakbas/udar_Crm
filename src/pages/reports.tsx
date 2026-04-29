@@ -108,7 +108,7 @@ export function ReportsPage() {
     loadProdReport()
   }, [loadProdReport])
 
-  const downloadExport = async (format: 'xlsx' | 'docx') => {
+  const downloadExport = async (format: 'xlsx' | 'docx', template?: 'cnc') => {
     if (!canReports) return
     try {
       const params: Record<string, string> = { year: String(reportYear), format }
@@ -116,6 +116,7 @@ export function ReportsPage() {
       if (reportTeam !== 'all') params.team_id = reportTeam
       if (reportUser !== 'all') params.assignee_id = reportUser
       if (reportStatus !== 'all') params.status = reportStatus
+      if (template) params.template = template
       const res = await api.get('/task-reports/export/', { params, responseType: 'blob' })
       const blob = new Blob([res.data], {
         type:
@@ -126,10 +127,16 @@ export function ReportsPage() {
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `gorev_raporu_${reportYear}_${reportMonth === 'all' ? 'yillik' : reportMonth}.${format === 'xlsx' ? 'xlsx' : 'docx'}`
+      a.download =
+        template === 'cnc'
+          ? `cnc_gunluk_faaliyet_raporu_${reportYear}_${reportMonth === 'all' ? 'yillik' : reportMonth}.docx`
+          : `gorev_raporu_${reportYear}_${reportMonth === 'all' ? 'yillik' : reportMonth}.${format === 'xlsx' ? 'xlsx' : 'docx'}`
       a.click()
       window.URL.revokeObjectURL(url)
-      toast({ title: 'İndirme başladı', description: format === 'xlsx' ? 'Excel dosyası' : 'Word dosyası' })
+      toast({
+        title: 'İndirme başladı',
+        description: template === 'cnc' ? 'CNC şablon raporu' : format === 'xlsx' ? 'Excel dosyası' : 'Word dosyası',
+      })
     } catch (e: any) {
       toast({
         title: 'İndirilemedi',
@@ -334,6 +341,10 @@ export function ReportsPage() {
               <Button variant="outline" size="sm" onClick={() => downloadExport('docx')}>
                 <FileText className="mr-2 h-4 w-4" />
                 Word (.docx)
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => downloadExport('docx', 'cnc')}>
+                <FileText className="mr-2 h-4 w-4" />
+                CNC Şablon (.docx)
               </Button>
             </div>
           </div>

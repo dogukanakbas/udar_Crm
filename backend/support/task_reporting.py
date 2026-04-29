@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from calendar import month_name
 from datetime import datetime
+import os
 from typing import Any
 
 from django.db.models import Count, Q
@@ -712,6 +713,102 @@ def export_docx_bytes(data: dict[str, Any], title: str = 'Görev Raporu') -> byt
     doc.add_heading('Görev listesi (özet)', level=1)
     for t in data.get('tasks', [])[:500]:
         doc.add_paragraph(f"[{t['status']}] {t['title']} — Ekip: {t['team_name']} — Atanan: {t['assignee_username']}", style='List Bullet')
+
+    bio = __import__('io')
+    buf = bio.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def export_cnc_docx_bytes(data: dict[str, Any]) -> bytes:
+    """
+    CNC gunluk faaliyet formatinda doldurulmus DOCX uretir.
+    Sunucuda sablon dosyasi bulunursa onu baz alir; yoksa ayni duzen koddan kurulur.
+    """
+    from docx import Document
+
+    template_candidates = [
+        '/app/docs/2-CNC .docx',
+        '/app/belgeler/2-CNC .docx',
+    ]
+    doc = None
+    for p in template_candidates:
+        if os.path.exists(p):
+            try:
+                doc = Document(p)
+                break
+            except Exception:
+                doc = None
+    if doc is None:
+        doc = Document()
+        doc.add_heading('GUNLUK CALISMA FAALIYET RAPORU', 0)
+        doc.add_paragraph('BOLUM: CNC')
+
+    master = data.get('master') or {}
+    task_rows = master.get('task_detail') or []
+    fire_rows = master.get('fire_analysis') or []
+    worker_rows = master.get('worker_line_performance') or []
+
+    doc.add_paragraph(
+        f"Donem: {data.get('period_start', '')} - {data.get('period_end', '')}\n"
+        f"Toplam gorev: {len(task_rows)}"
+    )
+
+    doc.add_heading('CALISAN OZETI', level=1)
+    t_workers = doc.add_table(rows=1, cols=4)
+    h = t_workers.rows[0].cells
+    h[0].text = 'KULLANICI'
+    h[1].text = 'BOLUM'
+    h[2].text = 'GIRIS SAYISI'
+    h[3].text = 'BILDIRILEN TOPLAM'
+    for r in worker_rows[:300]:
+        rr = t_workers.add_row().cells
+        rr[0].text = str(r.get('username') or '')
+        rr[1].text = str(r.get('team_name') or '')
+        rr[2].text = str(r.get('entry_count') or 0)
+        rr[3].text = str(r.get('reported_quantity_sum') or 0)
+
+    doc.add_heading('SIPARIS / GOREV DETAYI', level=1)
+    t_tasks = doc.add_table(rows=1, cols=8)
+    h2 = t_tasks.rows[0].cells
+    h2[0].text = 'IS EMRI KODU'
+    h2[1].text = 'GOREV'
+    h2[2].text = 'AKTIF BOLUM'
+    h2[3].text = 'SIPARIS SATIR ADET'
+    h2[4].text = 'YAPILAN PANEL ADET'
+    h2[5].text = 'SIP.KALAN ADET'
+    h2[6].text = 'DURUM'
+    h2[7].text = 'GUNCELLENME'
+    for r in task_rows[:500]:
+        rr = t_tasks.add_row().cells
+        rr[0].text = str(r.get('task_id') or '')
+        rr[1].text = str(r.get('title') or '')
+        rr[2].text = str(r.get('team_name') or '')
+        rr[3].text = str(r.get('target_total') or 0)
+        rr[4].text = str(r.get('realized_total') or 0)
+        rr[5].text = str(r.get('remaining_total') or 0)
+        rr[6].text = str(r.get('status') or '')
+        rr[7].text = str(r.get('updated_at') or '')
+
+    doc.add_heading('FIRE BILGILERI', level=1)
+    t_fire = doc.add_table(rows=1, cols=7)
+    h3 = t_fire.rows[0].cells
+    h3[0].text = 'GOREV ID'
+    h3[1].text = 'MODEL KODU'
+    h3[2].text = 'FIRE ADET'
+    h3[3].text = 'FIRE SEBEP'
+    h3[4].text = 'FIRE NEREDE'
+    h3[5].text = 'FIRE GORSEL'
+    h3[6].text = 'ACIKLAMA'
+    for r in fire_rows[:500]:
+        rr = t_fire.add_row().cells
+        rr[0].text = str(r.get('task_id') or '')
+        rr[1].text = str(r.get('model_code') or '')
+        rr[2].text = str(r.get('fire_qty') or 0)
+        rr[3].text = str(r.get('fire_reason') or '')
+        rr[4].text = str(r.get('fire_where') or '')
+        rr[5].text = str(r.get('fire_image') or '')
+        rr[6].text = str(r.get('title') or '')
 
     bio = __import__('io')
     buf = bio.BytesIO()
