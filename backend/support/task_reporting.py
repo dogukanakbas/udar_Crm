@@ -12,7 +12,7 @@ from django.db.models.functions import Coalesce, TruncMonth
 from django.utils import timezone
 
 from accounts.models import Team, User
-from .models import Task, TaskTimeEntry
+from .models import Task, TaskTimeEntry, TaskProductionEntry
 
 
 def _year_bounds(year: int, month: int | None) -> tuple[datetime, datetime]:
@@ -280,6 +280,179 @@ def build_full_report(org_id: int, year: int, month: int | None, filters: dict) 
         key = f'{year}-{int(month):02d}'
         monthly_timeline = [m for m in monthly_timeline if m['year_month'] == key]
 
+    # Master analytics
+    tasks_for_master = list(detail_qs)
+    task_id_set = {t.id for t in tasks_for_master}
+    entries_qs = TaskProductionEntry.objects.filter(task__organization_id=org_id, task_id__in=task_id_set).select_related('task', 'user', 'team')
+    prod_by_task_line_team_latest: dict[tuple[int, int, int], tuple[datetime, int]] = {}
+    worker_line_perf: dict[tuple[int, str, str, int], dict[str, Any]] = {}
+    for e in entries_qs:
+        line_idx = int(e.product_line_index or 0)
+        team_id = int(e.team_id or 0)
+        key = (e.task_id, line_idx, team_id)
+        current = prod_by_task_line_team_latest.get(key)
+        ts = e.created_at or timezone.now()
+        if current is None or ts >= current[0]:
+            prod_by_task_line_team_latest[key] = (ts, int(e.quantity or 0))
+        wname = e.user.username if e.user else '—'
+        tname = e.team.name if e.team else '—'
+        wkey = (e.user_id or 0, wname, tname, line_idx)
+        row = worker_line_perf.setdefault(
+            wkey,
+            {
+                'user_id': e.user_id,
+                'username': wname,
+                'team_name': tname,
+                'product_line_index': line_idx,
+                'entry_count': 0,
+                'reported_quantity_sum': 0,
+                'tasks_touched': set(),
+            },
+        )
+        row['entry_count'] += 1
+        row['reported_quantity_sum'] += int(e.quantity or 0)
+        row['tasks_touched'].add(e.task_id)
+
+    task_detail_master: list[dict[str, Any]] = []
+    fire_rows: list[dict[str, Any]] = []
+    stage_rows: list[dict[str, Any]] = []
+    stage_qty_rows: list[dict[str, Any]] = []
+    team_perf_map: dict[str, dict[str, Any]] = {}
+
+    for t in tasks_for_master:
+        lines = list(getattr(t, 'product_lines', None) or [])
+        target_total = 0
+        for ln in lines:
+            try:
+                target_total += max(0, int((ln or {}).get('quantity') or 0))
+            except (TypeError, ValueError):
+                continue
+        if target_total <= 0:
+            target_total = max(1, int(t.quantity or 1))
+        wf_ids = [int(x) for x in (t.workflow_team_ids or []) if str(x).isdigit()]
+        stage_state = dict(t.workflow_stage_state or {})
+        if wf_ids:
+            done_vals = []
+            for tid in wf_ids:
+                st = dict(stage_state.get(str(tid), {}) or {})
+                done_vals.append(max(0, int(st.get('qty_done') or 0)))
+            realized = min(done_vals) if done_vals else 0
+            # Workflow aşama hedef/gerçekleşen (qty_target/qty_done) detayı
+            for tid in wf_ids:
+                st = dict(stage_state.get(str(tid), {}) or {})
+                team_obj = Team.objects.filter(id=tid, organization_id=org_id).first()
+                stage_qty_rows.append(
+                    {
+                        'task_id': t.id,
+                        'task_title': t.title,
+                        'team_name': team_obj.name if team_obj else str(tid),
+                        'qty_target': int(st.get('qty_target') or 0),
+                        'qty_done': int(st.get('qty_done') or 0),
+                        'stage_done': bool(st.get('stage_done')),
+                        'pending_approval': bool(st.get('pending_approval')),
+                    }
+                )
+        else:
+            realized = 0
+            for ln in lines:
+                try:
+                    realized += max(0, int((ln or {}).get('qty_produced') or 0))
+                except (TypeError, ValueError):
+                    continue
+        remaining = max(0, target_total - realized)
+        task_detail_master.append(
+            {
+                'task_id': t.id,
+                'title': t.title,
+                'status': t.status,
+                'team_name': (t.current_team or t.team).name if (t.current_team or t.team) else '',
+                'target_total': target_total,
+                'realized_total': realized,
+                'remaining_total': remaining,
+                'planned_hours': float(t.planned_hours or 0),
+                'start': t.start.isoformat() if t.start else '',
+                'end': t.end.isoformat() if t.end else '',
+                'updated_at': t.updated_at.isoformat() if t.updated_at else '',
+            }
+        )
+        for idx, ln in enumerate(lines):
+            fq = float((ln or {}).get('fire_qty') or 0)
+            fr = str((ln or {}).get('fire_reason') or '').strip()
+            fi = str((ln or {}).get('fire_image_data_url') or '').strip()
+            if fq > 0 or fr or fi:
+                fire_rows.append(
+                    {
+                        'task_id': t.id,
+                        'title': t.title,
+                        'product_line_index': idx,
+                        'model_code': str((ln or {}).get('model_code') or ''),
+                        'fire_qty': fq,
+                        'fire_reason': fr,
+                        'fire_where': (t.current_team.name if t.current_team else '') or ((t.team.name if t.team else '') or ''),
+                        'fire_image': 'Var' if fi else 'Yok',
+                    }
+                )
+        history = list(t.handover_history or [])
+        prev_at = t.start or t.created_at
+        for h in history:
+            at_raw = h.get('at')
+            try:
+                at_dt = datetime.fromisoformat(str(at_raw).replace('Z', '+00:00')) if at_raw else None
+            except Exception:
+                at_dt = None
+            if at_dt is None:
+                continue
+            from_name = h.get('from_team_name') or '—'
+            to_name = h.get('to_team_name') or '—'
+            dur_h = round(max(0, (at_dt - prev_at).total_seconds()) / 3600, 2) if prev_at else 0
+            stage_rows.append(
+                {
+                    'task_id': t.id,
+                    'title': t.title,
+                    'from_team': from_name,
+                    'to_team': to_name,
+                    'at': at_dt.isoformat(),
+                    'duration_hours': dur_h,
+                    'type': h.get('type') or '',
+                    'note': h.get('note') or '',
+                }
+            )
+            perf = team_perf_map.setdefault(
+                to_name,
+                {'team_name': to_name, 'transition_count': 0, 'total_duration_hours': 0.0, 'max_duration_hours': 0.0},
+            )
+            perf['transition_count'] += 1
+            perf['total_duration_hours'] += dur_h
+            perf['max_duration_hours'] = max(perf['max_duration_hours'], dur_h)
+            prev_at = at_dt
+
+    worker_rows = []
+    for row in worker_line_perf.values():
+        cnt = int(row['entry_count'])
+        worker_rows.append(
+            {
+                'user_id': row['user_id'],
+                'username': row['username'],
+                'team_name': row['team_name'],
+                'product_line_index': row['product_line_index'],
+                'entry_count': cnt,
+                'reported_quantity_sum': row['reported_quantity_sum'],
+                'task_count': len(row['tasks_touched']),
+                'avg_reported_qty': round((row['reported_quantity_sum'] / cnt), 2) if cnt > 0 else 0,
+            }
+        )
+    worker_rows.sort(key=lambda x: (-x['reported_quantity_sum'], -x['entry_count']))
+    team_perf_rows = []
+    for v in team_perf_map.values():
+        c = int(v['transition_count'])
+        team_perf_rows.append(
+            {
+                **v,
+                'avg_duration_hours': round((float(v['total_duration_hours']) / c), 2) if c > 0 else 0,
+            }
+        )
+    team_perf_rows.sort(key=lambda x: -x['avg_duration_hours'])
+
     return {
         'year': year,
         'month': month,
@@ -290,6 +463,14 @@ def build_full_report(org_id: int, year: int, month: int | None, filters: dict) 
         'by_team': by_team_summary(org_id, year, month, f),
         'by_user': by_user_summary(org_id, year, month, f),
         'tasks': task_detail_rows(detail_qs),
+        'master': {
+            'task_detail': task_detail_master,
+            'team_performance': team_perf_rows,
+            'worker_line_performance': worker_rows,
+            'fire_analysis': fire_rows,
+            'stage_durations': sorted(stage_rows, key=lambda r: (r['task_id'], r['at'])),
+            'stage_qty_detail': stage_qty_rows,
+        },
     }
 
 
@@ -298,24 +479,132 @@ def export_xlsx_bytes(data: dict[str, Any]) -> bytes:
     from openpyxl.styles import Font
 
     wb = Workbook()
+    master = data.get('master') or {}
+    by_user = data.get('by_user') or []
+    hours_by_user: dict[str, float] = {}
+    for r in by_user:
+        if r.get('user_id') is None:
+            continue
+        hours_by_user[str(r.get('user_id'))] = float(r.get('hours_logged') or 0)
+
     # Özet — aylık
     ws0 = wb.active
-    ws0.title = 'Aylik özet'
+    ws0.title = 'Özet'
     ws0.append(['Ay', 'Tamamlanan görev', 'Oluşturulan görev'])
     for row in data.get('monthly_timeline', []):
         ws0.append([row.get('month_label') or row.get('year_month'), row.get('completed_count', 0), row.get('created_count', 0)])
-    # Ekip
-    ws1 = wb.create_sheet('Ekip bazlı')
-    ws1.append(['Ekip ID', 'Ekip', 'Dönemde tamamlanan', 'Aktif görev'])
-    for r in data.get('by_team', []):
-        ws1.append([r['team_id'], r['team_name'], r['tasks_completed_in_period'], r['tasks_active']])
-    # Çalışan
-    ws2 = wb.create_sheet('Çalışan bazlı')
-    ws2.append(['Kullanıcı ID', 'Kullanıcı', 'Tamamlanan', 'Aktif', 'Saat (zaman kaydı)'])
-    for r in data.get('by_user', []):
-        ws2.append([r['user_id'], r['username'], r['tasks_completed'], r['tasks_active'], r['hours_logged']])
-    # Görev detay
-    ws3 = wb.create_sheet('Görev detay')
+    ws0.append([])
+    ws0.append(['Metri̇k', 'Değer'])
+    ws0.append(['Toplam görev satırı', len(master.get('task_detail') or [])])
+    ws0.append(['Fire kayıt satırı', len(master.get('fire_analysis') or [])])
+    ws0.append(['Aşama geçiş satırı', len(master.get('stage_durations') or [])])
+    # Görev Detayı
+    ws1 = wb.create_sheet('Görev Detayı')
+    ws1.append(
+        [
+            'Görev ID',
+            'Başlık',
+            'Durum',
+            'Aktif Ekip',
+            'Toplam Hedef',
+            'Gerçekleşen',
+            'Kalan',
+            'Plan Saat',
+            'Başlangıç',
+            'Bitiş',
+            'Güncellenme',
+        ]
+    )
+    for r in master.get('task_detail', []):
+        ws1.append(
+            [
+                r['task_id'],
+                r['title'],
+                r['status'],
+                r['team_name'],
+                r['target_total'],
+                r['realized_total'],
+                r['remaining_total'],
+                r['planned_hours'],
+                r['start'],
+                r['end'],
+                r['updated_at'],
+            ]
+        )
+    # Ekip Performansı
+    ws2 = wb.create_sheet('Ekip Performansı')
+    ws2.append(['Ekip', 'Geçiş Sayısı', 'Toplam Süre (saat)', 'Ort. Süre (saat)', 'Maks. Süre (saat)'])
+    for r in master.get('team_performance', []):
+        ws2.append([r['team_name'], r['transition_count'], r['total_duration_hours'], r['avg_duration_hours'], r['max_duration_hours']])
+    # Çalışan Performansı
+    ws3 = wb.create_sheet('Çalışan Performansı')
+    ws3.append(
+        [
+            'Kullanıcı ID',
+            'Kullanıcı',
+            'Ekip',
+            'Kalem Index',
+            'Giriş Sayısı',
+            'Bildirilen Toplam',
+            'Görev Sayısı',
+            'Ortalama',
+            'Çalıştığı Saat (toplam)',
+        ]
+    )
+    for r in master.get('worker_line_performance', []):
+        ws3.append(
+            [
+                r['user_id'],
+                r['username'],
+                r['team_name'],
+                r['product_line_index'],
+                r['entry_count'],
+                r['reported_quantity_sum'],
+                r['task_count'],
+                r['avg_reported_qty'],
+                hours_by_user.get(str(r['user_id']), 0),
+            ]
+        )
+    # Fire Analizi
+    ws4 = wb.create_sheet('Fire Analizi')
+    ws4.append(['Görev ID', 'Başlık', 'Kalem Index', 'Model Kod', 'Fire Adet', 'Fire Sebep', 'Fire Nerede', 'Fire Görsel'])
+    for r in master.get('fire_analysis', []):
+        ws4.append(
+            [
+                r['task_id'],
+                r['title'],
+                r['product_line_index'],
+                r['model_code'],
+                r['fire_qty'],
+                r['fire_reason'],
+                r.get('fire_where', ''),
+                r['fire_image'],
+            ]
+        )
+    # Aşama Süreleri
+    ws5 = wb.create_sheet('Aşama Süreleri')
+    ws5.append(['Görev ID', 'Başlık', 'Önceki Ekip', 'Sonraki Ekip', 'Geçiş Zamanı', 'Aşama Süresi (saat)', 'Tip', 'Not'])
+    for r in master.get('stage_durations', []):
+        ws5.append([r['task_id'], r['title'], r['from_team'], r['to_team'], r['at'], r['duration_hours'], r['type'], r['note']])
+
+    # Aşama Qty Detayı
+    ws6 = wb.create_sheet('Aşama Qty Detayı')
+    ws6.append(['Görev ID', 'Görev Başlık', 'Ekip', 'Hedef', 'Gerçekleşen', 'Aşama Done', 'Pending Approval'])
+    for r in master.get('stage_qty_detail', []):
+        ws6.append(
+            [
+                r['task_id'],
+                r['task_title'],
+                r['team_name'],
+                r['qty_target'],
+                r['qty_done'],
+                'Var' if r['stage_done'] else 'Yok',
+                'Var' if r['pending_approval'] else 'Yok',
+            ]
+        )
+
+    # Legacy detay (geri uyumluluk)
+    ws6 = wb.create_sheet('Görev detay (legacy)')
     headers = [
         'ID',
         'Başlık',
@@ -337,9 +626,9 @@ def export_xlsx_bytes(data: dict[str, Any]) -> bytes:
         'Plan saat',
         'Plan dk',
     ]
-    ws3.append(headers)
+    ws6.append(headers)
     for t in data.get('tasks', []):
-        ws3.append(
+        ws6.append(
             [
                 t['id'],
                 t['title'],
