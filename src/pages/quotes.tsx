@@ -852,28 +852,28 @@ const buildCsv = (quotes: Quote[]) =>
     )
     .join('\n')
 
-async function downloadDocument(quoteId: string) {
-  const manifestResponse = await api.get(`/quotes/${quoteId}/export-files/`)
-  const files = manifestResponse.data?.files || []
-  if (!files.length) throw new Error('Bu belge için uygun indirme şablonu bulunamadı')
+const pdfFileName = (value: string) => `${value.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'belge'}.pdf`
 
-  for (const file of files) {
-    const response = await api.get(`/quotes/${quoteId}/export-xlsx/`, {
-      params: {
-        ...(file.template_key ? { template_key: file.template_key } : {}),
-        _ts: Date.now(),
-      },
-      responseType: 'blob',
-    })
-    const url = window.URL.createObjectURL(new Blob([response.data]))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = file.filename || `document-${quoteId}.xlsx`
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    window.URL.revokeObjectURL(url)
-  }
+async function downloadDocument(quoteId: string, documentNumber?: string) {
+  const response = await api.get(`/quotes/${quoteId}/export-pdf/`, {
+    params: { _ts: Date.now() },
+    responseType: 'blob',
+  })
+  const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }))
+  const link = document.createElement('a')
+  const disposition = response.headers?.['content-disposition'] || ''
+  const encodedFileNameMatch = /filename\*=UTF-8''([^;]+)/i.exec(disposition)
+  const fileNameMatch = /filename="?([^";]+)"?/i.exec(disposition)
+  link.href = url
+  link.download = documentNumber
+    ? pdfFileName(documentNumber)
+    : encodedFileNameMatch?.[1]
+      ? decodeURIComponent(encodedFileNameMatch[1])
+      : fileNameMatch?.[1] || `document-${quoteId}.pdf`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
 }
 
 function NumericEditor({ value, onValueChange, min = 0, max }: { value?: number; onValueChange: (value: number) => void; min?: number; max?: number }) {
@@ -962,8 +962,8 @@ export function QuotesPage() {
 
   const handleDownload = async (quote: Quote) => {
     try {
-      await downloadDocument(quote.id)
-      toast({ title: `${DOCUMENT_TYPE_TR[quote.documentType]} dosyaları indirildi` })
+      await downloadDocument(quote.id, quote.number)
+      toast({ title: `${DOCUMENT_TYPE_TR[quote.documentType]} PDF olarak indirildi` })
     } catch (error: any) {
       toast({ title: error?.response?.data?.detail || error?.message || 'Dosya oluşturulamadı', variant: 'destructive' })
     }
@@ -1614,8 +1614,8 @@ export function QuoteDetailPage() {
 
   const handleDownload = async () => {
     try {
-      await downloadDocument(quote.id)
-      toast({ title: `${DOCUMENT_TYPE_TR[quote.documentType]} dosyaları indirildi` })
+      await downloadDocument(quote.id, quote.number)
+      toast({ title: `${DOCUMENT_TYPE_TR[quote.documentType]} PDF olarak indirildi` })
     } catch (error: any) {
       toast({ title: error?.response?.data?.detail || error?.message || 'Dosya oluşturulamadı', variant: 'destructive' })
     }

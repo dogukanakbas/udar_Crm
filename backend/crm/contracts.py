@@ -5,7 +5,11 @@ from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unicodedata
 from django.conf import settings
 from accounts.models import OrganizationSettings
@@ -13,8 +17,10 @@ from openpyxl.drawing.image import Image as XLImage
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter, range_boundaries
+from openpyxl.worksheet.properties import PageSetupProperties
 
 XLSX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+PDF_CONTENT_TYPE = 'application/pdf'
 EMPTY_BORDER = Border(left=Side(style=None), right=Side(style=None), top=Side(style=None), bottom=Side(style=None))
 EMPTY_FILL = PatternFill(fill_type=None)
 PLACEHOLDER_PATTERN = re.compile(r'\{([A-Za-z0-9_.]+)\}')
@@ -1041,6 +1047,7 @@ def _build_seller_master_document_export(quote):
     _apply_template_placeholders(worksheet, quote, template)
     tail_row = _render_dynamic_product_group_tables(worksheet, quote)
     _render_seller_master_tail(worksheet, quote, tail_row)
+    _prepare_pdf_print_layout(worksheet)
 
     output = BytesIO()
     workbook.save(output)
@@ -1049,6 +1056,273 @@ def _build_seller_master_document_export(quote):
         'content': output,
         'filename': f"{quote.number}-firma-sablonu.xlsx",
         'content_type': XLSX_CONTENT_TYPE,
+    }
+
+
+def _prepare_pdf_print_layout(worksheet):
+    worksheet.page_setup.orientation = 'landscape'
+    worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
+    worksheet.page_setup.fitToWidth = 1
+    worksheet.page_setup.fitToHeight = 0
+    worksheet.sheet_properties.pageSetUpPr = worksheet.sheet_properties.pageSetUpPr or PageSetupProperties()
+    worksheet.sheet_properties.pageSetUpPr.fitToPage = True
+    worksheet.page_margins.left = 0.2
+    worksheet.page_margins.right = 0.2
+    worksheet.page_margins.top = 0.2
+    worksheet.page_margins.bottom = 0.2
+    worksheet.print_options.horizontalCentered = True
+    worksheet.print_area = f'A1:{get_column_letter(worksheet.max_column)}{worksheet.max_row}'
+
+
+def build_document_pdf_export(quote):
+    xlsx_export = build_document_export(quote, template_key=SELLER_MASTER_TEMPLATE_KEY)
+    pdf_stream = _convert_xlsx_stream_to_pdf(xlsx_export['content'], xlsx_export['filename'])
+    return {
+        'content': pdf_stream,
+        'filename': f'{quote.number}.pdf',
+        'content_type': PDF_CONTENT_TYPE,
+    }
+
+
+def _convert_xlsx_stream_to_pdf(xlsx_stream, xlsx_filename):
+    converter = shutil.which('libreoffice') or shutil.which('soffice')
+    if not converter:
+        raise ValueError('PDF oluşturmak için LibreOffice bulunamadı.')
+
+    safe_filename = re.sub(r'[^A-Za-z0-9_.-]+', '_', xlsx_filename or 'document.xlsx')
+    if not safe_filename.lower().endswith('.xlsx'):
+        safe_filename = f'{safe_filename}.xlsx'
+
+    xlsx_stream.seek(0)
+    with tempfile.TemporaryDirectory(prefix='udar_pdf_') as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        input_path = tmp_path / safe_filename
+        output_path = input_path.with_suffix('.pdf')
+        input_path.write_bytes(xlsx_stream.read())
+
+        result = subprocess.run(
+            [
+                converter,
+                '--headless',
+                '--nologo',
+                '--nofirststartwizard',
+                '--convert-to',
+                'pdf',
+                '--outdir',
+                str(tmp_path),
+                str(input_path),
+            ],
+            cwd=str(tmp_path),
+            env={**os.environ, 'HOME': str(tmp_path)},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=90,
+            check=False,
+        )
+        if result.returncode != 0 or not output_path.exists():
+            detail = (result.stderr or result.stdout or '').strip()
+            raise ValueError(f'PDF oluşturulamadı: {detail or "LibreOffice dönüştürme hatası"}')
+
+        pdf_stream = BytesIO(output_path.read_bytes())
+        pdf_stream.seek(0)
+        return pdf_stream
+
+
+def _build_reportlab_document_pdf_export(quote):
+    from html import escape
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.platypus import Image as PdfImage
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    def register_font(name, candidates):
+        for candidate in candidates:
+            path = Path(candidate)
+            if path.exists():
+                try:
+                    pdfmetrics.registerFont(TTFont(name, str(path)))
+                    return name
+                except Exception:
+                    continue
+        return 'Helvetica'
+
+    base_font = register_font('UdarSans', [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        'C:/Windows/Fonts/arial.ttf',
+    ])
+    bold_font = register_font('UdarSansBold', [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+        'C:/Windows/Fonts/arialbd.ttf',
+    ])
+    if bold_font == 'Helvetica':
+        bold_font = 'Helvetica-Bold'
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        leftMargin=12 * mm,
+        rightMargin=12 * mm,
+        topMargin=10 * mm,
+        bottomMargin=10 * mm,
+        title=quote.number,
+    )
+    styles = getSampleStyleSheet()
+    normal = ParagraphStyle('UdarNormal', parent=styles['Normal'], fontName=base_font, fontSize=8, leading=10)
+    small = ParagraphStyle('UdarSmall', parent=normal, fontSize=7, leading=9)
+    title_style = ParagraphStyle('UdarTitle', parent=normal, fontName=bold_font, fontSize=13, alignment=1, textColor=colors.white)
+    heading = ParagraphStyle('UdarHeading', parent=normal, fontName=bold_font, fontSize=10, textColor=colors.HexColor('#203864'))
+
+    def p(value, style=normal):
+        return Paragraph(escape(str(value or '')).replace('\n', '<br/>'), style)
+
+    def money(value):
+        symbol = _currency_symbol(_quote_currency(quote))
+        amount = Decimal(value or 0)
+        return f'{symbol} {amount:,.2f}'
+
+    def basic_table(data, widths=None, header_rows=0):
+        table = Table(data, colWidths=widths, repeatRows=header_rows)
+        table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), base_font),
+            ('FONTSIZE', (0, 0), (-1, -1), 7),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#9FB2C8')),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#EAF2F8')) if header_rows else ('TEXTCOLOR', (0, 0), (0, 0), colors.black),
+            ('FONTNAME', (0, 0), (-1, 0), bold_font) if header_rows else ('TEXTCOLOR', (0, 0), (0, 0), colors.black),
+        ]))
+        return table
+
+    seller = _selected_seller_profile(quote)
+    customer = _customer_snapshot(quote.contract_config or {})
+    logo_path = _seller_logo_media_path(seller)
+    logo = ''
+    if logo_path:
+        try:
+            logo = PdfImage(str(logo_path), width=48 * mm, height=22 * mm, kind='proportional')
+        except Exception:
+            logo = ''
+
+    story = []
+    story.append(Table(
+        [[logo, p(f"{_normalize_display_name(seller.get('display_name', ''))}\n{seller.get('email', '')} / {seller.get('phone', '')}", normal)]],
+        colWidths=[85 * mm, 170 * mm],
+    ))
+    story.append(Spacer(1, 4))
+    title_table = Table([[p('Sözleşme' if quote.document_type == 'Contract' else 'Teklif', title_style)]], colWidths=[255 * mm])
+    title_table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#203864'))]))
+    story.append(title_table)
+    story.append(Spacer(1, 6))
+
+    doc_date = _timezone_fallback(quote.created_at).strftime('%d.%m.%Y')
+    story.append(basic_table([
+        [p('TARİH', heading), p(doc_date), p(f'{quote.document_type == "Contract" and "Sözleşme" or "Teklif"} NUMARASI', heading), p(quote.number)],
+        [p('HAZIRLAYAN', heading), p(_resolve_prepared_by_name(quote)), p('GEÇERLİLİK TARİHİ', heading), p(format_validity_text(quote.valid_until))],
+    ], widths=[35 * mm, 92 * mm, 42 * mm, 86 * mm]))
+    story.append(Spacer(1, 6))
+
+    story.append(p('SATIŞI YAPAN FİRMA', heading))
+    story.append(basic_table([
+        [p('ÜNVAN', heading), p(_normalize_display_name(seller.get('display_name', '')))],
+        [p('VERGİ DAİRESİ / NO', heading), p(_join_tax(seller.get('tax_office', ''), seller.get('tax_number', '')))],
+        [p('ADRES', heading), p(seller.get('address', ''))],
+        [p('TELEFON / E-POSTA', heading), p(_join_contact(seller.get('phone', ''), seller.get('email', '')))],
+    ], widths=[45 * mm, 210 * mm]))
+    story.append(Spacer(1, 6))
+
+    story.append(p('ALICI BİLGİLERİ', heading))
+    story.append(basic_table([
+        [p('CARİ ÜNVANI', heading), p(customer.get('name') or getattr(quote.customer, 'name', ''))],
+        [p('VERGİ DAİRESİ / NO', heading), p(_join_tax(customer.get('tax_office'), customer.get('tax_number')))],
+        [p('ADRES', heading), p(customer.get('address') or '')],
+        [p('YETKİLİ', heading), p(customer.get('authorized_person') or '')],
+        [p('TELEFON / E-POSTA', heading), p(_join_contact(customer.get('phone'), customer.get('email')))],
+    ], widths=[45 * mm, 210 * mm]))
+    story.append(Spacer(1, 8))
+
+    groups = _build_dynamic_line_groups(quote)
+    for group in groups:
+        rows = [[p('Kod', heading), p('Ürün', heading), p('Miktar', heading), p('Birim', heading), p('Liste Fiyatı', heading), p('Birim Net', heading), p('Tutar', heading)]]
+        quantity_total = Decimal('0')
+        for line in group['lines']:
+            details = dict(line.details or {})
+            product = getattr(line, 'product', None)
+            qty = Decimal(line.qty or 0)
+            quantity_total += qty
+            rows.append([
+                p(details.get('code') or getattr(product, 'sku', '') or '', small),
+                p(line.name or '', small),
+                p(f'{qty:,.2f}', small),
+                p(line.unit or 'Adet', small),
+                p(money(line.unit_price), small),
+                p(money(_net_unit_price(line)), small),
+                p(money(_line_subtotal(line)), small),
+            ])
+        rows.append(['', '', p(f'{quantity_total:,.2f}', small), '', '', p('Yekün', small), p(money(sum((_line_subtotal(line) + _line_tax(line) for line in group['lines']), Decimal('0'))), small)])
+        story.append(p(_turkish_upper(group['label']), heading))
+        story.append(basic_table(rows, widths=[28 * mm, 78 * mm, 22 * mm, 20 * mm, 33 * mm, 33 * mm, 33 * mm], header_rows=1))
+        story.append(Spacer(1, 6))
+
+    service_rows = [[p('Kod', heading), p('Ürün / Hizmet', heading), p('Miktar', heading), p('Ara Toplam', heading), p('K.D.V.', heading), p('Yekün', heading)]]
+    subtotal_total = Decimal('0')
+    tax_total = Decimal('0')
+    grand_total = Decimal('0')
+    qty_total = Decimal('0')
+    for group in groups:
+        for line in group['lines']:
+            details = dict(line.details or {})
+            product = getattr(line, 'product', None)
+            subtotal = _line_subtotal(line)
+            tax = _line_tax(line)
+            qty = Decimal(line.qty or 0)
+            subtotal_total += subtotal
+            tax_total += tax
+            grand_total += subtotal + tax
+            qty_total += qty
+            service_rows.append([p(details.get('code') or getattr(product, 'sku', '') or '', small), p(line.name or '', small), p(f'{qty:,.2f}', small), p(money(subtotal), small), p(money(tax), small), p(money(subtotal + tax), small)])
+    service_rows.append([p('TOPLAM', small), '', p(f'{qty_total:,.2f}', small), p(money(subtotal_total), small), p(money(tax_total), small), p(money(grand_total), small)])
+    story.append(p('HİZMETLER & MONTAJ', heading))
+    story.append(basic_table(service_rows, widths=[28 * mm, 94 * mm, 24 * mm, 34 * mm, 32 * mm, 35 * mm], header_rows=1))
+    story.append(Spacer(1, 8))
+
+    config = quote.contract_config or {}
+    story.append(p('ÖDEME VE TESLİM', heading))
+    story.append(basic_table([
+        [p('ÖDEME KOŞULU', heading), p(quote.payment_terms or config.get('paymentOption') or config.get('payment_option') or '')],
+        [p('TESLİM TİPİ', heading), p(config.get('deliveryType') or config.get('delivery_type') or '')],
+        [p('TESLİM TARİHİ', heading), p(quote.delivery_terms or '')],
+    ], widths=[45 * mm, 210 * mm]))
+    story.append(Spacer(1, 6))
+
+    terms = parse_terms_text(config.get('termsText') or config.get('terms_text') or DEFAULT_TERMS_TEXT)
+    if quote.document_type == 'Contract':
+        terms += parse_contract_notes_text(config.get('contractNotesText') or config.get('contract_notes_text') or '')
+    if terms:
+        story.append(p('SÖZLEŞME KOŞULLARI' if quote.document_type == 'Contract' else 'TEKLİF KOŞULLARI', heading))
+        story.append(basic_table([[p(term, small)] for term in terms], widths=[255 * mm]))
+        story.append(Spacer(1, 6))
+
+    bank_rows = [[p('Banka', heading), p('IBAN', heading)]]
+    for account in seller.get('bank_accounts') or []:
+        if account.get('bank') and account.get('iban'):
+            bank_rows.append([p(_normalize_bank_name(account.get('bank', '')), small), p(account.get('iban', ''), small)])
+    story.append(p('FİRMA ÜNVANI & IBANLAR', heading))
+    story.append(basic_table(bank_rows, widths=[70 * mm, 185 * mm], header_rows=1))
+    story.append(Spacer(1, 8))
+
+    story.append(basic_table([[p(f"SATICI\n{_normalize_display_name(seller.get('display_name', ''))}", normal), p(f"ALICI\n{customer.get('name') or getattr(quote.customer, 'name', '') or ''}", normal)]], widths=[127 * mm, 128 * mm]))
+
+    doc.build(story)
+    buffer.seek(0)
+    return {
+        'content': buffer,
+        'filename': f'{quote.number}.pdf',
+        'content_type': PDF_CONTENT_TYPE,
     }
 
 

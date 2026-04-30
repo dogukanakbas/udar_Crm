@@ -18,6 +18,7 @@ from PIL import Image, UnidentifiedImageError
 from .models import Quote, QuoteLine, PricingRule, BusinessPartner, Lead, Opportunity, Contact
 from .contracts import (
     build_document_export,
+    build_document_pdf_export,
     get_default_seller_profiles,
     get_seller_profiles,
     get_template_download,
@@ -462,6 +463,28 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='export-xlsx')
     def export_xlsx(self, request, pk=None):
+        return self.export_pdf(request, pk=pk)
+
+    @action(detail=True, methods=['get'], url_path='export-pdf')
+    def export_pdf(self, request, pk=None):
+        quote = self.get_object()
+        try:
+            export = build_document_pdf_export(quote)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        response = FileResponse(
+            export['content'],
+            as_attachment=True,
+            filename=export['filename'],
+            content_type=export['content_type'],
+        )
+        response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response['Pragma'] = 'no-cache'
+        response['Expires'] = '0'
+        return response
+
+    @action(detail=True, methods=['get'], url_path='export-excel')
+    def export_excel(self, request, pk=None):
         quote = self.get_object()
         try:
             export = build_document_export(quote, template_key=request.query_params.get('template_key'))
@@ -481,7 +504,7 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='export-files')
     def export_files(self, request, pk=None):
         quote = self.get_object()
-        return Response({'files': list_document_exports(quote)})
+        return Response({'files': [{'filename': f'{quote.number}.pdf', 'template_key': ''}]})
 
     @action(detail=False, methods=['get'], url_path='template-library')
     def template_library(self, request):
