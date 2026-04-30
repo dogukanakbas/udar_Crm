@@ -949,7 +949,7 @@ def export_cnc_docx_bytes(data: dict[str, Any]) -> bytes:
         rr[1].text = str(r.get('target_total') or 0)
         rr[2].text = str(r.get('realized_total') or 0)
         rr[3].text = str(r.get('remaining_total') or 0)
-    doc.add_heading('GOREV ICI KATEGORI OZETI (ILK 20)', level=1)
+    doc.add_heading('GOREV ICI KATEGORI OZETI', level=1)
     t_line = doc.add_table(rows=1, cols=6)
     _grid(t_line)
     hl = t_line.rows[0].cells
@@ -978,7 +978,7 @@ def export_cnc_docx_bytes(data: dict[str, Any]) -> bytes:
         row['realized_total'] += int(r.get('realized_total') or 0)
         row['line_count'] += 1
     grouped_rows = sorted(grouped.values(), key=lambda x: (x['task_title'], x['category_code']))
-    for r in grouped_rows[:20]:
+    for r in grouped_rows:
         rr = t_line.add_row().cells
         rr[0].text = str(r.get('task_title') or '')
         rr[1].text = str(r.get('category_code') or '')
