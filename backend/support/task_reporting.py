@@ -319,6 +319,9 @@ def build_full_report(org_id: int, year: int, month: int | None, filters: dict) 
     stage_rows: list[dict[str, Any]] = []
     stage_qty_rows: list[dict[str, Any]] = []
     category_breakdown_map: dict[str, dict[str, Any]] = {}
+    color_breakdown_map: dict[str, dict[str, Any]] = {}
+    size_breakdown_map: dict[str, dict[str, Any]] = {}
+    line_detail_rows: list[dict[str, Any]] = []
     team_perf_map: dict[str, dict[str, Any]] = {}
 
     for t in tasks_for_master:
@@ -379,6 +382,9 @@ def build_full_report(org_id: int, year: int, month: int | None, filters: dict) 
         )
         for idx, ln in enumerate(lines):
             cat = str((ln or {}).get('model_code') or '').strip() or 'Kategori Yok'
+            color = str((ln or {}).get('product_color') or '').strip() or 'Renk Yok'
+            color_code = str((ln or {}).get('product_color_code') or '').strip()
+            sizes = list((ln or {}).get('model_sizes') or [])
             try:
                 line_target = max(0, int((ln or {}).get('quantity') or 0))
             except (TypeError, ValueError):
@@ -405,6 +411,44 @@ def build_full_report(org_id: int, year: int, month: int | None, filters: dict) 
             )
             cat_row['target_total'] += line_target
             cat_row['realized_total'] += line_realized
+            color_key = f'{color} ({color_code})' if color_code else color
+            color_row = color_breakdown_map.setdefault(
+                color_key,
+                {'color': color, 'color_code': color_code, 'target_total': 0, 'realized_total': 0},
+            )
+            color_row['target_total'] += line_target
+            color_row['realized_total'] += line_realized
+            if sizes:
+                for sz in sizes:
+                    sk = str(sz).strip() or 'Olcu Yok'
+                    srow = size_breakdown_map.setdefault(
+                        sk,
+                        {'size': sk, 'target_total': 0, 'realized_total': 0},
+                    )
+                    srow['target_total'] += line_target
+                    srow['realized_total'] += line_realized
+            else:
+                srow = size_breakdown_map.setdefault(
+                    'Olcu Yok',
+                    {'size': 'Olcu Yok', 'target_total': 0, 'realized_total': 0},
+                )
+                srow['target_total'] += line_target
+                srow['realized_total'] += line_realized
+            line_detail_rows.append(
+                {
+                    'task_id': t.id,
+                    'task_title': t.title,
+                    'product_line_index': idx,
+                    'category_code': cat,
+                    'color': color,
+                    'color_code': color_code,
+                    'sizes': ', '.join(str(x) for x in sizes) if sizes else '',
+                    'target_total': line_target,
+                    'realized_total': line_realized,
+                    'remaining_total': max(0, line_target - line_realized),
+                    'status': t.status,
+                }
+            )
             fq = float((ln or {}).get('fire_qty') or 0)
             fr = str((ln or {}).get('fire_reason') or '').strip()
             fi = str((ln or {}).get('fire_image_data_url') or '').strip()
@@ -494,6 +538,33 @@ def build_full_report(org_id: int, year: int, month: int | None, filters: dict) 
             }
         )
     category_rows.sort(key=lambda x: x['category_code'])
+    color_rows = []
+    for v in color_breakdown_map.values():
+        tgt = int(v.get('target_total') or 0)
+        done = int(v.get('realized_total') or 0)
+        color_rows.append(
+            {
+                'color': v.get('color') or 'Renk Yok',
+                'color_code': v.get('color_code') or '',
+                'target_total': tgt,
+                'realized_total': done,
+                'remaining_total': max(0, tgt - done),
+            }
+        )
+    color_rows.sort(key=lambda x: (x['color'], x['color_code']))
+    size_rows = []
+    for v in size_breakdown_map.values():
+        tgt = int(v.get('target_total') or 0)
+        done = int(v.get('realized_total') or 0)
+        size_rows.append(
+            {
+                'size': v.get('size') or 'Olcu Yok',
+                'target_total': tgt,
+                'realized_total': done,
+                'remaining_total': max(0, tgt - done),
+            }
+        )
+    size_rows.sort(key=lambda x: x['size'])
 
     return {
         'year': year,
@@ -513,6 +584,9 @@ def build_full_report(org_id: int, year: int, month: int | None, filters: dict) 
             'stage_durations': sorted(stage_rows, key=lambda r: (r['task_id'], r['at'])),
             'stage_qty_detail': stage_qty_rows,
             'category_breakdown': category_rows,
+            'color_breakdown': color_rows,
+            'size_breakdown': size_rows,
+            'line_detail': line_detail_rows,
         },
     }
 
@@ -542,6 +616,9 @@ def export_xlsx_bytes(data: dict[str, Any]) -> bytes:
     ws0.append(['Fire kayıt satırı', len(master.get('fire_analysis') or [])])
     ws0.append(['Aşama geçiş satırı', len(master.get('stage_durations') or [])])
     ws0.append(['Kategori kırılım satırı', len(master.get('category_breakdown') or [])])
+    ws0.append(['Renk kırılım satırı', len(master.get('color_breakdown') or [])])
+    ws0.append(['Olcu kırılım satırı', len(master.get('size_breakdown') or [])])
+    ws0.append(['Kalem detay satırı', len(master.get('line_detail') or [])])
     # Görev Detayı
     ws1 = wb.create_sheet('Görev Detayı')
     ws1.append(
@@ -652,6 +729,32 @@ def export_xlsx_bytes(data: dict[str, Any]) -> bytes:
     ws7.append(['Kategori Kodu', 'Toplam Hedef', 'Gerçekleşen', 'Kalan'])
     for r in master.get('category_breakdown', []):
         ws7.append([r['category_code'], r['target_total'], r['realized_total'], r['remaining_total']])
+    ws8 = wb.create_sheet('Renk Kırılımı')
+    ws8.append(['Renk', 'Renk Kodu', 'Toplam Hedef', 'Gerçekleşen', 'Kalan'])
+    for r in master.get('color_breakdown', []):
+        ws8.append([r['color'], r.get('color_code', ''), r['target_total'], r['realized_total'], r['remaining_total']])
+    ws9 = wb.create_sheet('Olcu Kırılımı')
+    ws9.append(['Olcu', 'Toplam Hedef', 'Gerçekleşen', 'Kalan'])
+    for r in master.get('size_breakdown', []):
+        ws9.append([r['size'], r['target_total'], r['realized_total'], r['remaining_total']])
+    ws10 = wb.create_sheet('Kalem Detayı')
+    ws10.append(['Görev ID', 'Görev', 'Kalem', 'Kategori', 'Renk', 'Renk Kod', 'Olculer', 'Hedef', 'Gerçekleşen', 'Kalan', 'Durum'])
+    for r in master.get('line_detail', []):
+        ws10.append(
+            [
+                r['task_id'],
+                r['task_title'],
+                r['product_line_index'],
+                r['category_code'],
+                r['color'],
+                r.get('color_code', ''),
+                r.get('sizes', ''),
+                r['target_total'],
+                r['realized_total'],
+                r['remaining_total'],
+                r['status'],
+            ]
+        )
 
     # Legacy detay (geri uyumluluk)
     ws6 = wb.create_sheet('Görev detay (legacy)')
@@ -714,6 +817,12 @@ def export_xlsx_bytes(data: dict[str, Any]) -> bytes:
 def export_docx_bytes(data: dict[str, Any], title: str = 'Görev Raporu') -> bytes:
     from docx import Document
 
+    def _grid(tbl):
+        try:
+            tbl.style = 'Table Grid'
+        except Exception:
+            pass
+
     doc = Document()
     doc.add_heading(title, 0)
     p = doc.add_paragraph()
@@ -724,6 +833,7 @@ def export_docx_bytes(data: dict[str, Any], title: str = 'Görev Raporu') -> byt
 
     doc.add_heading('Aylık özet', level=1)
     t1 = doc.add_table(rows=1, cols=3)
+    _grid(t1)
     t1.rows[0].cells[0].text = 'Ay'
     t1.rows[0].cells[1].text = 'Tamamlanan'
     t1.rows[0].cells[2].text = 'Oluşturulan'
@@ -735,6 +845,7 @@ def export_docx_bytes(data: dict[str, Any], title: str = 'Görev Raporu') -> byt
 
     doc.add_heading('Ekip bazlı', level=1)
     t2 = doc.add_table(rows=1, cols=3)
+    _grid(t2)
     hdr2 = t2.rows[0].cells
     hdr2[0].text = 'Ekip'
     hdr2[1].text = 'Tamamlanan (dönem)'
@@ -747,6 +858,7 @@ def export_docx_bytes(data: dict[str, Any], title: str = 'Görev Raporu') -> byt
 
     doc.add_heading('Çalışan bazlı', level=1)
     t3 = doc.add_table(rows=1, cols=4)
+    _grid(t3)
     hdr3 = t3.rows[0].cells
     hdr3[0].text = 'Kullanıcı'
     hdr3[1].text = 'Tamamlanan'
@@ -775,6 +887,11 @@ def export_cnc_docx_bytes(data: dict[str, Any]) -> bytes:
     Sunucuda sablon dosyasi bulunursa onu baz alir; yoksa ayni duzen koddan kurulur.
     """
     from docx import Document
+    def _grid(tbl):
+        try:
+            tbl.style = 'Table Grid'
+        except Exception:
+            pass
 
     template_candidates = [
         '/app/docs/2-CNC .docx',
@@ -798,6 +915,7 @@ def export_cnc_docx_bytes(data: dict[str, Any]) -> bytes:
     fire_rows = master.get('fire_analysis') or []
     stage_qty_rows = master.get('stage_qty_detail') or []
     category_rows = master.get('category_breakdown') or []
+    line_detail_rows = master.get('line_detail') or []
 
     doc.add_paragraph(
         f"Donem: {data.get('period_start', '')} - {data.get('period_end', '')}\n"
@@ -819,6 +937,7 @@ def export_cnc_docx_bytes(data: dict[str, Any]) -> bytes:
 
     doc.add_heading('KATEGORI KIRILIMI', level=1)
     t_cat = doc.add_table(rows=1, cols=4)
+    _grid(t_cat)
     hc = t_cat.rows[0].cells
     hc[0].text = 'KATEGORI KODU'
     hc[1].text = 'TOPLAM HEDEF'
@@ -830,9 +949,72 @@ def export_cnc_docx_bytes(data: dict[str, Any]) -> bytes:
         rr[1].text = str(r.get('target_total') or 0)
         rr[2].text = str(r.get('realized_total') or 0)
         rr[3].text = str(r.get('remaining_total') or 0)
+    doc.add_heading('GOREV ICI KATEGORI OZETI (ILK 20)', level=1)
+    t_line = doc.add_table(rows=1, cols=6)
+    _grid(t_line)
+    hl = t_line.rows[0].cells
+    hl[0].text = 'GOREV'
+    hl[1].text = 'KATEGORI'
+    hl[2].text = 'HEDEF TOPLAM'
+    hl[3].text = 'GERCEKLESEN TOPLAM'
+    hl[4].text = 'KALAN'
+    hl[5].text = 'ADET SATIR SAYISI'
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for r in line_detail_rows:
+        task_title = str(r.get('task_title') or '')
+        cat = str(r.get('category_code') or 'Kategori Yok')
+        key = (task_title, cat)
+        row = grouped.setdefault(
+            key,
+            {
+                'task_title': task_title,
+                'category_code': cat,
+                'target_total': 0,
+                'realized_total': 0,
+                'line_count': 0,
+            },
+        )
+        row['target_total'] += int(r.get('target_total') or 0)
+        row['realized_total'] += int(r.get('realized_total') or 0)
+        row['line_count'] += 1
+    grouped_rows = sorted(grouped.values(), key=lambda x: (x['task_title'], x['category_code']))
+    for r in grouped_rows[:20]:
+        rr = t_line.add_row().cells
+        rr[0].text = str(r.get('task_title') or '')
+        rr[1].text = str(r.get('category_code') or '')
+        rr[2].text = str(r.get('target_total') or 0)
+        rr[3].text = str(r.get('realized_total') or 0)
+        rr[4].text = str(max(0, int(r.get('target_total') or 0) - int(r.get('realized_total') or 0)))
+        rr[5].text = str(r.get('line_count') or 0)
+
+    # Görev bazlı kategori kırılımı: sayı farklılıklarını izlemek için
+    doc.add_heading('GOREV BAZLI KATEGORI DETAYI', level=1)
+    t_cat_task = doc.add_table(rows=1, cols=6)
+    _grid(t_cat_task)
+    hct = t_cat_task.rows[0].cells
+    hct[0].text = 'GOREV ID'
+    hct[1].text = 'GOREV'
+    hct[2].text = 'KATEGORI KODU'
+    hct[3].text = 'HEDEF'
+    hct[4].text = 'GERCEKLESEN'
+    hct[5].text = 'KALAN'
+    # task_detail içinden kategori satırlarını türet
+    # (excelden gelen model_code bilgisi product line üzerinde olduğu için master hesapta mevcut)
+    # not: burada task başına kategori dağılımını doğrudan task_detail+fire/title ile gösteriyoruz.
+    # daha ileri detay için xlsx "Kategori Kırılımı" sheeti referans alınabilir.
+    for t in (master.get('task_detail') or [])[:500]:
+        # Bu tabloda görev satırını tek satır veriyoruz; kategori kırılımı üst tabloda toplu.
+        rr = t_cat_task.add_row().cells
+        rr[0].text = str(t.get('task_id') or '')
+        rr[1].text = str(t.get('title') or '')
+        rr[2].text = 'Toplu'
+        rr[3].text = str(t.get('target_total') or 0)
+        rr[4].text = str(t.get('realized_total') or 0)
+        rr[5].text = str(t.get('remaining_total') or 0)
 
     doc.add_heading('EKIP BAZLI OZET', level=1)
     t_team = doc.add_table(rows=1, cols=4)
+    _grid(t_team)
     h = t_team.rows[0].cells
     h[0].text = 'BOLUM'
     h[1].text = 'URETILEN TOPLAM'
@@ -847,6 +1029,7 @@ def export_cnc_docx_bytes(data: dict[str, Any]) -> bytes:
 
     doc.add_heading('SIPARIS / GOREV DETAYI', level=1)
     t_tasks = doc.add_table(rows=1, cols=8)
+    _grid(t_tasks)
     h2 = t_tasks.rows[0].cells
     h2[0].text = 'IS EMRI KODU'
     h2[1].text = 'GOREV'
@@ -869,6 +1052,7 @@ def export_cnc_docx_bytes(data: dict[str, Any]) -> bytes:
 
     doc.add_heading('FIRE BILGILERI', level=1)
     t_fire = doc.add_table(rows=1, cols=7)
+    _grid(t_fire)
     h3 = t_fire.rows[0].cells
     h3[0].text = 'GOREV ID'
     h3[1].text = 'MODEL KODU'

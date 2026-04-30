@@ -148,6 +148,15 @@ def _extract_color(*texts):
     return ''
 
 
+def _map_excel_status(raw: str) -> str:
+    s = _norm_text(raw).lower()
+    if s in ('aktif', 'active', 'in-progress', 'in progress', 'devam ediyor'):
+        return 'in-progress'
+    if s in ('kapanmış', 'kapandi', 'kapandı', 'closed', 'done', 'tamamlandı'):
+        return 'done'
+    return 'todo'
+
+
 def _task_has_fire_record(task):
     """Eksik üretim kapanışı için en az bir kalemde fire adedi+sebebi girilmiş olmalı."""
     lines = list(getattr(task, 'product_lines', None) or [])
@@ -440,6 +449,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
         product_lines = []
         refs = []
+        parsed_statuses = []
         for r in ws.iter_rows(min_row=2, values_only=True):
             prod_name = _norm_text(r[idx['ÜRETİLECEK ÜRÜN İSMİ']]) if idx['ÜRETİLECEK ÜRÜN İSMİ'] < len(r) else ''
             qty_raw = r[idx['ÜRETİM MİKTARI']] if idx['ÜRETİM MİKTARI'] < len(r) else None
@@ -450,6 +460,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             s_sira = _norm_text(r[idx['SİPARİŞ SIRA']]) if idx['SİPARİŞ SIRA'] < len(r) else ''
             ac1 = _norm_text(r[idx['SİPARİŞ AÇIKLAMA_1']]) if idx['SİPARİŞ AÇIKLAMA_1'] < len(r) else ''
             ac2 = _norm_text(r[idx['SİPARİŞ AÇIKLAMA_2']]) if idx['SİPARİŞ AÇIKLAMA_2'] < len(r) else ''
+            st_raw = _norm_text(r[idx['DURUMU']]) if 'DURUMU' in idx and idx['DURUMU'] < len(r) else ''
             sizes = _extract_sizes(ac1, ac2)
             color = _extract_color(ac1, ac2)
             qty = _parse_int_qty(qty_raw)
@@ -457,6 +468,8 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             brief = " / ".join([x for x in [prod_name, ac1, ac2] if x]).strip()[:600]
             if s_seri or s_sira:
                 refs.append(f'{s_seri}-{s_sira}'.strip('-'))
+            if st_raw:
+                parsed_statuses.append(_map_excel_status(st_raw))
             product_lines.append(
                 {
                     'mode': 'manual',
@@ -485,11 +498,19 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         ref_text = ", ".join(uniq_refs[:5]) if uniq_refs else fname
         title = f'Excel Sipariş: {ref_text} ({len(product_lines)} kalem)'
         qty_total = max(1, sum(int(pl.get('quantity') or 1) for pl in product_lines))
+        # Durumu kolonundan görev durumunu türet:
+        # herhangi bir aktif varsa in-progress; hepsi done ise done; aksi todo
+        derived_status = 'todo'
+        if parsed_statuses:
+            if any(x == 'in-progress' for x in parsed_statuses):
+                derived_status = 'in-progress'
+            elif all(x == 'done' for x in parsed_statuses):
+                derived_status = 'done'
         return Response(
             {
                 'draft': {
                     'title': title,
-                    'status': 'todo',
+                    'status': derived_status,
                     'priority': 'medium',
                     'planned_hours': 0,
                     'planned_cost': 0,
