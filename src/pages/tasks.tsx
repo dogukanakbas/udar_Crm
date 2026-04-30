@@ -85,6 +85,23 @@ function pickDefaultTaskOwner(users: UserLite[], explicitOwner?: string): string
 const MENTION_REGEX = /@([\w.-]+)/g
 const MAX_FILE_MB = 10
 const ALLOWED_FILE_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'application/pdf']
+type TaskModelApiRow = {
+  code: string
+  image_url?: string
+  duration_minutes: number
+  sizes: string[]
+  blade_min?: number
+  blade_max?: number
+  width_mm?: number
+  height_mm?: number
+  thickness_mm?: number
+}
+type OrgSettingsApi = { working_hours_start: string; working_hours_end: string; working_days: number[] } | null
+let taskModelsCache: TaskModelApiRow[] | null = null
+let taskModelsReq: Promise<TaskModelApiRow[]> | null = null
+let orgSettingsCache: OrgSettingsApi = null
+let orgSettingsReq: Promise<OrgSettingsApi> | null = null
+let orgSettingsLoaded = false
 const TASK_TEMPLATES: { id: string; name: string; checklist: string[] }[] = [
   { id: 'onboarding', name: 'Onboarding', checklist: ['Gereksinim topla', 'Ölçümleri tanımla', 'Kickoff planla'] },
   { id: 'bugfix', name: 'Bug fix', checklist: ['Reprodüksiyon', 'Kök neden analizi', 'Fix PR', 'Test ve onay'] },
@@ -3291,27 +3308,55 @@ function TaskModal({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [droppedFiles, setDroppedFiles] = useState<File[]>([])
-  const [apiTaskModels, setApiTaskModels] = useState<
-    {
-      code: string
-      image_url?: string
-      duration_minutes: number
-      sizes: string[]
-      blade_min?: number
-      blade_max?: number
-      width_mm?: number
-      height_mm?: number
-      thickness_mm?: number
-    }[]
-  >([])
-  const [orgSettings, setOrgSettings] = useState<{ working_hours_start: string; working_hours_end: string; working_days: number[] } | null>(null)
+  const [apiTaskModels, setApiTaskModels] = useState<TaskModelApiRow[]>(taskModelsCache || [])
+  const [orgSettings, setOrgSettings] = useState<OrgSettingsApi>(orgSettingsLoaded ? orgSettingsCache : null)
   const errors = form.formState.errors
 
   useEffect(() => {
-    api.get('/task-models/').then((r) => setApiTaskModels(r.data || [])).catch(() => setApiTaskModels([]))
+    if (taskModelsCache) {
+      setApiTaskModels(taskModelsCache)
+      return
+    }
+    if (!taskModelsReq) {
+      taskModelsReq = api
+        .get('/task-models/')
+        .then((r) => {
+          taskModelsCache = (r.data || []) as TaskModelApiRow[]
+          return taskModelsCache
+        })
+        .catch(() => {
+          taskModelsCache = []
+          return []
+        })
+        .finally(() => {
+          taskModelsReq = null
+        })
+    }
+    taskModelsReq.then((rows) => setApiTaskModels(rows))
   }, [])
   useEffect(() => {
-    api.get('/auth/organization-settings/').then((r) => setOrgSettings(r.data)).catch(() => setOrgSettings(null))
+    if (orgSettingsLoaded) {
+      setOrgSettings(orgSettingsCache)
+      return
+    }
+    if (!orgSettingsReq) {
+      orgSettingsReq = api
+        .get('/auth/organization-settings/')
+        .then((r) => {
+          orgSettingsCache = (r.data || null) as OrgSettingsApi
+          orgSettingsLoaded = true
+          return orgSettingsCache
+        })
+        .catch(() => {
+          orgSettingsCache = null
+          orgSettingsLoaded = true
+          return null
+        })
+        .finally(() => {
+          orgSettingsReq = null
+        })
+    }
+    orgSettingsReq.then((cfg) => setOrgSettings(cfg))
   }, [])
   const { toast } = useToast()
   const watchLines =
