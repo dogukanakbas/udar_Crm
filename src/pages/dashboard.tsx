@@ -88,21 +88,26 @@ export function DashboardPage() {
   }, [widgets])
 
   useEffect(() => {
-    api.get('/dashboard/kpis/').then((res) => {
-      const d = res.data || {}
-      setKpiTotals({
-        revenue: d.revenue ?? 0,
-        pipeline: d.pipeline ?? 0,
-        ar: d.ar ?? 0,
-        inventory: d.inventory_value ?? 0,
-        tickets: d.tickets_open ?? 0,
+    api
+      .get('/dashboard/kpis/')
+      .then((res) => {
+        const d = res.data || {}
+        setKpiTotals({
+          revenue: d.revenue ?? 0,
+          pipeline: d.pipeline ?? 0,
+          ar: d.ar ?? 0,
+          inventory: d.inventory_value ?? 0,
+          tickets: d.tickets_open ?? 0,
+        })
+        setTodayTasks(d.today_tasks || todayTasks)
+        setTodayOverdueInvoices(d.overdue_invoices || todayOverdueInvoices)
+        setTodayLowStock(d.low_stock || todayLowStock)
+        setTodayMeetings(d.meetings || todayMeetings)
+        setKpiDate(formatDate(new Date()))
       })
-      setTodayTasks(d.today_tasks || todayTasks)
-      setTodayOverdueInvoices(d.overdue_invoices || todayOverdueInvoices)
-      setTodayLowStock(d.low_stock || todayLowStock)
-      setTodayMeetings(d.meetings || todayMeetings)
-      setKpiDate(formatDate(new Date()))
-    })
+      .catch(() => {
+        // 429 dahil durumlarda dashboard UI kırılmasın.
+      })
     const role = typeof window !== 'undefined' ? localStorage.getItem('current-user-role') : null
     if (role !== 'Worker') {
       api.get('/approvals/pending/').then((res) => setPendingApprovals(res.data || [])).catch(() => setPendingApprovals([]))
@@ -129,13 +134,8 @@ export function DashboardPage() {
   }
 
   useEffect(() => {
-    if (isWorker) {
-      api
-        .get('/tasks/my-team-queue/')
-        .then((res) => setTeamQueueTasks((res.data || []).map(mapTaskFromApi)))
-        .catch(() => setTeamQueueTasks([]))
-    }
-  }, [isWorker, data.tasks])
+    if (isWorker) fetchTeamQueue()
+  }, [isWorker])
 
   const totals = {
     revenue: data.invoices.reduce((sum, inv) => sum + inv.amount, 0),

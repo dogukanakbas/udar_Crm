@@ -231,9 +231,78 @@ class TaskSerializer(serializers.ModelSerializer):
         if update_fields:
             instance.save(update_fields=list(dict.fromkeys(update_fields + ['updated_at'])))
 
+    def _apply_done_status_defaults(self, instance):
+        """Durumu done olan görevlerde kalem üretimini hedefe eşitle."""
+        if getattr(instance, 'status', None) != 'done':
+            return
+
+        update_fields = []
+        lines = list(instance.product_lines or [])
+        if lines:
+            changed = False
+            for ln in lines:
+                row = dict(ln or {})
+                try:
+                    qty = max(0, int(row.get('quantity') or 0))
+                except (TypeError, ValueError):
+                    qty = 0
+                if int(row.get('qty_produced') or 0) != qty:
+                    row['qty_produced'] = qty
+                    changed = True
+                ln.clear()
+                ln.update(row)
+            if changed:
+                instance.product_lines = lines
+                update_fields.append('product_lines')
+
+        wf_ids = workflow_team_id_list(instance)
+        if wf_ids:
+            state = ensure_workflow_state(instance) or {}
+            changed_state = False
+            qmap_full = {}
+            for i, ln in enumerate(lines):
+                try:
+                    qmap_full[str(i)] = max(0, int((ln or {}).get('quantity') or 0))
+                except (TypeError, ValueError):
+                    qmap_full[str(i)] = 0
+            total_done = 0
+            for v in qmap_full.values():
+                total_done += int(v or 0)
+
+            for tid in wf_ids:
+                key = str(tid)
+                st = dict(state.get(key, {}) or {})
+                if st.get('stage_done') is not True:
+                    st['stage_done'] = True
+                    changed_state = True
+                if st.get('pending_approval') is not False:
+                    st['pending_approval'] = False
+                    changed_state = True
+                if int(st.get('qty_done') or 0) != total_done:
+                    st['qty_done'] = total_done
+                    changed_state = True
+                if dict(st.get('qty_done_by_line') or {}) != qmap_full:
+                    st['qty_done_by_line'] = qmap_full
+                    changed_state = True
+                if st.get('assignee_id') is not None:
+                    st['assignee_id'] = None
+                    changed_state = True
+                state[key] = st
+            if changed_state:
+                instance.workflow_stage_state = state
+                update_fields.append('workflow_stage_state')
+
+        if instance.assignee_id is not None:
+            instance.assignee = None
+            update_fields.append('assignee')
+
+        if update_fields:
+            instance.save(update_fields=list(dict.fromkeys(update_fields + ['updated_at'])))
+
     def create(self, validated_data):
         instance = super().create(validated_data)
         self._sync_product_lines_and_workflow(instance)
+        self._apply_done_status_defaults(instance)
         return instance
 
     def update(self, instance, validated_data):
@@ -251,6 +320,7 @@ class TaskSerializer(serializers.ModelSerializer):
             validated_data['product_lines'] = merged
         instance = super().update(instance, validated_data)
         self._sync_product_lines_and_workflow(instance)
+        self._apply_done_status_defaults(instance)
         return instance
 
 

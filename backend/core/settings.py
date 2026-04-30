@@ -126,8 +126,9 @@ SIMPLE_JWT = {
 
 # Throttling (configurable via env)
 THROTTLE_RATES = {
-    'user': os.getenv('THROTTLE_USER', '1000/day'),
-    'anon': os.getenv('THROTTLE_ANON', '100/day'),
+    # Yoğun dashboard/hydrate akışlarında 429 patlamasını azaltmak için daha gerçekçi varsayılanlar.
+    'user': os.getenv('THROTTLE_USER', '300/min'),
+    'anon': os.getenv('THROTTLE_ANON', '120/min'),
     'login': os.getenv('THROTTLE_LOGIN', '5/min'),
 }
 
