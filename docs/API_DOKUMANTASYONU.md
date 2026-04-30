@@ -1,6 +1,6 @@
 # Udar CRM + ERP API Dokumantasyonu
 
-_Olusturma tarihi: 2026-04-30 15:32_
+_Olusturma tarihi: 2026-04-30 15:41_
 
 Bu dokuman mevcut Django REST API/OpenAPI semasindan ve kod icindeki ozel aksiyonlardan hazirlanmistir. Mobil uygulama gelistirme, web entegrasyonu ve ucuncu parti servis baglantilari icin referans olarak kullanilabilir.
 
@@ -133,7 +133,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 | Method | Endpoint | Islev | Request Body | Basarili/Onemli Response |
 |---|---|---|---|---|
 | `POST` | `/api/auth/activate/` | auth_activate_create | - | `200` No response body |
-| `POST` | `/api/auth/bulk-create-users/` | Admin: Her sat?r 'Ad Soyad' ? benzersiz kullan?c? ad? ve ?ifre ?retilir (e-posta zorunlu de?il). | - | `200` No response body |
+| `POST` | `/api/auth/bulk-create-users/` | Admin: Her satir 'Ad Soyad' - benzersiz kullanici adi ve sifre uretilir (e-posta zorunlu degil). | - | `200` No response body |
 | `POST` | `/api/auth/change-password/` | auth_change_password_create | - | `200` No response body |
 | `POST` | `/api/auth/create-user/` | auth_create_user_create | - | `200` No response body |
 | `POST` | `/api/auth/invite/` | auth_invite_create | - | `200` No response body |
@@ -153,8 +153,8 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 | `GET` | `/api/auth/role-perms/` | auth_role_perms_retrieve | - | `200` No response body |
 | `POST` | `/api/auth/role-perms/` | auth_role_perms_create | - | `200` No response body |
 | `GET` | `/api/auth/users/` | auth_users_retrieve | - | `200` No response body |
-| `PATCH` | `/api/auth/users/{id}/` | Admin: organizasyondaki kullan?c?y? kal?c? siler (FK'ler SET_NULL ise g?venli). | - | `200` No response body |
-| `DELETE` | `/api/auth/users/{id}/` | Admin: organizasyondaki kullan?c?y? kal?c? siler (FK'ler SET_NULL ise g?venli). | - | `204` No response body |
+| `PATCH` | `/api/auth/users/{id}/` | Admin: organizasyondaki kullaniciyi kalici siler (FK'ler SET_NULL ise guvenli). | - | `200` No response body |
+| `DELETE` | `/api/auth/users/{id}/` | Admin: organizasyondaki kullaniciyi kalici siler (FK'ler SET_NULL ise guvenli). | - | `204` No response body |
 
 ## Gorev, Destek, Dosya, Otomasyon
 
@@ -176,7 +176,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 | `DELETE` | `/api/task-attachments/{id}/` | task_attachments_destroy | - | `204` No response body |
 | `GET` | `/api/task-checklist/` | task_checklist_list | - | `200` application/json: Array<TaskChecklist> |
 | `POST` | `/api/task-checklist/` | task_checklist_create | `application/json`: `TaskChecklist`<br>`application/x-www-form-urlencoded`: `TaskChecklist`<br>`multipart/form-data`: `TaskChecklist` zorunlu | `201` application/json: TaskChecklist |
-| `POST` | `/api/task-checklist/reorder/` | S?ra g?ncelle: { "task": "<task_id>", "order": ["<id1>", "<id2>", ...] } | `application/json`: `TaskChecklist`<br>`application/x-www-form-urlencoded`: `TaskChecklist`<br>`multipart/form-data`: `TaskChecklist` zorunlu | `200` application/json: TaskChecklist |
+| `POST` | `/api/task-checklist/reorder/` | Sira guncelle: { "task": "<task_id>", "order": ["<id1>", "<id2>", ...] } | `application/json`: `TaskChecklist`<br>`application/x-www-form-urlencoded`: `TaskChecklist`<br>`multipart/form-data`: `TaskChecklist` zorunlu | `200` application/json: TaskChecklist |
 | `GET` | `/api/task-checklist/{id}/` | task_checklist_retrieve | - | `200` application/json: TaskChecklist |
 | `PUT` | `/api/task-checklist/{id}/` | task_checklist_update | `application/json`: `TaskChecklist`<br>`application/x-www-form-urlencoded`: `TaskChecklist`<br>`multipart/form-data`: `TaskChecklist` zorunlu | `200` application/json: TaskChecklist |
 | `PATCH` | `/api/task-checklist/{id}/` | task_checklist_partial_update | `application/json`: `PatchedTaskChecklist`<br>`application/x-www-form-urlencoded`: `PatchedTaskChecklist`<br>`multipart/form-data`: `PatchedTaskChecklist` | `200` application/json: TaskChecklist |
@@ -187,12 +187,12 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 | `PUT` | `/api/task-comments/{id}/` | task_comments_update | `application/json`: `TaskComment`<br>`application/x-www-form-urlencoded`: `TaskComment`<br>`multipart/form-data`: `TaskComment` zorunlu | `200` application/json: TaskComment |
 | `PATCH` | `/api/task-comments/{id}/` | task_comments_partial_update | `application/json`: `PatchedTaskComment`<br>`application/x-www-form-urlencoded`: `PatchedTaskComment`<br>`multipart/form-data`: `PatchedTaskComment` | `200` application/json: TaskComment |
 | `DELETE` | `/api/task-comments/{id}/` | task_comments_destroy | - | `204` No response body |
-| `GET` | `/api/task-models/` | Sabit g?rev modelleri (AY-01 vb.) - Admin/Manager y?netir. | - | `200` application/json: Array<TaskModel> |
-| `POST` | `/api/task-models/` | Sabit g?rev modelleri (AY-01 vb.) - Admin/Manager y?netir. | `application/json`: `TaskModel`<br>`application/x-www-form-urlencoded`: `TaskModel`<br>`multipart/form-data`: `TaskModel` zorunlu | `201` application/json: TaskModel |
-| `GET` | `/api/task-models/{id}/` | Sabit g?rev modelleri (AY-01 vb.) - Admin/Manager y?netir. | - | `200` application/json: TaskModel |
-| `PUT` | `/api/task-models/{id}/` | Sabit g?rev modelleri (AY-01 vb.) - Admin/Manager y?netir. | `application/json`: `TaskModel`<br>`application/x-www-form-urlencoded`: `TaskModel`<br>`multipart/form-data`: `TaskModel` zorunlu | `200` application/json: TaskModel |
-| `PATCH` | `/api/task-models/{id}/` | Sabit g?rev modelleri (AY-01 vb.) - Admin/Manager y?netir. | `application/json`: `PatchedTaskModel`<br>`application/x-www-form-urlencoded`: `PatchedTaskModel`<br>`multipart/form-data`: `PatchedTaskModel` | `200` application/json: TaskModel |
-| `DELETE` | `/api/task-models/{id}/` | Sabit g?rev modelleri (AY-01 vb.) - Admin/Manager y?netir. | - | `204` No response body |
+| `GET` | `/api/task-models/` | Sabit gorev modelleri (AY-01 vb.) - Admin/Manager yonetir. | - | `200` application/json: Array<TaskModel> |
+| `POST` | `/api/task-models/` | Sabit gorev modelleri (AY-01 vb.) - Admin/Manager yonetir. | `application/json`: `TaskModel`<br>`application/x-www-form-urlencoded`: `TaskModel`<br>`multipart/form-data`: `TaskModel` zorunlu | `201` application/json: TaskModel |
+| `GET` | `/api/task-models/{id}/` | Sabit gorev modelleri (AY-01 vb.) - Admin/Manager yonetir. | - | `200` application/json: TaskModel |
+| `PUT` | `/api/task-models/{id}/` | Sabit gorev modelleri (AY-01 vb.) - Admin/Manager yonetir. | `application/json`: `TaskModel`<br>`application/x-www-form-urlencoded`: `TaskModel`<br>`multipart/form-data`: `TaskModel` zorunlu | `200` application/json: TaskModel |
+| `PATCH` | `/api/task-models/{id}/` | Sabit gorev modelleri (AY-01 vb.) - Admin/Manager yonetir. | `application/json`: `PatchedTaskModel`<br>`application/x-www-form-urlencoded`: `PatchedTaskModel`<br>`multipart/form-data`: `PatchedTaskModel` | `200` application/json: TaskModel |
+| `DELETE` | `/api/task-models/{id}/` | Sabit gorev modelleri (AY-01 vb.) - Admin/Manager yonetir. | - | `204` No response body |
 | `GET` | `/api/task-reports/export/` | Gorev raporunu xlsx/docx olarak indirir. | - | `200` No response body |
 | `GET` | `/api/task-reports/summary/` | task_reports_summary_retrieve | - | `200` No response body |
 | `GET` | `/api/task-time-entries/` | task_time_entries_list | - | `200` application/json: Array<TaskTimeEntry> |
@@ -204,21 +204,21 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 | `GET` | `/api/tasks/` | tasks_list | - | `200` application/json: Array<Task> |
 | `POST` | `/api/tasks/` | tasks_create | `application/json`: `Task`<br>`application/x-www-form-urlencoded`: `Task`<br>`multipart/form-data`: `Task` zorunlu | `201` application/json: Task |
 | `POST` | `/api/tasks/import-excel/` | Gorev uretim Excel dosyasini ice aktarir. | `application/json`: `Task`<br>`application/x-www-form-urlencoded`: `Task`<br>`multipart/form-data`: `Task` zorunlu | `200` application/json: Task |
-| `GET` | `/api/tasks/my-team-queue/` | Worker i?in: s?ral? ak??ta yaln?zca ilgili ekip usta ba??s? (havuzdaki g?revler); paralel ak??ta ilgili b?l?m ?yeleri. Liste sonunda kullan?c?ya g?re filtrelenir. | - | `200` application/json: Task |
-| `GET` | `/api/tasks/production-report/` | G?nl?k ?retim: ...date=YYYY-MM-DD (y?netici) | - | `200` application/json: Task |
-| `GET` | `/api/tasks/worker-detail/` | ?al??an detay: g?nl?k/ayl?k s?re, aktif/biten g?revler. Query: ...worker_id=123 | - | `200` application/json: Task |
-| `GET` | `/api/tasks/worker-tracking/` | Admin/Manager i?in worker tracking endpoint'i. Her worker'?n hangi departmanda ?al??t???n? g?sterir. | - | `200` application/json: Task |
+| `GET` | `/api/tasks/my-team-queue/` | Worker icin: sirali akista yalnizca ilgili ekip usta basisi (havuzdaki gorevler); paralel akista ilgili bolum uyeleri. Liste sonunda kullaniciya gore filtrelenir. | - | `200` application/json: Task |
+| `GET` | `/api/tasks/production-report/` | Gunluk uretim: ?date=YYYY-MM-DD (yonetici) | - | `200` application/json: Task |
+| `GET` | `/api/tasks/worker-detail/` | Calisan detay: gunluk/aylik sure, aktif/biten gorevler. Query: ?worker_id=123 | - | `200` application/json: Task |
+| `GET` | `/api/tasks/worker-tracking/` | Admin/Manager icin worker tracking endpoint'i. Her worker'in hangi departmanda calistigini gosterir. | - | `200` application/json: Task |
 | `GET` | `/api/tasks/{id}/` | tasks_retrieve | - | `200` application/json: Task |
 | `PUT` | `/api/tasks/{id}/` | tasks_update | `application/json`: `Task`<br>`application/x-www-form-urlencoded`: `Task`<br>`multipart/form-data`: `Task` zorunlu | `200` application/json: Task |
 | `PATCH` | `/api/tasks/{id}/` | tasks_partial_update | `application/json`: `PatchedTask`<br>`application/x-www-form-urlencoded`: `PatchedTask`<br>`multipart/form-data`: `PatchedTask` | `200` application/json: Task |
 | `DELETE` | `/api/tasks/{id}/` | tasks_destroy | - | `204` No response body |
-| `POST` | `/api/tasks/{id}/approve-section/` | Usta ba?? / y?netici: paralel ak??ta b?l?m onay? (t?m b?l?mler bitince done); s?ral? ak??ta onay sonras? s?radaki ekibe devir veya g?revin kapanmas?. | `application/json`: `Task`<br>`application/x-www-form-urlencoded`: `Task`<br>`multipart/form-data`: `Task` zorunlu | `200` application/json: Task |
-| `POST` | `/api/tasks/{id}/claim/` | Worker ekibindeki bekleyen g?revi ?stlenir. Paralel ak??ta workflow i?indeki uygun b?l?mde ?stlenir. | `application/json`: `Task`<br>`application/x-www-form-urlencoded`: `Task`<br>`multipart/form-data`: `Task` zorunlu | `200` application/json: Task |
-| `POST` | `/api/tasks/{id}/complete-stage/` | Paralel ak??: aktif ekipte b?l?m tamamlan?nca otomatik olarak s?radaki ekibe ge?er. S?ral? i? ak??? (workflow_team_ids, workflow_parallel kapal?): ekip ?yesi ?bitir? ile onaya g?nderir; usta ba?? approve_section ile s?radaki ekibe devreder veya g?revi kapat?r. ?? ak??? tan?ms?zsa fabrika s?ras? ile devretme / tamamlama (?nceki davran??). | `application/json`: `Task`<br>`application/x-www-form-urlencoded`: `Task`<br>`multipart/form-data`: `Task` zorunlu | `200` application/json: Task |
+| `POST` | `/api/tasks/{id}/approve-section/` | Usta basi / yonetici: paralel akista bolum onayi (tum bolumler bitince done); sirali akista onay sonrasi siradaki ekibe devir veya gorevin kapanmasi. | `application/json`: `Task`<br>`application/x-www-form-urlencoded`: `Task`<br>`multipart/form-data`: `Task` zorunlu | `200` application/json: Task |
+| `POST` | `/api/tasks/{id}/claim/` | Worker ekibindeki bekleyen gorevi ustlenir. Paralel akista workflow icindeki uygun bolumde ustlenir. | `application/json`: `Task`<br>`application/x-www-form-urlencoded`: `Task`<br>`multipart/form-data`: `Task` zorunlu | `200` application/json: Task |
+| `POST` | `/api/tasks/{id}/complete-stage/` | Paralel akis: aktif ekipte bolum tamamlaninca otomatik olarak siradaki ekibe gecer. Sirali is akisi (workflow_team_ids, workflow_parallel kapali): ekip uyesi bitir ile onaya gonderir; usta basi approve_section ile siradaki ekibe devreder veya gorevi kapatir. Is akisi tanimsizsa fabrika sirasi ile devretme / tamamlama (onceki davranis). | `application/json`: `Task`<br>`application/x-www-form-urlencoded`: `Task`<br>`multipart/form-data`: `Task` zorunlu | `200` application/json: Task |
 | `POST` | `/api/tasks/{id}/handover/` | tasks_handover_create | `application/json`: `Task`<br>`application/x-www-form-urlencoded`: `Task`<br>`multipart/form-data`: `Task` zorunlu | `200` application/json: Task |
-| `POST` | `/api/tasks/{id}/log-production/` | G?nl?k tamamlanan adet ? iste?e ba?l? sipari?e quantity_produced yans?r. | `application/json`: `Task`<br>`application/x-www-form-urlencoded`: `Task`<br>`multipart/form-data`: `Task` zorunlu | `200` application/json: Task |
-| `POST` | `/api/tasks/{id}/release-to-team/` | Usta ba??: g?revi ekibe a?ar (assignee temizlenir, ?yeler ?stlenebilir). | `application/json`: `Task`<br>`application/x-www-form-urlencoded`: `Task`<br>`multipart/form-data`: `Task` zorunlu | `200` application/json: Task |
-| `POST` | `/api/tasks/{id}/self_handover/` | Worker kendi g?revini ba?ka ekibe devredebilir (b?l?m de?i?imi i?in) | `application/json`: `Task`<br>`application/x-www-form-urlencoded`: `Task`<br>`multipart/form-data`: `Task` zorunlu | `200` application/json: Task |
+| `POST` | `/api/tasks/{id}/log-production/` | Gunluk tamamlanan adet - istege bagli siparise quantity_produced yansir. | `application/json`: `Task`<br>`application/x-www-form-urlencoded`: `Task`<br>`multipart/form-data`: `Task` zorunlu | `200` application/json: Task |
+| `POST` | `/api/tasks/{id}/release-to-team/` | Usta basi: gorevi ekibe acar (assignee temizlenir, uyeler ustlenebilir). | `application/json`: `Task`<br>`application/x-www-form-urlencoded`: `Task`<br>`multipart/form-data`: `Task` zorunlu | `200` application/json: Task |
+| `POST` | `/api/tasks/{id}/self_handover/` | Worker kendi gorevini baska ekibe devredebilir (bolum degisimi icin) | `application/json`: `Task`<br>`application/x-www-form-urlencoded`: `Task`<br>`multipart/form-data`: `Task` zorunlu | `200` application/json: Task |
 | `GET` | `/api/ticket-messages/` | ticket_messages_list | - | `200` application/json: Array<TicketMessage> |
 | `POST` | `/api/ticket-messages/` | ticket_messages_create | `application/json`: `TicketMessage`<br>`application/x-www-form-urlencoded`: `TicketMessage`<br>`multipart/form-data`: `TicketMessage` zorunlu | `201` application/json: TicketMessage |
 | `GET` | `/api/ticket-messages/{id}/` | ticket_messages_retrieve | - | `200` application/json: TicketMessage |
@@ -361,12 +361,12 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 | Method | Endpoint | Islev | Request Body | Basarili/Onemli Response |
 |---|---|---|---|---|
-| `GET` | `/api/team-associates/` | Hesaps?z ekip ?al??anlar? (CRUD). | - | `200` application/json: Array<TeamAssociate> |
-| `POST` | `/api/team-associates/` | Hesaps?z ekip ?al??anlar? (CRUD). | `application/json`: `TeamAssociate`<br>`application/x-www-form-urlencoded`: `TeamAssociate`<br>`multipart/form-data`: `TeamAssociate` zorunlu | `201` application/json: TeamAssociate |
-| `GET` | `/api/team-associates/{id}/` | Hesaps?z ekip ?al??anlar? (CRUD). | - | `200` application/json: TeamAssociate |
-| `PUT` | `/api/team-associates/{id}/` | Hesaps?z ekip ?al??anlar? (CRUD). | `application/json`: `TeamAssociate`<br>`application/x-www-form-urlencoded`: `TeamAssociate`<br>`multipart/form-data`: `TeamAssociate` zorunlu | `200` application/json: TeamAssociate |
-| `PATCH` | `/api/team-associates/{id}/` | Hesaps?z ekip ?al??anlar? (CRUD). | `application/json`: `PatchedTeamAssociate`<br>`application/x-www-form-urlencoded`: `PatchedTeamAssociate`<br>`multipart/form-data`: `PatchedTeamAssociate` | `200` application/json: TeamAssociate |
-| `DELETE` | `/api/team-associates/{id}/` | Hesaps?z ekip ?al??anlar? (CRUD). | - | `204` No response body |
+| `GET` | `/api/team-associates/` | Hesapsiz ekip calisanlari (CRUD). | - | `200` application/json: Array<TeamAssociate> |
+| `POST` | `/api/team-associates/` | Hesapsiz ekip calisanlari (CRUD). | `application/json`: `TeamAssociate`<br>`application/x-www-form-urlencoded`: `TeamAssociate`<br>`multipart/form-data`: `TeamAssociate` zorunlu | `201` application/json: TeamAssociate |
+| `GET` | `/api/team-associates/{id}/` | Hesapsiz ekip calisanlari (CRUD). | - | `200` application/json: TeamAssociate |
+| `PUT` | `/api/team-associates/{id}/` | Hesapsiz ekip calisanlari (CRUD). | `application/json`: `TeamAssociate`<br>`application/x-www-form-urlencoded`: `TeamAssociate`<br>`multipart/form-data`: `TeamAssociate` zorunlu | `200` application/json: TeamAssociate |
+| `PATCH` | `/api/team-associates/{id}/` | Hesapsiz ekip calisanlari (CRUD). | `application/json`: `PatchedTeamAssociate`<br>`application/x-www-form-urlencoded`: `PatchedTeamAssociate`<br>`multipart/form-data`: `PatchedTeamAssociate` | `200` application/json: TeamAssociate |
+| `DELETE` | `/api/team-associates/{id}/` | Hesapsiz ekip calisanlari (CRUD). | - | `204` No response body |
 | `GET` | `/api/teams/` | teams_list | - | `200` application/json: Array<Team> |
 | `POST` | `/api/teams/` | teams_create | `application/json`: `Team`<br>`application/x-www-form-urlencoded`: `Team`<br>`multipart/form-data`: `Team` zorunlu | `201` application/json: Team |
 | `GET` | `/api/teams/{id}/` | teams_retrieve | - | `200` application/json: Team |
@@ -502,7 +502,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `POST /api/auth/bulk-create-users/`
 
-- Islev: Admin: Her sat?r 'Ad Soyad' ? benzersiz kullan?c? ad? ve ?ifre ?retilir (e-posta zorunlu de?il).
+- Islev: Admin: Her satir 'Ad Soyad' - benzersiz kullanici adi ve sifre uretilir (e-posta zorunlu degil).
 - OpenAPI operationId: `auth_bulk_create_users_create`
 - Tag: `auth`
 - Parametreler: Parametre yok.
@@ -682,7 +682,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `PATCH /api/auth/users/{id}/`
 
-- Islev: Admin: organizasyondaki kullan?c?y? kal?c? siler (FK'ler SET_NULL ise g?venli).
+- Islev: Admin: organizasyondaki kullaniciyi kalici siler (FK'ler SET_NULL ise guvenli).
 - OpenAPI operationId: `auth_users_partial_update`
 - Tag: `auth`
 - Parametreler:
@@ -694,7 +694,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `DELETE /api/auth/users/{id}/`
 
-- Islev: Admin: organizasyondaki kullan?c?y? kal?c? siler (FK'ler SET_NULL ise g?venli).
+- Islev: Admin: organizasyondaki kullaniciyi kalici siler (FK'ler SET_NULL ise guvenli).
 - OpenAPI operationId: `auth_users_destroy`
 - Tag: `auth`
 - Parametreler:
@@ -876,7 +876,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `POST /api/task-checklist/reorder/`
 
-- Islev: S?ra g?ncelle: { "task": "<task_id>", "order": ["<id1>", "<id2>", ...] }
+- Islev: Sira guncelle: { "task": "<task_id>", "order": ["<id1>", "<id2>", ...] }
 - OpenAPI operationId: `task_checklist_reorder_create`
 - Tag: `task-checklist`
 - Parametreler: Parametre yok.
@@ -999,7 +999,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `GET /api/task-models/`
 
-- Islev: Sabit g?rev modelleri (AY-01 vb.) - Admin/Manager y?netir.
+- Islev: Sabit gorev modelleri (AY-01 vb.) - Admin/Manager yonetir.
 - OpenAPI operationId: `task_models_list`
 - Tag: `task-models`
 - Parametreler:
@@ -1011,7 +1011,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `POST /api/task-models/`
 
-- Islev: Sabit g?rev modelleri (AY-01 vb.) - Admin/Manager y?netir.
+- Islev: Sabit gorev modelleri (AY-01 vb.) - Admin/Manager yonetir.
 - OpenAPI operationId: `task_models_create`
 - Tag: `task-models`
 - Parametreler: Parametre yok.
@@ -1020,7 +1020,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `GET /api/task-models/{id}/`
 
-- Islev: Sabit g?rev modelleri (AY-01 vb.) - Admin/Manager y?netir.
+- Islev: Sabit gorev modelleri (AY-01 vb.) - Admin/Manager yonetir.
 - OpenAPI operationId: `task_models_retrieve`
 - Tag: `task-models`
 - Parametreler:
@@ -1032,7 +1032,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `PUT /api/task-models/{id}/`
 
-- Islev: Sabit g?rev modelleri (AY-01 vb.) - Admin/Manager y?netir.
+- Islev: Sabit gorev modelleri (AY-01 vb.) - Admin/Manager yonetir.
 - OpenAPI operationId: `task_models_update`
 - Tag: `task-models`
 - Parametreler:
@@ -1044,7 +1044,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `PATCH /api/task-models/{id}/`
 
-- Islev: Sabit g?rev modelleri (AY-01 vb.) - Admin/Manager y?netir.
+- Islev: Sabit gorev modelleri (AY-01 vb.) - Admin/Manager yonetir.
 - OpenAPI operationId: `task_models_partial_update`
 - Tag: `task-models`
 - Parametreler:
@@ -1056,7 +1056,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `DELETE /api/task-models/{id}/`
 
-- Islev: Sabit g?rev modelleri (AY-01 vb.) - Admin/Manager y?netir.
+- Islev: Sabit gorev modelleri (AY-01 vb.) - Admin/Manager yonetir.
 - OpenAPI operationId: `task_models_destroy`
 - Tag: `task-models`
 - Parametreler:
@@ -1183,7 +1183,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `GET /api/tasks/my-team-queue/`
 
-- Islev: Worker i?in: s?ral? ak??ta yaln?zca ilgili ekip usta ba??s? (havuzdaki g?revler); paralel ak??ta ilgili b?l?m ?yeleri. Liste sonunda kullan?c?ya g?re filtrelenir.
+- Islev: Worker icin: sirali akista yalnizca ilgili ekip usta basisi (havuzdaki gorevler); paralel akista ilgili bolum uyeleri. Liste sonunda kullaniciya gore filtrelenir.
 - OpenAPI operationId: `tasks_my_team_queue_retrieve`
 - Tag: `tasks`
 - Parametreler: Parametre yok.
@@ -1192,7 +1192,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `GET /api/tasks/production-report/`
 
-- Islev: G?nl?k ?retim: ...date=YYYY-MM-DD (y?netici)
+- Islev: Gunluk uretim: ?date=YYYY-MM-DD (yonetici)
 - OpenAPI operationId: `tasks_production_report_retrieve`
 - Tag: `tasks`
 - Parametreler: Parametre yok.
@@ -1201,7 +1201,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `GET /api/tasks/worker-detail/`
 
-- Islev: ?al??an detay: g?nl?k/ayl?k s?re, aktif/biten g?revler. Query: ...worker_id=123
+- Islev: Calisan detay: gunluk/aylik sure, aktif/biten gorevler. Query: ?worker_id=123
 - OpenAPI operationId: `tasks_worker_detail_retrieve`
 - Tag: `tasks`
 - Parametreler: Parametre yok.
@@ -1210,7 +1210,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `GET /api/tasks/worker-tracking/`
 
-- Islev: Admin/Manager i?in worker tracking endpoint'i. Her worker'?n hangi departmanda ?al??t???n? g?sterir.
+- Islev: Admin/Manager icin worker tracking endpoint'i. Her worker'in hangi departmanda calistigini gosterir.
 - OpenAPI operationId: `tasks_worker_tracking_retrieve`
 - Tag: `tasks`
 - Parametreler: Parametre yok.
@@ -1267,7 +1267,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `POST /api/tasks/{id}/approve-section/`
 
-- Islev: Usta ba?? / y?netici: paralel ak??ta b?l?m onay? (t?m b?l?mler bitince done); s?ral? ak??ta onay sonras? s?radaki ekibe devir veya g?revin kapanmas?.
+- Islev: Usta basi / yonetici: paralel akista bolum onayi (tum bolumler bitince done); sirali akista onay sonrasi siradaki ekibe devir veya gorevin kapanmasi.
 - OpenAPI operationId: `tasks_approve_section_create`
 - Tag: `tasks`
 - Parametreler:
@@ -1279,7 +1279,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `POST /api/tasks/{id}/claim/`
 
-- Islev: Worker ekibindeki bekleyen g?revi ?stlenir. Paralel ak??ta workflow i?indeki uygun b?l?mde ?stlenir.
+- Islev: Worker ekibindeki bekleyen gorevi ustlenir. Paralel akista workflow icindeki uygun bolumde ustlenir.
 - OpenAPI operationId: `tasks_claim_create`
 - Tag: `tasks`
 - Parametreler:
@@ -1291,7 +1291,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `POST /api/tasks/{id}/complete-stage/`
 
-- Islev: Paralel ak??: aktif ekipte b?l?m tamamlan?nca otomatik olarak s?radaki ekibe ge?er. S?ral? i? ak??? (workflow_team_ids, workflow_parallel kapal?): ekip ?yesi ?bitir? ile onaya g?nderir; usta ba?? approve_section ile s?radaki ekibe devreder veya g?revi kapat?r. ?? ak??? tan?ms?zsa fabrika s?ras? ile devretme / tamamlama (?nceki davran??).
+- Islev: Paralel akis: aktif ekipte bolum tamamlaninca otomatik olarak siradaki ekibe gecer. Sirali is akisi (workflow_team_ids, workflow_parallel kapali): ekip uyesi bitir ile onaya gonderir; usta basi approve_section ile siradaki ekibe devreder veya gorevi kapatir. Is akisi tanimsizsa fabrika sirasi ile devretme / tamamlama (onceki davranis).
 - OpenAPI operationId: `tasks_complete_stage_create`
 - Tag: `tasks`
 - Parametreler:
@@ -1315,7 +1315,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `POST /api/tasks/{id}/log-production/`
 
-- Islev: G?nl?k tamamlanan adet ? iste?e ba?l? sipari?e quantity_produced yans?r.
+- Islev: Gunluk tamamlanan adet - istege bagli siparise quantity_produced yansir.
 - OpenAPI operationId: `tasks_log_production_create`
 - Tag: `tasks`
 - Parametreler:
@@ -1327,7 +1327,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `POST /api/tasks/{id}/release-to-team/`
 
-- Islev: Usta ba??: g?revi ekibe a?ar (assignee temizlenir, ?yeler ?stlenebilir).
+- Islev: Usta basi: gorevi ekibe acar (assignee temizlenir, uyeler ustlenebilir).
 - OpenAPI operationId: `tasks_release_to_team_create`
 - Tag: `tasks`
 - Parametreler:
@@ -1339,7 +1339,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `POST /api/tasks/{id}/self_handover/`
 
-- Islev: Worker kendi g?revini ba?ka ekibe devredebilir (b?l?m de?i?imi i?in)
+- Islev: Worker kendi gorevini baska ekibe devredebilir (bolum degisimi icin)
 - OpenAPI operationId: `tasks_self_handover_create`
 - Tag: `tasks`
 - Parametreler:
@@ -2665,7 +2665,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `GET /api/team-associates/`
 
-- Islev: Hesaps?z ekip ?al??anlar? (CRUD).
+- Islev: Hesapsiz ekip calisanlari (CRUD).
 - OpenAPI operationId: `team_associates_list`
 - Tag: `team-associates`
 - Parametreler:
@@ -2678,7 +2678,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `POST /api/team-associates/`
 
-- Islev: Hesaps?z ekip ?al??anlar? (CRUD).
+- Islev: Hesapsiz ekip calisanlari (CRUD).
 - OpenAPI operationId: `team_associates_create`
 - Tag: `team-associates`
 - Parametreler: Parametre yok.
@@ -2687,7 +2687,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `GET /api/team-associates/{id}/`
 
-- Islev: Hesaps?z ekip ?al??anlar? (CRUD).
+- Islev: Hesapsiz ekip calisanlari (CRUD).
 - OpenAPI operationId: `team_associates_retrieve`
 - Tag: `team-associates`
 - Parametreler:
@@ -2699,7 +2699,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `PUT /api/team-associates/{id}/`
 
-- Islev: Hesaps?z ekip ?al??anlar? (CRUD).
+- Islev: Hesapsiz ekip calisanlari (CRUD).
 - OpenAPI operationId: `team_associates_update`
 - Tag: `team-associates`
 - Parametreler:
@@ -2711,7 +2711,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `PATCH /api/team-associates/{id}/`
 
-- Islev: Hesaps?z ekip ?al??anlar? (CRUD).
+- Islev: Hesapsiz ekip calisanlari (CRUD).
 - OpenAPI operationId: `team_associates_partial_update`
 - Tag: `team-associates`
 - Parametreler:
@@ -2723,7 +2723,7 @@ DRF viewset list endpointlerinin cogu asagidaki parametreleri destekler:
 
 #### `DELETE /api/team-associates/{id}/`
 
-- Islev: Hesaps?z ekip ?al??anlar? (CRUD).
+- Islev: Hesapsiz ekip calisanlari (CRUD).
 - OpenAPI operationId: `team_associates_destroy`
 - Tag: `team-associates`
 - Parametreler:
@@ -3680,7 +3680,7 @@ Admin serializer with all fields
 | `amount` | `string(decimal)` | Hayir | Hayir |  |
 | `shipping_date` | `string(date)` | Hayir | Hayir |  |
 | `expected_delivery` | `string(date)` | Hayir | Hayir |  |
-| `order_quantity` | `integer` | Hayir | Hayir | Sipari? adedi (?retim takibi) |
+| `order_quantity` | `integer` | Hayir | Hayir | Siparis adedi (uretim takibi) |
 | `quantity_produced` | `integer` | Hayir | Hayir | Raporlanan tamamlanan adet |
 | `organization` | `integer` | Hayir | Hayir |  |
 
@@ -3730,12 +3730,12 @@ Admin serializer with all fields
 | `handover_at` | `string(date-time)` | Hayir | Hayir |  |
 | `handover_history` | `-` | Hayir | Hayir |  |
 | `workflow_team_ids` | `-` | Hayir | Hayir |  |
-| `workflow_parallel` | `boolean` | Hayir | Hayir | True ise b?l?mler s?ra beklemeden paralel ?al???r; usta ba?? onay? ile kapan?r. |
-| `workflow_stage_targets` | `-` | Hayir | Hayir | workflow_team_ids ile ayn? uzunlukta b?l?m bazl? hedef adetler |
+| `workflow_parallel` | `boolean` | Hayir | Hayir | True ise bolumler sira beklemeden paralel calisir; usta basi onayi ile kapanir. |
+| `workflow_stage_targets` | `-` | Hayir | Hayir | workflow_team_ids ile ayni uzunlukta bolum bazli hedef adetler |
 | `workflow_stage_state` | `-` | Hayir | Hayir | Ekip ID -> {assignee_id, qty_target, qty_done, pending_approval, stage_done} |
 | `sales_order` | `integer` | Hayir | Hayir |  |
-| `product_lines` | `-` | Hayir | Hayir | Her eleman: model_code, variant, quantity, renk, s?re vb. ? ?oklu ?r?n kalemleri |
-| `active_product_index` | `integer` | Hayir | Hayir | ?u an i? ak???na yans?t?lan ?r?n sat?r? (0 tabanl?) |
+| `product_lines` | `-` | Hayir | Hayir | Her eleman: model_code, variant, quantity, renk, sure vb. - coklu urun kalemleri |
+| `active_product_index` | `integer` | Hayir | Hayir | Su an is akisina yansitilan urun satiri (0 tabanli) |
 | `created_at` | `string(date-time)` | Hayir | Evet |  |
 | `updated_at` | `string(date-time)` | Hayir | Evet |  |
 | `attachments` | `Array<TaskAttachment>` | Hayir | Evet |  |
@@ -3770,7 +3770,7 @@ Admin serializer with all fields
 | `done` | `boolean` | Hayir | Hayir |  |
 | `order` | `integer` | Hayir | Hayir |  |
 | `created_at` | `string(date-time)` | Hayir | Evet |  |
-| `workflow_team` | `integer` | Hayir | Evet | Doluysa madde i? ak??? bu ekibin ad?m?na ba?l?d?r; s?ra ve tik workflow ile senkron olur. |
+| `workflow_team` | `integer` | Hayir | Evet | Doluysa madde is akisi bu ekibin adimina baglidir; sira ve tik workflow ile senkron olur. |
 
 ### `PatchedTaskComment`
 | Alan | Tip | Zorunlu | Readonly | Aciklama / Varsayilan |
@@ -3818,7 +3818,7 @@ Admin serializer with all fields
 | `created_at` | `string(date-time)` | Hayir | Evet |  |
 
 ### `PatchedTeam`
-members: yazarken tamsay? pk listesi (JSON [1,2,3]). Ge?ersiz veya ba?ka organizasyona ait pk'lar sessiz?e d???r?l?r ? b?ylece silinmi? kullan?c? kal?nt?lar? y?z?nden PATCH 400 olu?maz.
+members: yazarken tamsayi pk listesi (JSON [1,2,3]). Gecersiz veya baska organizasyona ait pk'lar sessizce dusurulur - boylece silinmis kullanici kalintilari yuzunden PATCH 400 olusmaz.
 
 | Alan | Tip | Zorunlu | Readonly | Aciklama / Varsayilan |
 |---|---|---:|---:|---|
@@ -3829,7 +3829,7 @@ members: yazarken tamsay? pk listesi (JSON [1,2,3]). Ge?ersiz veya ba?ka organiz
 | `leader` | `integer` | Hayir | Hayir |  |
 
 ### `PatchedTeamAssociate`
-Hesaps?z ekip ?al??an?: teams = ekip pk listesi.
+Hesapsiz ekip calisani: teams = ekip pk listesi.
 
 | Alan | Tip | Zorunlu | Readonly | Aciklama / Varsayilan |
 |---|---|---:|---:|---|
@@ -4048,7 +4048,7 @@ Enum degerleri: `Draft`, `Sent`, `Under Review`, `Approved`, `Rejected`, `Conver
 | `amount` | `string(decimal)` | Hayir | Hayir |  |
 | `shipping_date` | `string(date)` | Hayir | Hayir |  |
 | `expected_delivery` | `string(date)` | Hayir | Hayir |  |
-| `order_quantity` | `integer` | Hayir | Hayir | Sipari? adedi (?retim takibi) |
+| `order_quantity` | `integer` | Hayir | Hayir | Siparis adedi (uretim takibi) |
 | `quantity_produced` | `integer` | Hayir | Hayir | Raporlanan tamamlanan adet |
 | `organization` | `integer` | Evet | Hayir |  |
 
@@ -4103,12 +4103,12 @@ Enum degerleri: `draft`, `published`
 | `handover_at` | `string(date-time)` | Hayir | Hayir |  |
 | `handover_history` | `-` | Hayir | Hayir |  |
 | `workflow_team_ids` | `-` | Hayir | Hayir |  |
-| `workflow_parallel` | `boolean` | Hayir | Hayir | True ise b?l?mler s?ra beklemeden paralel ?al???r; usta ba?? onay? ile kapan?r. |
-| `workflow_stage_targets` | `-` | Hayir | Hayir | workflow_team_ids ile ayn? uzunlukta b?l?m bazl? hedef adetler |
+| `workflow_parallel` | `boolean` | Hayir | Hayir | True ise bolumler sira beklemeden paralel calisir; usta basi onayi ile kapanir. |
+| `workflow_stage_targets` | `-` | Hayir | Hayir | workflow_team_ids ile ayni uzunlukta bolum bazli hedef adetler |
 | `workflow_stage_state` | `-` | Hayir | Hayir | Ekip ID -> {assignee_id, qty_target, qty_done, pending_approval, stage_done} |
 | `sales_order` | `integer` | Hayir | Hayir |  |
-| `product_lines` | `-` | Hayir | Hayir | Her eleman: model_code, variant, quantity, renk, s?re vb. ? ?oklu ?r?n kalemleri |
-| `active_product_index` | `integer` | Hayir | Hayir | ?u an i? ak???na yans?t?lan ?r?n sat?r? (0 tabanl?) |
+| `product_lines` | `-` | Hayir | Hayir | Her eleman: model_code, variant, quantity, renk, sure vb. - coklu urun kalemleri |
+| `active_product_index` | `integer` | Hayir | Hayir | Su an is akisina yansitilan urun satiri (0 tabanli) |
 | `created_at` | `string(date-time)` | Evet | Evet |  |
 | `updated_at` | `string(date-time)` | Evet | Evet |  |
 | `attachments` | `Array<TaskAttachment>` | Evet | Evet |  |
@@ -4143,7 +4143,7 @@ Enum degerleri: `draft`, `published`
 | `done` | `boolean` | Hayir | Hayir |  |
 | `order` | `integer` | Hayir | Hayir |  |
 | `created_at` | `string(date-time)` | Evet | Evet |  |
-| `workflow_team` | `integer` | Evet | Evet | Doluysa madde i? ak??? bu ekibin ad?m?na ba?l?d?r; s?ra ve tik workflow ile senkron olur. |
+| `workflow_team` | `integer` | Evet | Evet | Doluysa madde is akisi bu ekibin adimina baglidir; sira ve tik workflow ile senkron olur. |
 
 ### `TaskComment`
 | Alan | Tip | Zorunlu | Readonly | Aciklama / Varsayilan |
@@ -4206,7 +4206,7 @@ Enum degerleri: `todo`, `in-progress`, `done`
 | `created_at` | `string(date-time)` | Evet | Evet |  |
 
 ### `Team`
-members: yazarken tamsay? pk listesi (JSON [1,2,3]). Ge?ersiz veya ba?ka organizasyona ait pk'lar sessiz?e d???r?l?r ? b?ylece silinmi? kullan?c? kal?nt?lar? y?z?nden PATCH 400 olu?maz.
+members: yazarken tamsayi pk listesi (JSON [1,2,3]). Gecersiz veya baska organizasyona ait pk'lar sessizce dusurulur - boylece silinmis kullanici kalintilari yuzunden PATCH 400 olusmaz.
 
 | Alan | Tip | Zorunlu | Readonly | Aciklama / Varsayilan |
 |---|---|---:|---:|---|
@@ -4217,7 +4217,7 @@ members: yazarken tamsay? pk listesi (JSON [1,2,3]). Ge?ersiz veya ba?ka organiz
 | `leader` | `integer` | Hayir | Hayir |  |
 
 ### `TeamAssociate`
-Hesaps?z ekip ?al??an?: teams = ekip pk listesi.
+Hesapsiz ekip calisani: teams = ekip pk listesi.
 
 | Alan | Tip | Zorunlu | Readonly | Aciklama / Varsayilan |
 |---|---|---:|---:|---|
@@ -4327,7 +4327,7 @@ Enum degerleri: `Open`, `In Progress`, `Waiting`, `Resolved`, `Closed`
 Enum degerleri: `task_status_changed`, `task_due_soon`, `task_created`
 
 ### `TwoFATokenObtainPair`
-Extends JWT login to require otp code if user has otp_enabled. Worker i?in mesai saat/g?n kontrol?.
+Extends JWT login to require otp code if user has otp_enabled. Worker icin mesai saat/gun kontrolu.
 
 | Alan | Tip | Zorunlu | Readonly | Aciklama / Varsayilan |
 |---|---|---:|---:|---|
