@@ -39,16 +39,7 @@ export function workerMayClaimTask(
   const parallel = t.workflowParallel === true && hasWf
   const sequential = hasWf && !t.workflowParallel
   if (parallel) {
-    for (const tid of t.workflowTeamIds || []) {
-      const row = teams.find((x) => x.id === tid)
-      const st = t.workflowStageState?.[tid]
-      if (st?.stage_done) continue
-      const aid = st?.assignee_id
-      if (aid != null && String(aid) !== String(userId)) continue
-      const isMember = row?.memberIds?.some((m) => String(m) === String(userId))
-      const isLeader = row?.leaderId && String(row.leaderId) === String(userId)
-      if (isMember || isLeader) return true
-    }
+    // Otomatik paralel modda explicit "Üstlen" adımı yok.
     return false
   }
   if (sequential) {

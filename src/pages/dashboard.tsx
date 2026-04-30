@@ -88,21 +88,26 @@ export function DashboardPage() {
   }, [widgets])
 
   useEffect(() => {
-    api.get('/dashboard/kpis/').then((res) => {
-      const d = res.data || {}
-      setKpiTotals({
-        revenue: d.revenue ?? 0,
-        pipeline: d.pipeline ?? 0,
-        ar: d.ar ?? 0,
-        inventory: d.inventory_value ?? 0,
-        tickets: d.tickets_open ?? 0,
+    api
+      .get('/dashboard/kpis/')
+      .then((res) => {
+        const d = res.data || {}
+        setKpiTotals({
+          revenue: d.revenue ?? 0,
+          pipeline: d.pipeline ?? 0,
+          ar: d.ar ?? 0,
+          inventory: d.inventory_value ?? 0,
+          tickets: d.tickets_open ?? 0,
+        })
+        setTodayTasks(d.today_tasks || todayTasks)
+        setTodayOverdueInvoices(d.overdue_invoices || todayOverdueInvoices)
+        setTodayLowStock(d.low_stock || todayLowStock)
+        setTodayMeetings(d.meetings || todayMeetings)
+        setKpiDate(formatDate(new Date()))
       })
-      setTodayTasks(d.today_tasks || todayTasks)
-      setTodayOverdueInvoices(d.overdue_invoices || todayOverdueInvoices)
-      setTodayLowStock(d.low_stock || todayLowStock)
-      setTodayMeetings(d.meetings || todayMeetings)
-      setKpiDate(formatDate(new Date()))
-    })
+      .catch(() => {
+        // 429 dahil durumlarda dashboard UI kırılmasın.
+      })
     const role = typeof window !== 'undefined' ? localStorage.getItem('current-user-role') : null
     if (role !== 'Worker') {
       api.get('/approvals/pending/').then((res) => setPendingApprovals(res.data || [])).catch(() => setPendingApprovals([]))
@@ -129,13 +134,8 @@ export function DashboardPage() {
   }
 
   useEffect(() => {
-    if (isWorker) {
-      api
-        .get('/tasks/my-team-queue/')
-        .then((res) => setTeamQueueTasks((res.data || []).map(mapTaskFromApi)))
-        .catch(() => setTeamQueueTasks([]))
-    }
-  }, [isWorker, data.tasks])
+    if (isWorker) fetchTeamQueue()
+  }, [isWorker])
 
   const totals = {
     revenue: data.invoices.reduce((sum, inv) => sum + inv.amount, 0),
@@ -492,7 +492,7 @@ export function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent className="h-72 min-h-[280px] min-w-0">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
               <AreaChart data={revenueTrend}>
                 <defs>
                   <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
@@ -518,7 +518,7 @@ export function DashboardPage() {
               <CardDescription>Segment toplamları</CardDescription>
             </CardHeader>
             <CardContent className="h-72 min-h-[280px] min-w-0">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
                 <BarChart data={Object.entries(pipelineByStage).map(([stage, value]) => ({ stage, value }))}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                   <XAxis dataKey="stage" />
@@ -595,7 +595,7 @@ export function DashboardPage() {
               <CardDescription>Planlanan giriş / çıkış</CardDescription>
             </CardHeader>
           <CardContent className="h-72 min-h-[280px] min-w-0">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
                 <LineChart data={cashflow}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                   <XAxis dataKey="month" />
@@ -618,7 +618,7 @@ export function DashboardPage() {
             <CardDescription>Depolara göre hız</CardDescription>
           </CardHeader>
           <CardContent className="h-72 min-h-[280px] min-w-0">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
               <BarChart data={topProducts}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                 <XAxis dataKey="name" hide />

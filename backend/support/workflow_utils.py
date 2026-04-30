@@ -100,6 +100,13 @@ def workflow_stage_production_met(task, team_id):
     st = (task.workflow_stage_state or {}).get(str(int(team_id)), {})
     tgt = int(st.get('qty_target') or 0)
     done = int(st.get('qty_done') or 0)
+    # Çoklu kalemde, aşama kapanmadan önce tüm kalemler için en az bir veri girilmiş olmalı.
+    lines = list(getattr(task, 'product_lines', None) or [])
+    if len(lines) > 1:
+        qmap = dict(st.get('qty_done_by_line') or {})
+        for idx in range(len(lines)):
+            if str(idx) not in qmap:
+                return False
     if tgt <= 0:
         tgt = default_workflow_qty_target(task)
     return done >= tgt
@@ -184,21 +191,11 @@ def apply_product_line_to_task(task, index=None):
 def default_workflow_qty_target(task):
     """
     İş akışı adım hedefi adedi.
-    Sıralı akışta birden fazla ürün kalemi varsa yalnızca aktif kalemin sipariş adedi;
-    paralel akışta veya tek kalemde tüm satırların adet toplamı (veya görev adedi).
+    Tüm akış tiplerinde (sıralı/paralel) ürün kalemlerinin toplam adedi hedef alınır.
+    Böylece 2. kalem için veri girişi, 1. kalem tamamen bitmeden de yapılabilir.
     """
     lines = list(getattr(task, 'product_lines', None) or [])
-    parallel = getattr(task, 'workflow_parallel', False)
     if lines:
-        if len(lines) > 1 and not parallel:
-            ai = int(getattr(task, 'active_product_index', 0) or 0)
-            if 0 <= ai < len(lines):
-                try:
-                    q = max(0, int((lines[ai] or {}).get('quantity') or 0))
-                except (TypeError, ValueError):
-                    q = 0
-                if q > 0:
-                    return max(1, q)
         total = 0
         for ln in lines:
             try:
@@ -271,7 +268,17 @@ def parallel_queue_visible(task, user, user_team_ids):
     role = getattr(user, 'role', '')
     staff = role in ('Admin', 'Manager')
     org_id = task.organization_id
-    for tid in ids:
+    # Otomatik paralel modda öncelik aktif akış ekibidir.
+    active_first = []
+    try:
+        ctid = int(getattr(task, 'current_team_id', None) or 0)
+    except (TypeError, ValueError):
+        ctid = 0
+    if ctid and ctid in ids:
+        active_first.append(ctid)
+    ordered_ids = active_first + [tid for tid in ids if tid not in active_first]
+
+    for tid in ordered_ids:
         if not staff and tid not in user_set:
             continue
         team = Team.objects.filter(id=tid, organization_id=org_id).first()
@@ -283,5 +290,8 @@ def parallel_queue_visible(task, user, user_team_ids):
             continue
         aid = st.get('assignee_id')
         if aid is None or aid == uid:
+            return True
+        # current_team'de atama başka üyeye yapılmış olsa bile ekip kuyruğu görünürlüğü korunur.
+        if ctid and tid == ctid and not staff:
             return True
     return False

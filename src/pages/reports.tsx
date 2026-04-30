@@ -108,14 +108,15 @@ export function ReportsPage() {
     loadProdReport()
   }, [loadProdReport])
 
-  const downloadExport = async (format: 'xlsx' | 'docx') => {
+  const downloadExport = async (format: 'xlsx' | 'docx', template?: 'daily') => {
     if (!canReports) return
     try {
-      const params: Record<string, string> = { year: String(reportYear), format }
+      const params: Record<string, string> = { year: String(reportYear), file_format: format }
       if (reportMonth !== 'all') params.month = reportMonth
       if (reportTeam !== 'all') params.team_id = reportTeam
       if (reportUser !== 'all') params.assignee_id = reportUser
       if (reportStatus !== 'all') params.status = reportStatus
+      if (template) params.template = template
       const res = await api.get('/task-reports/export/', { params, responseType: 'blob' })
       const blob = new Blob([res.data], {
         type:
@@ -126,14 +127,23 @@ export function ReportsPage() {
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `gorev_raporu_${reportYear}_${reportMonth === 'all' ? 'yillik' : reportMonth}.${format === 'xlsx' ? 'xlsx' : 'docx'}`
+      a.download =
+        template === 'daily'
+          ? `gunluk_uretim_faaliyet_raporu_${reportYear}_${reportMonth === 'all' ? 'yillik' : reportMonth}.docx`
+          : `gorev_raporu_${reportYear}_${reportMonth === 'all' ? 'yillik' : reportMonth}.${format === 'xlsx' ? 'xlsx' : 'docx'}`
       a.click()
       window.URL.revokeObjectURL(url)
-      toast({ title: 'İndirme başladı', description: format === 'xlsx' ? 'Excel dosyası' : 'Word dosyası' })
+      toast({
+        title: 'İndirme başladı',
+        description: template === 'daily' ? 'Günlük üretim raporu' : format === 'xlsx' ? 'Excel dosyası' : 'Word dosyası',
+      })
     } catch (e: any) {
+      const is404 = e?.response?.status === 404
       toast({
         title: 'İndirilemedi',
-        description: e?.response?.data?.detail || 'Dosya oluşturulamadı',
+        description: is404
+          ? 'Rapor export endpointi bulunamadı. Backend deploy güncel değil.'
+          : e?.response?.data?.detail || 'Dosya oluşturulamadı',
         variant: 'destructive',
       })
     }
@@ -335,6 +345,10 @@ export function ReportsPage() {
                 <FileText className="mr-2 h-4 w-4" />
                 Word (.docx)
               </Button>
+              <Button variant="outline" size="sm" onClick={() => downloadExport('docx', 'daily')}>
+                <FileText className="mr-2 h-4 w-4" />
+                Günlük Üretim Şablon (.docx)
+              </Button>
             </div>
           </div>
         </CardHeader>
@@ -435,7 +449,7 @@ export function ReportsPage() {
                 {monthlyChartData.length === 0 ? (
                   <p className="text-sm text-muted-foreground">Veri yok</p>
                 ) : (
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
                     <BarChart data={monthlyChartData}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="label" tick={{ fontSize: 10 }} />
@@ -558,7 +572,7 @@ export function ReportsPage() {
             <CardDescription>Seçilen yapılandırmanın canlı önizlemesi</CardDescription>
           </CardHeader>
           <CardContent className="h-80 min-h-[320px] min-w-0">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
               <AreaChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="key" />
@@ -602,7 +616,7 @@ export function ReportsPage() {
             <CardDescription>Son 6 ay tamamlanan görev</CardDescription>
           </CardHeader>
           <CardContent className="h-56 min-h-[240px] min-w-0">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
               <BarChart data={throughputByMonthLocal}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="month" />
