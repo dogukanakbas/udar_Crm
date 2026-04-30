@@ -38,6 +38,24 @@ type TaskReportSummary = {
   by_team: { team_id: number; team_name: string; tasks_completed_in_period: number; tasks_active: number }[]
   by_user: { user_id: number; username: string; tasks_completed: number; tasks_active: number; hours_logged: number }[]
   tasks: TaskReportTask[]
+  master?: {
+    category_breakdown?: {
+      category_code: string
+      target_total: number
+      realized_total: number
+      remaining_total: number
+    }[]
+    line_detail?: {
+      task_id: number
+      task_title: string
+      product_line_index: number
+      category_code: string
+      target_total: number
+      realized_total: number
+      remaining_total: number
+      status: string
+    }[]
+  }
 }
 
 export function ReportsPage() {
@@ -258,6 +276,25 @@ export function ReportsPage() {
       Olusturulan: m.created_count,
     })) ?? []
 
+  const productionTotals = useMemo(() => {
+    const rows = taskReport?.master?.category_breakdown || []
+    return rows.reduce(
+      (acc, r) => {
+        acc.target += Number(r.target_total || 0)
+        acc.realized += Number(r.realized_total || 0)
+        acc.remaining += Number(r.remaining_total || 0)
+        return acc
+      },
+      { target: 0, realized: 0, remaining: 0 }
+    )
+  }, [taskReport])
+
+  const categoryRows = useMemo(() => {
+    const rows = [...(taskReport?.master?.category_breakdown || [])]
+    rows.sort((a, b) => Number(b.target_total || 0) - Number(a.target_total || 0))
+    return rows
+  }, [taskReport])
+
   if (!canReports) {
     return (
       <div className="space-y-4">
@@ -438,6 +475,70 @@ export function ReportsPage() {
               {taskReport.tasks.length}
             </p>
           )}
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Toplam Hedef (Tüm Ürünler)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-semibold">{productionTotals.target}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Toplam Üretilen</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-semibold text-emerald-600">{productionTotals.realized}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Toplam Kalan</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-semibold text-amber-600">{productionTotals.remaining}</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Ürün Kategori Üretim Tablosu</CardTitle>
+              <CardDescription>
+                Kasa, Pervaz ve diğer tüm kategoriler için hedef / üretilen / kalan toplamları
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {categoryRows.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Kategori üretim verisi bulunamadı.</p>
+              ) : (
+                <div className="overflow-x-auto rounded border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Kategori</th>
+                        <th className="px-3 py-2 text-right">Hedef</th>
+                        <th className="px-3 py-2 text-right">Üretilen</th>
+                        <th className="px-3 py-2 text-right">Kalan</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {categoryRows.map((row) => (
+                        <tr key={row.category_code || 'Kategori Yok'} className="border-t">
+                          <td className="px-3 py-2 font-medium">{row.category_code || 'Kategori Yok'}</td>
+                          <td className="px-3 py-2 text-right">{Number(row.target_total || 0)}</td>
+                          <td className="px-3 py-2 text-right text-emerald-700">{Number(row.realized_total || 0)}</td>
+                          <td className="px-3 py-2 text-right text-amber-700">{Number(row.remaining_total || 0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Card className="min-w-0">
