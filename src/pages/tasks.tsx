@@ -2107,8 +2107,7 @@ export function TaskDetailPage() {
                   const active = (task.activeProductIndex ?? 0) === lidx
                   const hex = cssColorFromProductCode(line.productColorCode)
                   const lineTarget = Math.max(1, Number(line.quantity ?? 1))
-                  // Kart üstündeki Üretilen/Kalan kalem geneli mutlak üretimi gösterir.
-                  // Giriş alanı varsayılanı ise aktif ekibin son kaydını kullanır.
+                  // Ekip-bazlı görünüm: kartta sadece bu kalemin aktif ekibinin değeri gösterilir.
                   const lineProductionMeta = (() => {
                     const lineTeamIds = (line.workflowTeamIds || []).map(String)
                     const lineState = (line.workflowStageState || {}) as Record<string, any>
@@ -2136,12 +2135,27 @@ export function TaskDetailPage() {
                       const fallback = Math.max(0, Number(line.qtyProduced ?? 0))
                       const overall = Math.max(overallFromTask, fallback)
                       const display = currentTaskTid ? currentStageFromTask : overall
-                      return { display, overall, currentStage: currentStageFromTask, hasOpenStage: Boolean(currentTaskTid) }
+                      return {
+                        display,
+                        overall,
+                        currentStage: currentStageFromTask,
+                        hasOpenStage: Boolean(currentTaskTid),
+                        currentTid: currentTaskTid,
+                        currentTarget: lineTarget,
+                        currentStageDone: Boolean(currentTaskTid ? (taskState[currentTaskTid] || {}).stage_done : false),
+                      }
                     }
-                    const currentTid =
-                      (line.currentTeamId && lineTeamIds.includes(String(line.currentTeamId)) ? String(line.currentTeamId) : null) ||
-                      (task.currentTeam && lineTeamIds.includes(String(task.currentTeam)) ? String(task.currentTeam) : null) ||
-                      null
+                    let currentTid =
+                      line.currentTeamId && lineTeamIds.includes(String(line.currentTeamId)) ? String(line.currentTeamId) : null
+                    if (!currentTid) {
+                      for (const tid of lineTeamIds) {
+                        const st = (lineState[tid] || {}) as Record<string, any>
+                        if (!st.stage_done) {
+                          currentTid = tid
+                          break
+                        }
+                      }
+                    }
                     let maxDone = 0
                     for (const tid of lineTeamIds) {
                       const st = lineState[tid] || {}
@@ -2152,7 +2166,9 @@ export function TaskDetailPage() {
                     const currentStage = Math.max(0, Number(stCurrent?.qty_done ?? 0))
                     const hasOpenStage = Boolean(currentTid)
                     const display = hasOpenStage ? currentStage : maxDone
-                    return { display, overall: maxDone, currentStage, hasOpenStage }
+                    const currentTarget = Math.max(1, Number(stCurrent?.qty_target ?? lineTarget))
+                    const currentStageDone = Boolean(stCurrent?.stage_done) || currentStage >= currentTarget
+                    return { display, overall: maxDone, currentStage, hasOpenStage, currentTid, currentTarget, currentStageDone }
                   })()
                   const lineEntries = (task.productionEntries || []).filter((e) => {
                     if (e.productLineIndex != null && !Number.isNaN(Number(e.productLineIndex))) {
@@ -2353,20 +2369,17 @@ export function TaskDetailPage() {
                           <p className="text-xs text-muted-foreground">Fire bilgisi girmek için kırmızı Fire butonuna basın.</p>
                         )}
                         <p className="text-xs font-semibold uppercase text-muted-foreground">Üretim — bu kalem</p>
-                        <p className="text-xs text-muted-foreground">
-                          Girilen değer <span className="font-medium text-foreground">bu kalem için toplam üretilmiş adet</span>
-                          (mutlak)dır; ekipler üst üste eklemez — son giriş geçerlidir.
-                        </p>
+                        <p className="text-xs text-muted-foreground">Girilen değer aktif ekip için mutlak değerdir.</p>
                         <div className="flex flex-wrap gap-2 items-end">
                           <div>
-                            <Label className="text-xs">Toplam üretilen (mutlak, {unit})</Label>
+                            <Label className="text-xs">Bu ekip üretilen (mutlak, {unit})</Label>
                             <Input
                               type="text"
                               inputMode="numeric"
                               pattern="[0-9]*"
                               autoComplete="off"
                               className="h-8 w-24"
-                              disabled={task.status === 'done' || sequentialProdLocked || salesOrderFulfilled}
+                              disabled={task.status === 'done' || sequentialProdLocked || salesOrderFulfilled || lineProductionMeta.currentStageDone}
                               value={
                                 lineProdInput[lidx]?.q ?? String(Math.max(0, Number(lineProduced ?? 0)))
                               }
@@ -2386,7 +2399,7 @@ export function TaskDetailPage() {
                             <Input
                               type="date"
                               className="h-8 w-40"
-                              disabled={task.status === 'done' || sequentialProdLocked || salesOrderFulfilled}
+                              disabled={task.status === 'done' || sequentialProdLocked || salesOrderFulfilled || lineProductionMeta.currentStageDone}
                               value={lineProdInput[lidx]?.d ?? prodDate}
                               onChange={(e) => {
                                 setLineProdInput((prev) => ({
@@ -2398,12 +2411,14 @@ export function TaskDetailPage() {
                           </div>
                           <Button
                             size="sm"
-                            disabled={task.status === 'done' || sequentialProdLocked || salesOrderFulfilled}
+                            disabled={task.status === 'done' || sequentialProdLocked || salesOrderFulfilled || lineProductionMeta.currentStageDone}
                             title={
                               salesOrderFulfilled
                                 ? 'Sipariş hedef adedine ulaşıldı'
                                 : sequentialProdLocked
                                   ? 'Önce usta başı görevi üstlenmeli'
+                                  : lineProductionMeta.currentStageDone
+                                    ? 'Bu ekip hedefe ulaştı; artık giriş yapılamaz'
                                   : undefined
                             }
                             onClick={async () => {
@@ -2421,6 +2436,17 @@ export function TaskDetailPage() {
                                 return
                               }
                               const quantity = Math.max(0, parseInt(raw, 10))
+                              if (quantity > lineProductionMeta.currentTarget) {
+                                toast({
+                                  title: 'Hedef aşılamaz',
+                                  description: `Bu ekip için en fazla ${formatNumber(lineProductionMeta.currentTarget)} ${unit} girilebilir.`,
+                                  variant: 'destructive',
+                                })
+                                return
+                              }
+                              if (quantity === lineProductionMeta.currentTarget) {
+                                toast({ title: 'Hedef tamamlandı', description: 'Bu ekip hedefe ulaştı; sonraki ekip çalışır.' })
+                              }
                               try {
                                 const payload: Record<string, any> = {
                                   quantity,
