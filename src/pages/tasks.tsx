@@ -1769,6 +1769,46 @@ export function TaskDetailPage() {
     !curStageSt?.pending_approval
 
   const wfState = task.workflowStageState || {}
+  const lineWorkflowRows = useMemo(() => {
+    const lines = task.productLines || []
+    const rootIds = (task.workflowTeamIds || []).map(String)
+    const ids: string[] = []
+    const pushId = (id: string) => {
+      if (!id || ids.includes(id)) return
+      ids.push(id)
+    }
+    rootIds.forEach(pushId)
+    lines.forEach((ln) => {
+      ;(ln.workflowTeamIds || []).map(String).forEach(pushId)
+    })
+    const rows = ids.map((tid, idx) => {
+      let target = 0
+      let done = 0
+      let lineCount = 0
+      let doneCount = 0
+      for (const ln of lines) {
+        const lnIds = (ln.workflowTeamIds || []).map(String)
+        if (!lnIds.includes(tid)) continue
+        lineCount += 1
+        const st = (ln.workflowStageState || {})[tid] || {}
+        const qtyTarget = Number(st.qty_target ?? ln.quantity ?? 0)
+        const qtyDone = Number(st.qty_done ?? 0)
+        target += Number.isFinite(qtyTarget) ? Math.max(0, qtyTarget) : 0
+        done += Number.isFinite(qtyDone) ? Math.max(0, qtyDone) : 0
+        if (st.stage_done) doneCount += 1
+      }
+      if (target <= 0) {
+        const fallback = Number(task.workflowStageTargets?.[idx] ?? workflowQtyFallback ?? 1)
+        target = Number.isFinite(fallback) ? Math.max(1, fallback) : 1
+      }
+      const isCurrent =
+        String(task.currentTeam || '') === tid ||
+        lines.some((ln) => String(ln.currentTeamId || '') === tid && (ln.workflowTeamIds || []).map(String).includes(tid))
+      const stageDone = lineCount > 0 ? doneCount === lineCount : !!wfState[tid]?.stage_done
+      return { tid, target, done, isCurrent, stageDone }
+    })
+    return rows
+  }, [task.productLines, task.workflowTeamIds, task.workflowStageTargets, task.currentTeam, workflowQtyFallback, wfState])
   const pendingSectionTeamIds = Object.entries(wfState)
     .filter(([_, st]) => st?.pending_approval && !st?.stage_done)
     .map(([k]) => k)
@@ -2476,14 +2516,14 @@ export function TaskDetailPage() {
                 <DetailRow label="Bitiş" value={task.end ? formatDate(task.end) : '—'} />
               </div>
             )}
-            {(task.workflowTeamIds || []).length > 0 && (
+            {lineWorkflowRows.length > 0 && (
               <div className="rounded border bg-background/70 p-3 space-y-2">
                 <p className="text-xs font-semibold uppercase text-muted-foreground">İş akışı — bölüm hedefleri</p>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {(task.workflowTeamIds || []).map((tid, idx) => {
-                    const st = wfState[tid] || {}
-                    const isCurrent = String(task.currentTeam || '') === String(tid)
-                    const done = !!st?.stage_done
+                  {lineWorkflowRows.map((row, idx) => {
+                    const tid = row.tid
+                    const isCurrent = row.isCurrent
+                    const done = row.stageDone
                     return (
                       <div
                         key={`wf-step-${tid}`}
@@ -2516,21 +2556,15 @@ export function TaskDetailPage() {
                   <span>○ Bekliyor</span>
                 </p>
                 <ul className="space-y-1.5 text-sm">
-                  {(task.workflowTeamIds || []).map((tid, idx) => {
+                  {lineWorkflowRows.map((row) => {
+                    const tid = row.tid
                     const tname = data.teams.find((t) => t.id === tid)?.name || tid
-                    const st = wfState[tid]
-                    const tgt =
-                      task.workflowStageTargets?.[idx] ??
-                      (typeof st?.qty_target === 'number' ? st.qty_target : undefined) ??
-                      workflowQtyFallback ??
-                      1
-                    const done = typeof st?.qty_done === 'number' ? st.qty_done : null
                     return (
                       <li key={tid} className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
                         <span className="font-medium">{tname}</span>
                         <span className="text-muted-foreground text-xs sm:text-sm">
-                          Hedef: <span className="font-medium text-foreground">{tgt}</span> adet
-                          {done != null ? ` • Son bildirilen (mutlak): ${done}` : ''}
+                          Hedef: <span className="font-medium text-foreground">{Math.max(0, row.target)}</span> adet
+                          {` • Son bildirilen (mutlak): ${Math.max(0, row.done)}`}
                         </span>
                       </li>
                     )
@@ -2864,18 +2898,19 @@ export function TaskDetailPage() {
                 {!te.ended_at && <Badge variant="secondary">Açık</Badge>}
               </div>
             ))}
-            {(task.workflowTeamIds?.length ?? 0) > 0 && (
+            {lineWorkflowRows.length > 0 && (
               <div className="rounded border p-3 space-y-1 mt-3">
                 <p className="text-sm font-semibold">Bölüm durumu</p>
                 <ul className="text-xs text-muted-foreground space-y-1">
-                  {(task.workflowTeamIds || []).map((tid) => {
+                  {lineWorkflowRows.map((row) => {
+                    const tid = row.tid
                     const st = wfState[tid] || {}
                     const name = data.teams.find((t) => t.id === tid)?.name || tid
                     return (
                       <li key={tid}>
-                        <span className="font-medium text-foreground">{name}</span>: hedef {st.qty_target ?? '—'}, son bildirilen{' '}
-                        (mutlak) {st.qty_done ?? 0}
-                        {st.stage_done ? ' ✓ tamam' : st.pending_approval ? ' — onay bekliyor' : ''}
+                        <span className="font-medium text-foreground">{name}</span>: hedef {Math.max(0, row.target)}, son bildirilen{' '}
+                        (mutlak) {Math.max(0, row.done)}
+                        {row.stageDone ? ' ✓ tamam' : st.pending_approval ? ' — onay bekliyor' : ''}
                         {st.production_shortfall_reason ? (
                           <span className="block mt-0.5 text-amber-700 dark:text-amber-400">
                             Eksik üretim gerekçesi: {st.production_shortfall_reason}
