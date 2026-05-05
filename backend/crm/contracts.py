@@ -1413,7 +1413,7 @@ def _dynamic_table_physical_width(groups):
 def _dynamic_column_spans(columns, physical_width):
     spans = [1 for _ in columns]
     extra = max(physical_width - len(columns), 0)
-    priority_terms = ('satis', 'sat', 'urun', 'ad', 'olcu', 'renk')
+    priority_terms = ('urun', 'hizmet', 'satis', 'sat', 'ad', 'olcu', 'renk')
     normalized = [_normalize_column_key(column) for column in columns]
     for term in priority_terms:
         if extra <= 0:
@@ -1430,6 +1430,44 @@ def _dynamic_column_spans(columns, physical_width):
         index += 1
         extra -= 1
     return spans
+
+
+def _dynamic_span_width(ws, start_column, span):
+    width = Decimal('0')
+    for physical_column in range(start_column, start_column + span):
+        letter = get_column_letter(physical_column)
+        width += Decimal(str(ws.column_dimensions[letter].width or 10))
+    return max(width, Decimal('8'))
+
+
+def _dynamic_text_row_height(value, width_units, base=18, line_height=13, max_height=96):
+    text = str(value or '').replace('\r\n', '\n').replace('\r', '\n')
+    if not text:
+        return base
+    usable_chars = max(8, int(float(width_units) * 1.05))
+    visual_lines = 0
+    for raw_line in text.split('\n'):
+        visual_lines += max(1, (len(raw_line) + usable_chars - 1) // usable_chars)
+    return min(max_height, max(base, base + (visual_lines - 1) * line_height))
+
+
+def _dynamic_set_row_height(ws, row, height):
+    current = ws.row_dimensions[row].height or 0
+    ws.row_dimensions[row].height = max(current, height)
+
+
+def _dynamic_is_numeric_column(header):
+    key = _normalize_column_key(header)
+    return any(term in key for term in ('miktar', 'adet', 'fiyat', 'tutar', 'iskonto', 'kdv', 'toplam', 'yekun'))
+
+
+def _format_quantity(value):
+    amount = Decimal(value or 0)
+    if amount == amount.to_integral_value():
+        return f'{int(amount):,}'.replace(',', '.')
+    normalized = amount.normalize()
+    text = f'{normalized:,.2f}'.rstrip('0').rstrip('.')
+    return text.replace(',', 'X').replace('.', ',').replace('X', '.')
 
 
 def _build_dynamic_line_groups(quote):
@@ -1510,10 +1548,12 @@ def _write_dynamic_product_group(ws, quote, group, row, column, physical_width=N
             ws.cell(row, physical_column).fill = header_fill
             ws.cell(row, physical_column).border = border
         current_column += span
+    _dynamic_set_row_height(ws, row, 22)
     row += 1
 
     for line in group['lines']:
         current_column = column
+        required_height = 18
         for offset, header in enumerate(columns):
             span = spans[offset]
             if span > 1:
@@ -1528,40 +1568,52 @@ def _write_dynamic_product_group(ws, quote, group, row, column, physical_width=N
                 cell.value = value
             for physical_column in range(current_column, current_column + span):
                 ws.cell(row, physical_column).border = border
-            cell.alignment = Alignment(vertical='center', wrap_text=True)
+            cell.alignment = Alignment(
+                horizontal='right' if _dynamic_is_numeric_column(header) else 'left',
+                vertical='center',
+                wrap_text=True,
+                shrink_to_fit=_dynamic_is_numeric_column(header),
+            )
+            if not _dynamic_is_numeric_column(header):
+                required_height = max(required_height, _dynamic_text_row_height(value, _dynamic_span_width(ws, current_column, span)))
             current_column += span
+        _dynamic_set_row_height(ws, row, required_height)
         row += 1
-
-    quantity_index = next((index for index, header in enumerate(columns) if 'miktar' in _normalize_column_key(header) or 'adet' in _normalize_column_key(header)), None)
-    quantity_total = sum((Decimal(line.qty or 0) for line in group['lines']), Decimal('0'))
-    for col in range(column, last_column + 1):
-        ws.cell(row, col).border = border
-    if quantity_index is not None:
-        quantity_column = column + sum(spans[:quantity_index])
-        cell = ws.cell(row, quantity_column)
-        cell.value = float(quantity_total)
-        cell.number_format = '#,##0.##'
-        cell.font = Font(bold=True, color='203864')
-        cell.alignment = Alignment(horizontal='right', vertical='center')
-    row += 1
 
     subtotal = sum((_line_subtotal(line) for line in group['lines']), Decimal('0'))
     tax = sum((_line_tax(line) for line in group['lines']), Decimal('0'))
     grand = subtotal + tax
+    quantity_total = sum((Decimal(line.qty or 0) for line in group['lines']), Decimal('0'))
     summary_values = [
-        ('Ara Toplam', subtotal),
-        (_summary_tax_label(group['lines']), tax),
-        ('Yekün', grand),
+        ('Toplam Ürün:', _format_quantity(quantity_total), False),
+        ('Ara Toplam', subtotal, True),
+        (_summary_tax_label(group['lines']), tax, True),
+        ('Yekün', grand, True),
     ]
-    for label, amount in summary_values:
-        for col in range(column, last_column + 1):
-            ws.cell(row, col).border = border
-        ws.cell(row, max(column, last_column - 1)).value = label
-        ws.cell(row, max(column, last_column - 1)).font = Font(bold=True, color='203864')
+    for label, amount, is_currency in summary_values:
+        label_column = max(column, last_column - 1)
+        left_end_column = max(column, label_column - 1)
+        _unmerge_overlapping_range(ws, row, row, column, left_end_column)
+        if left_end_column > column:
+            ws.merge_cells(start_row=row, start_column=column, end_row=row, end_column=left_end_column)
+        for col in range(column, left_end_column + 1):
+            ws.cell(row, col).border = EMPTY_BORDER
+        left_cell = ws.cell(row, column)
+        left_cell.value = ''
+        left_cell.border = EMPTY_BORDER
+        left_cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        label_cell = ws.cell(row, label_column)
+        label_cell.value = label
+        label_cell.font = Font(bold=True, color='203864')
+        label_cell.border = border
+        label_cell.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
         amount_cell = ws.cell(row, last_column)
-        amount_cell.value = float(amount)
-        amount_cell.number_format = _currency_number_format(currency_code)
+        amount_cell.value = float(amount) if is_currency else str(amount)
+        amount_cell.number_format = _currency_number_format(currency_code) if is_currency else '@'
         amount_cell.font = Font(bold=True)
+        amount_cell.border = border
+        amount_cell.alignment = Alignment(horizontal='right', vertical='center', shrink_to_fit=True)
+        _dynamic_set_row_height(ws, row, _dynamic_text_row_height(label, _dynamic_span_width(ws, max(column, last_column - 1), 1), base=18, max_height=48))
         row += 1
 
     for item in group.get('technical_items') or []:
@@ -1571,6 +1623,7 @@ def _write_dynamic_product_group(ws, quote, group, row, column, physical_width=N
         cell.value = f'* {item}'
         cell.font = Font(italic=True, color='203864')
         cell.alignment = Alignment(wrap_text=True)
+        _dynamic_set_row_height(ws, row, _dynamic_text_row_height(cell.value, _dynamic_span_width(ws, column, last_column - column + 1), base=18, max_height=72))
         row += 1
 
     return row
@@ -1613,6 +1666,7 @@ def _write_service_summary_group(ws, quote, groups, row, column, physical_width)
             ws.cell(row, physical_column).fill = header_fill
             ws.cell(row, physical_column).border = border
         current_column += span
+    _dynamic_set_row_height(ws, row, 22)
     row += 1
 
     subtotal_total = Decimal('0')
@@ -1653,6 +1707,7 @@ def _write_service_summary_group(ws, quote, groups, row, column, physical_width)
 
 def _write_service_summary_row(ws, row, column, spans, values, currency_code, border, bold=False):
     current_column = column
+    required_height = 18
     for index, value in enumerate(values):
         span = spans[index]
         if span > 1:
@@ -1665,10 +1720,19 @@ def _write_service_summary_row(ws, row, column, spans, values, currency_code, bo
             if index < 3:
                 cell.number_format = '#,##0.##'
         cell.font = Font(bold=bold, color='203864' if bold else '000000')
-        cell.alignment = Alignment(horizontal='right' if index >= 1 else 'left', vertical='center', wrap_text=True)
+        is_amount_column = index >= 2
+        cell.alignment = Alignment(
+            horizontal='right' if is_amount_column else 'left',
+            vertical='center',
+            wrap_text=True,
+            shrink_to_fit=is_amount_column,
+        )
         for physical_column in range(current_column, current_column + span):
             ws.cell(row, physical_column).border = border
+        if not is_amount_column:
+            required_height = max(required_height, _dynamic_text_row_height(value, _dynamic_span_width(ws, current_column, span), max_height=84))
         current_column += span
+    _dynamic_set_row_height(ws, row, required_height)
     return row + 1
 
 
