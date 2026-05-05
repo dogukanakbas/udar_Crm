@@ -2400,11 +2400,19 @@ export function TaskDetailPage() {
                               }
                               const quantity = Math.max(0, parseInt(raw, 10))
                               try {
-                                await api.post(`/tasks/${task.id}/log-production/`, {
+                                const payload: Record<string, any> = {
                                   quantity,
                                   entry_date: row.d || prodDate,
                                   product_line_index: lidx,
-                                })
+                                }
+                                const lineTeamId =
+                                  (line.currentTeamId && String(line.currentTeamId).trim() !== ''
+                                    ? String(line.currentTeamId).trim()
+                                    : task.currentTeam && String(task.currentTeam).trim() !== ''
+                                      ? String(task.currentTeam).trim()
+                                      : null)
+                                if (lineTeamId && /^\d+$/.test(lineTeamId)) payload.team = Number(lineTeamId)
+                                await api.post(`/tasks/${task.id}/log-production/`, payload)
                                 await hydrateFromApi()
                                 setLineProdInput((prev) => {
                                   const next = { ...prev }
@@ -3132,10 +3140,16 @@ export function TaskDetailPage() {
                         }
                         const quantity = Math.max(1, parseInt(raw, 10))
                         try {
-                          await api.post(`/tasks/${task.id}/log-production/`, {
+                          const payload: Record<string, any> = {
                             quantity,
                             entry_date: prodDate,
-                          })
+                          }
+                          const currentTeamId =
+                            task.currentTeam && String(task.currentTeam).trim() !== ''
+                              ? String(task.currentTeam).trim()
+                              : null
+                          if (currentTeamId && /^\d+$/.test(currentTeamId)) payload.team = Number(currentTeamId)
+                          await api.post(`/tasks/${task.id}/log-production/`, payload)
                           await hydrateFromApi()
                           setProdQty('1')
                           toast({ title: 'Üretim kaydedildi' })
