@@ -2427,12 +2427,44 @@ export function TaskDetailPage() {
                                   entry_date: row.d || prodDate,
                                   product_line_index: lidx,
                                 }
-                                const lineTeamId =
-                                  (line.currentTeamId && String(line.currentTeamId).trim() !== ''
-                                    ? String(line.currentTeamId).trim()
-                                    : null)
-                                if (lineTeamId && /^\d+$/.test(lineTeamId)) payload.team = Number(lineTeamId)
-                                await api.post(`/tasks/${task.id}/log-production/`, payload)
+                                const candidateTeams: string[] = []
+                                const pushCandidate = (val: unknown) => {
+                                  const s = val != null ? String(val).trim() : ''
+                                  if (!/^\d+$/.test(s)) return
+                                  if (!candidateTeams.includes(s)) candidateTeams.push(s)
+                                }
+                                // Öncelik: kalemin aktif ekibi
+                                pushCandidate(line.currentTeamId)
+                                // Fallback: kullanıcının üyesi/lideri olduğu açık kalem aşamaları
+                                const lineState = (line.workflowStageState || {}) as Record<string, any>
+                                for (const tid of (line.workflowTeamIds || []).map(String)) {
+                                  const st = (lineState[tid] || {}) as Record<string, any>
+                                  if (st.stage_done) continue
+                                  const tr = data.teams.find((t) => String(t.id) === tid)
+                                  const isMember = !!(currentUserId && tr?.memberIds?.includes(String(currentUserId)))
+                                  const isLeader = !!(currentUserId && tr?.leaderId && String(tr.leaderId) === String(currentUserId))
+                                  if (isMember || isLeader) pushCandidate(tid)
+                                }
+
+                                let posted = false
+                                let lastErr: any = null
+                                if (candidateTeams.length === 0) {
+                                  await api.post(`/tasks/${task.id}/log-production/`, payload)
+                                  posted = true
+                                } else {
+                                  for (const teamId of candidateTeams) {
+                                    try {
+                                      await api.post(`/tasks/${task.id}/log-production/`, { ...payload, team: Number(teamId) })
+                                      posted = true
+                                      break
+                                    } catch (err: any) {
+                                      lastErr = err
+                                      const s = Number(err?.response?.status || 0)
+                                      if (s !== 400 && s !== 403) throw err
+                                    }
+                                  }
+                                }
+                                if (!posted && lastErr) throw lastErr
                                 await hydrateFromApi()
                                 setLineProdInput((prev) => {
                                   const next = { ...prev }
