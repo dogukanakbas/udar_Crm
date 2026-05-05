@@ -2408,9 +2408,7 @@ export function TaskDetailPage() {
                                 const lineTeamId =
                                   (line.currentTeamId && String(line.currentTeamId).trim() !== ''
                                     ? String(line.currentTeamId).trim()
-                                    : task.currentTeam && String(task.currentTeam).trim() !== ''
-                                      ? String(task.currentTeam).trim()
-                                      : null)
+                                    : null)
                                 if (lineTeamId && /^\d+$/.test(lineTeamId)) payload.team = Number(lineTeamId)
                                 await api.post(`/tasks/${task.id}/log-production/`, payload)
                                 await hydrateFromApi()

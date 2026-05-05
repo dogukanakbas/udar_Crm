@@ -1447,7 +1447,32 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         # user.teams ilişkisini de dikkate al (bazı canlı verilerde members M2M senkronu gecikebiliyor).
         is_team_linked_u = bool(tid in user_team_set)
         if not (is_staff_u or is_member_u or is_leader_u or is_assignee_u or is_team_linked_u):
-            raise PermissionDenied("Bu ekibin üyesi/lideri değilsiniz")
+            # İstemci yanlış/eskimiş team göndermiş olabilir; kalem akışından yeniden çözmeyi dene.
+            if line_wf_ids:
+                line_state_auth = dict(active_line.get('workflow_stage_state') or {})
+                open_for_user_auth = []
+                for ltid in line_wf_ids:
+                    if ltid not in user_team_set:
+                        continue
+                    st_auth = dict(line_state_auth.get(str(ltid)) or {})
+                    if st_auth.get('stage_done'):
+                        continue
+                    open_for_user_auth.append(ltid)
+                if len(open_for_user_auth) == 1:
+                    tid = int(open_for_user_auth[0])
+                    team_row = Team.objects.filter(id=tid, organization_id=task.organization_id).first()
+                    if not team_row:
+                        return Response({'detail': 'Ekip bulunamadı'}, status=status.HTTP_400_BAD_REQUEST)
+                    is_member_u = team_row.members.filter(id=user.id).exists()
+                    is_leader_u = bool(getattr(team_row, 'leader_id', None) and str(team_row.leader_id) == str(user.id))
+                    is_team_linked_u = bool(tid in user_team_set)
+                elif len(open_for_user_auth) > 1:
+                    return Response(
+                        {'detail': 'Birden fazla ekipte yetkiniz var; doğru ekip için tekrar deneyin.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            if not (is_staff_u or is_member_u or is_leader_u or is_assignee_u or is_team_linked_u):
+                raise PermissionDenied("Bu ekibin üyesi/lideri değilsiniz")
         if (
             wf
             and not getattr(task, 'workflow_parallel', False)
