@@ -1341,7 +1341,10 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         line_wf_ids = [int(x) for x in (active_line or {}).get('workflow_team_ids', []) if str(x).isdigit()]
         wf = workflow_team_id_list(task)
         user_teams = list(user.teams.values_list('id', flat=True))
-        user_team_set = set(user_teams)
+        leader_team_ids = set(
+            Team.objects.filter(organization_id=task.organization_id, leader_id=user.id).values_list('id', flat=True)
+        )
+        user_team_set = set(user_teams) | leader_team_ids
         team_raw = request.data.get('team')
         tid = int(team_raw) if team_raw not in (None, '') else None
         if tid is None:

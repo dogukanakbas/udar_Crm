@@ -2352,7 +2352,6 @@ export function TaskDetailPage() {
                                   quantity,
                                   entry_date: row.d || prodDate,
                                   product_line_index: lidx,
-                                  ...(task.currentTeam ? { team: task.currentTeam } : {}),
                                 })
                                 await hydrateFromApi()
                                 setLineProdInput((prev) => {
@@ -3089,7 +3088,6 @@ export function TaskDetailPage() {
                           await api.post(`/tasks/${task.id}/log-production/`, {
                             quantity,
                             entry_date: prodDate,
-                            ...(task.currentTeam ? { team: task.currentTeam } : {}),
                           })
                           await hydrateFromApi()
                           setProdQty('1')
