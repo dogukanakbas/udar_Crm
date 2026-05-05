@@ -2112,9 +2112,31 @@ export function TaskDetailPage() {
                   const lineProductionMeta = (() => {
                     const lineTeamIds = (line.workflowTeamIds || []).map(String)
                     const lineState = (line.workflowStageState || {}) as Record<string, any>
+                    const taskTeamIds = (task.workflowTeamIds || []).map(String)
+                    const taskState = (task.workflowStageState || {}) as Record<string, any>
                     if (!lineTeamIds.length) {
+                      // Eski/göçmemiş kayıtlarda üretim task.workflow_stage_state.qty_done_by_line içine yazılmış olabilir.
+                      let overallFromTask = 0
+                      let currentStageFromTask = 0
+                      const currentTaskTid =
+                        (line.currentTeamId && taskTeamIds.includes(String(line.currentTeamId)) ? String(line.currentTeamId) : null) ||
+                        (task.currentTeam && taskTeamIds.includes(String(task.currentTeam)) ? String(task.currentTeam) : null) ||
+                        null
+                      for (const tid of taskTeamIds) {
+                        const st = (taskState[tid] || {}) as Record<string, any>
+                        const qmap = (st.qty_done_by_line || {}) as Record<string, any>
+                        const byLine = Math.max(0, Number(qmap[String(lidx)] ?? 0))
+                        if (byLine > overallFromTask) overallFromTask = byLine
+                      }
+                      if (currentTaskTid) {
+                        const stCur = (taskState[currentTaskTid] || {}) as Record<string, any>
+                        const qmapCur = (stCur.qty_done_by_line || {}) as Record<string, any>
+                        currentStageFromTask = Math.max(0, Number(qmapCur[String(lidx)] ?? 0))
+                      }
                       const fallback = Math.max(0, Number(line.qtyProduced ?? 0))
-                      return { display: fallback, overall: fallback, currentStage: fallback, hasOpenStage: false }
+                      const overall = Math.max(overallFromTask, fallback)
+                      const display = currentTaskTid ? currentStageFromTask : overall
+                      return { display, overall, currentStage: currentStageFromTask, hasOpenStage: Boolean(currentTaskTid) }
                     }
                     const currentTid =
                       (line.currentTeamId && lineTeamIds.includes(String(line.currentTeamId)) ? String(line.currentTeamId) : null) ||
