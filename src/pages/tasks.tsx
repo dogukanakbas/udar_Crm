@@ -2107,18 +2107,19 @@ export function TaskDetailPage() {
                   const active = (task.activeProductIndex ?? 0) === lidx
                   const hex = cssColorFromProductCode(line.productColorCode)
                   const lineTarget = Math.max(1, Number(line.quantity ?? 1))
-                  // Kalem-bazlı akışta üretim line.workflowStageState içinde tutulur.
+                  // Kalem kartında yalnızca aktif ekibin (veya kalemin current ekibinin) verisi gösterilir.
+                  // Böylece Giben'de girilen miktar CNC'de "üretilen" gibi görünmez.
                   const stageProduced = (() => {
                     const lineTeamIds = (line.workflowTeamIds || []).map(String)
                     const lineState = (line.workflowStageState || {}) as Record<string, any>
                     if (!lineTeamIds.length) return null
-                    let maxDone = 0
-                    for (const tid of lineTeamIds) {
-                      const st = lineState[tid] || lineState[String(tid)] || {}
-                      const done = Math.max(0, Number(st?.qty_done ?? 0))
-                      if (done > maxDone) maxDone = done
-                    }
-                    return maxDone
+                    const currentTid =
+                      (task.currentTeam && lineTeamIds.includes(String(task.currentTeam)) ? String(task.currentTeam) : null) ||
+                      (line.currentTeamId && lineTeamIds.includes(String(line.currentTeamId)) ? String(line.currentTeamId) : null) ||
+                      null
+                    if (!currentTid) return 0
+                    const st = lineState[currentTid] || {}
+                    return Math.max(0, Number(st?.qty_done ?? 0))
                   })()
                   const lineProduced = stageProduced != null ? stageProduced : Math.max(0, Number(line.qtyProduced ?? 0))
                   const lineRemaining = Math.max(0, lineTarget - lineProduced)
