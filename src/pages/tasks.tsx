@@ -1679,7 +1679,7 @@ export function TaskDetailPage() {
     let cancelled = false
     ;(async () => {
       try {
-        const res = await api.get('/mdf-skus/')
+        const res = await api.get(`/tasks/${task.id}/mdf-options/`)
         const rows = (res.data || []).map((r: any) => ({
           id: String(r.id),
           label: `${r.thickness_mm} mm · ${r.width_cm} × ${r.height_cm} cm`,
@@ -2958,7 +2958,7 @@ export function TaskDetailPage() {
                             note: mdfNote.trim() || undefined,
                           })
                           await refreshTask()
-                          const mdfRes = await api.get('/mdf-skus/')
+                          const mdfRes = await api.get(`/tasks/${task.id}/mdf-options/`)
                           setMdfSkus(
                             (mdfRes.data || []).map((r: any) => ({
                               id: String(r.id),

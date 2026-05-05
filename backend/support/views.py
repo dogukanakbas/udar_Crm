@@ -1790,6 +1790,32 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
         return Response(TaskSerializer(task, context={'request': request}).data)
 
+    @action(detail=True, methods=['get'], url_path='mdf-options')
+    def mdf_options(self, request, pk=None):
+        """Görev bazlı MDF seçim listesi (tasks.view yetkisiyle)."""
+        task = self.get_object()
+        if task.organization_id != request.user.organization_id:
+            raise PermissionDenied("Farklı organizasyon")
+        team = task.current_team or task.team
+        team_name = (getattr(team, 'name', '') or '').lower()
+        if ('giben' not in team_name) and ('pvc' not in team_name):
+            return Response([], status=status.HTTP_200_OK)
+        from mdf.models import MdfSku
+
+        rows = MdfSku.objects.filter(organization_id=task.organization_id).order_by('thickness_mm', 'width_cm', 'height_cm')
+        return Response(
+            [
+                {
+                    'id': r.id,
+                    'thickness_mm': r.thickness_mm,
+                    'width_cm': r.width_cm,
+                    'height_cm': r.height_cm,
+                    'quantity': r.quantity,
+                }
+                for r in rows
+            ]
+        )
+
     @action(detail=False, methods=['get'], url_path='production-report')
     def production_report(self, request):
         """Günlük üretim: ?date=YYYY-MM-DD (yönetici)"""
