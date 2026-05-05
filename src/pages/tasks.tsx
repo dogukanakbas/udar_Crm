@@ -2154,15 +2154,15 @@ export function TaskDetailPage() {
                     const display = hasOpenStage ? currentStage : maxDone
                     return { display, overall: maxDone, currentStage, hasOpenStage }
                   })()
-                  const lineProduced = lineProductionMeta.display
-                  const lineRemaining = Math.max(0, lineTarget - lineProduced)
-                  const unit = line.unitType === 'metre' || isPvcStage ? 'metre' : 'adet'
                   const lineEntries = (task.productionEntries || []).filter((e) => {
                     if (e.productLineIndex != null && !Number.isNaN(Number(e.productLineIndex))) {
                       return Number(e.productLineIndex) === lidx
                     }
                     return lidx === 0 && (task.productLines?.length ?? 0) > 0
                   })
+                  const lineProduced = lineProductionMeta.display
+                  const lineRemaining = Math.max(0, lineTarget - lineProduced)
+                  const unit = line.unitType === 'metre' || isPvcStage ? 'metre' : 'adet'
                   return (
                     <div
                       key={lidx}
