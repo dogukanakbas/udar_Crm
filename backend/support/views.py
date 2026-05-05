@@ -1369,10 +1369,9 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                     if len(open_for_user) == 1:
                         tid = open_for_user[0]
                     elif len(open_for_user) > 1:
-                        return Response(
-                            {'detail': 'Bu kalem için birden fazla ekipte yetkiniz var; team gönderin.'},
-                            status=status.HTTP_400_BAD_REQUEST,
-                        )
+                        # Veri tutarsızlığı nedeniyle birden fazla açık aşama görünürse
+                        # akış sırasındaki ilk uygun ekibi seç.
+                        tid = open_for_user[0]
             # Sıralı workflow'ta hangi ekip aktifse, üretim kaydı o ekibe gitmeli.
             # Kullanıcı birden fazla workflow ekibinin üyesi ise eski mantık ilk uygun ekibi
             # seçip A/B verisini karıştırabiliyordu.
@@ -1467,10 +1466,14 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                     is_leader_u = bool(getattr(team_row, 'leader_id', None) and str(team_row.leader_id) == str(user.id))
                     is_team_linked_u = bool(tid in user_team_set)
                 elif len(open_for_user_auth) > 1:
-                    return Response(
-                        {'detail': 'Birden fazla ekipte yetkiniz var; doğru ekip için tekrar deneyin.'},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
+                    # Akış sırasındaki ilk uygun açık ekiple devam et.
+                    tid = int(open_for_user_auth[0])
+                    team_row = Team.objects.filter(id=tid, organization_id=task.organization_id).first()
+                    if not team_row:
+                        return Response({'detail': 'Ekip bulunamadı'}, status=status.HTTP_400_BAD_REQUEST)
+                    is_member_u = team_row.members.filter(id=user.id).exists()
+                    is_leader_u = bool(getattr(team_row, 'leader_id', None) and str(team_row.leader_id) == str(user.id))
+                    is_team_linked_u = bool(tid in user_team_set)
             if not (is_staff_u or is_member_u or is_leader_u or is_assignee_u or is_team_linked_u):
                 raise PermissionDenied("Bu ekibin üyesi/lideri değilsiniz")
         if (
