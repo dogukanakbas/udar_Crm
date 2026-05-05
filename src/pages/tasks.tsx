@@ -2114,7 +2114,7 @@ export function TaskDetailPage() {
                     const lineState = (line.workflowStageState || {}) as Record<string, any>
                     if (!lineTeamIds.length) {
                       const fallback = Math.max(0, Number(line.qtyProduced ?? 0))
-                      return { overall: fallback, currentStage: fallback }
+                      return { display: fallback, overall: fallback, currentStage: fallback, hasOpenStage: false }
                     }
                     const currentTid =
                       (line.currentTeamId && lineTeamIds.includes(String(line.currentTeamId)) ? String(line.currentTeamId) : null) ||
@@ -2128,9 +2128,11 @@ export function TaskDetailPage() {
                     }
                     const stCurrent = currentTid ? lineState[currentTid] || {} : {}
                     const currentStage = Math.max(0, Number(stCurrent?.qty_done ?? 0))
-                    return { overall: maxDone, currentStage }
+                    const hasOpenStage = Boolean(currentTid)
+                    const display = hasOpenStage ? currentStage : maxDone
+                    return { display, overall: maxDone, currentStage, hasOpenStage }
                   })()
-                  const lineProduced = lineProductionMeta.overall
+                  const lineProduced = lineProductionMeta.display
                   const lineRemaining = Math.max(0, lineTarget - lineProduced)
                   const unit = line.unitType === 'metre' || isPvcStage ? 'metre' : 'adet'
                   const lineEntries = (task.productionEntries || []).filter((e) => {
