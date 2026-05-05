@@ -276,6 +276,7 @@ export interface Task {
   history?: TaskHistoryItem[]
   notes?: string
   productionEntries?: TaskProductionEntry[]
+  mdfConsumptions?: TaskMdfConsumption[]
   /** Birden fazla ürün; aktif olanın alanları modelCode / quantity vb. ile senkron tutulur. */
   productLines?: TaskProductLine[]
   activeProductIndex?: number
@@ -292,6 +293,21 @@ export interface TaskProductionEntry {
   productLineIndex?: number | null
   entryDate: string
   quantity: number
+  note?: string
+  createdAt?: string
+}
+
+export interface TaskMdfConsumption {
+  id: string
+  task: string
+  user?: string
+  userName?: string
+  team?: string
+  teamName?: string
+  mdfSku?: string
+  mdfLabel?: string
+  quantity: number
+  consumedAt: string
   note?: string
   createdAt?: string
 }

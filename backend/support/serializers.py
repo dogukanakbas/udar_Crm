@@ -9,6 +9,7 @@ from .models import (
     TaskTimeEntry,
     TaskModel,
     TaskProductionEntry,
+    TaskMdfConsumption,
 )
 from .workflow_utils import apply_product_line_to_task, ensure_product_line_workflows, ensure_workflow_state, workflow_team_id_list
 from .models_automation import AutomationRule
@@ -90,12 +91,49 @@ class TaskProductionEntrySerializer(serializers.ModelSerializer):
         return obj.team.name if obj.team else None
 
 
+class TaskMdfConsumptionSerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+    team_name = serializers.SerializerMethodField()
+    mdf_label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TaskMdfConsumption
+        fields = [
+            'id',
+            'task',
+            'user',
+            'user_name',
+            'team',
+            'team_name',
+            'mdf_sku',
+            'mdf_label',
+            'quantity',
+            'consumed_at',
+            'note',
+            'created_at',
+        ]
+        read_only_fields = ['user_name', 'team_name', 'mdf_label', 'created_at']
+
+    def get_user_name(self, obj):
+        return obj.user.username if obj.user else None
+
+    def get_team_name(self, obj):
+        return obj.team.name if obj.team else None
+
+    def get_mdf_label(self, obj):
+        sku = getattr(obj, 'mdf_sku', None)
+        if not sku:
+            return None
+        return f"{sku.thickness_mm} mm · {sku.width_cm} × {sku.height_cm} cm"
+
+
 class TaskSerializer(serializers.ModelSerializer):
     attachments = TaskAttachmentSerializer(many=True, read_only=True)
     comments = TaskCommentSerializer(many=True, read_only=True)
     checklist = serializers.SerializerMethodField()
     time_entries = serializers.SerializerMethodField()
     production_entries = serializers.SerializerMethodField()
+    mdf_consumptions = serializers.SerializerMethodField()
 
     class Meta:
         model = Task
@@ -105,6 +143,7 @@ class TaskSerializer(serializers.ModelSerializer):
             'checklist',
             'time_entries',
             'production_entries',
+            'mdf_consumptions',
         )
         extra_kwargs = {
             'owner': {'required': False, 'allow_null': True},
@@ -130,6 +169,10 @@ class TaskSerializer(serializers.ModelSerializer):
     def get_production_entries(self, obj):
         items = obj.production_entries.all().order_by('-entry_date', '-created_at')[:200]
         return TaskProductionEntrySerializer(items, many=True).data
+
+    def get_mdf_consumptions(self, obj):
+        items = obj.mdf_consumptions.select_related('user', 'team', 'mdf_sku').all()[:200]
+        return TaskMdfConsumptionSerializer(items, many=True).data
 
     def validate(self, attrs):
         # Boş sipariş: üretim düşümü isteğe bağlı

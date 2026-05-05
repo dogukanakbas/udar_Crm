@@ -232,3 +232,29 @@ class TaskProductionEntry(models.Model):
     def __str__(self):
         return f"{self.task_id} {self.entry_date} +{self.quantity}"
 
+
+class TaskMdfConsumption(models.Model):
+    """Görev içinde ekiplerin MDF tüketim kayıtları (stoktan otomatik düşer)."""
+
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='mdf_consumptions')
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='task_mdf_consumptions')
+    team = models.ForeignKey('accounts.Team', on_delete=models.SET_NULL, null=True, blank=True)
+    mdf_sku = models.ForeignKey('mdf.MdfSku', on_delete=models.CASCADE, related_name='task_consumptions')
+    quantity = models.PositiveIntegerField(default=0)
+    consumed_at = models.DateField(db_index=True)
+    note = models.CharField(max_length=255, blank=True, default='')
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_task_mdf_consumptions',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-consumed_at', '-created_at']
+
+    def __str__(self):
+        return f"{self.task_id} MDF {self.mdf_sku_id} -{self.quantity}"
+

@@ -1573,6 +1573,13 @@ export function TaskDetailPage() {
   const [lineFireOpen, setLineFireOpen] = useState<Record<number, boolean>>({})
   const [claimBusy, setClaimBusy] = useState(false)
   const [productionShortfallNote, setProductionShortfallNote] = useState('')
+  const [mdfSkus, setMdfSkus] = useState<Array<{ id: string; label: string; quantity: number }>>([])
+  const [mdfSkuId, setMdfSkuId] = useState('none')
+  const [mdfWorkerId, setMdfWorkerId] = useState('none')
+  const [mdfQty, setMdfQty] = useState('1')
+  const [mdfDate, setMdfDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [mdfNote, setMdfNote] = useState('')
+  const [mdfBusy, setMdfBusy] = useState(false)
   useEffect(() => {
     setProdQty('1')
     setProdDate(new Date().toISOString().slice(0, 10))
@@ -1596,6 +1603,7 @@ export function TaskDetailPage() {
   const workflowQtyFallback = workflowTargetFallbackQty(task)
   const currentTeamName = data.teams.find((t) => t.id === task.currentTeam)?.name || ''
   const isPvcStage = /pvc/i.test(currentTeamName)
+  const isMdfConsumerStage = /pvc|giben/i.test(currentTeamName)
   const showCncTechFields =
     /cnc/i.test(currentTeamName) || data.settings.role === 'Admin' || data.settings.role === 'Manager'
   const linkedSalesOrder =
@@ -1665,6 +1673,30 @@ export function TaskDetailPage() {
   const refreshTask = async () => {
     await hydrateFromApi()
   }
+
+  useEffect(() => {
+    if (!isMdfConsumerStage) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await api.get('/mdf-skus/')
+        const rows = (res.data || []).map((r: any) => ({
+          id: String(r.id),
+          label: `${r.thickness_mm} mm · ${r.width_cm} × ${r.height_cm} cm`,
+          quantity: Number(r.quantity ?? 0),
+        }))
+        if (!cancelled) {
+          setMdfSkus(rows)
+          setMdfSkuId((prev) => (prev !== 'none' && rows.some((x: any) => x.id === prev) ? prev : rows[0]?.id || 'none'))
+        }
+      } catch {
+        if (!cancelled) setMdfSkus([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [isMdfConsumerStage, taskId])
 
   const handleClaim = async () => {
     if (claimBusy) {
@@ -2854,6 +2886,116 @@ export function TaskDetailPage() {
                     )
                   })}
                 </ul>
+              </div>
+            )}
+            {isMdfConsumerStage && (
+              <div className="rounded border p-3 space-y-2 mt-3">
+                <p className="text-sm font-semibold">MDF stok tüketimi ({currentTeamName || 'ekip'})</p>
+                <p className="text-xs text-muted-foreground">
+                  Giben/PVC ekibi için MDF seçip çalışan ve kullanılan miktarı girin; kayıtta stoktan otomatik düşülür.
+                </p>
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
+                  <div className="space-y-1">
+                    <Label className="text-xs">MDF</Label>
+                    <Select value={mdfSkuId} onValueChange={setMdfSkuId}>
+                      <SelectTrigger className="h-8">
+                        <SelectValue placeholder="MDF seçin" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {mdfSkus.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.label} (stok: {s.quantity})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Çalışan</Label>
+                    <Select value={mdfWorkerId} onValueChange={setMdfWorkerId}>
+                      <SelectTrigger className="h-8">
+                        <SelectValue placeholder="Çalışan seçin" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Ben</SelectItem>
+                        {data.users
+                          .filter((u) => u.role === 'Worker')
+                          .map((u) => (
+                            <SelectItem key={u.id} value={u.id}>
+                              {u.username}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Miktar</Label>
+                    <Input type="number" min={1} className="h-8" value={mdfQty} onChange={(e) => setMdfQty(e.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Tarih</Label>
+                    <Input type="date" className="h-8" value={mdfDate} onChange={(e) => setMdfDate(e.target.value)} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
+                  <div className="md:col-span-3 space-y-1">
+                    <Label className="text-xs">Not</Label>
+                    <Input className="h-8" value={mdfNote} onChange={(e) => setMdfNote(e.target.value)} placeholder="Opsiyonel not" />
+                  </div>
+                  <div className="flex items-end">
+                    <Button
+                      size="sm"
+                      className="w-full"
+                      disabled={mdfBusy || mdfSkuId === 'none' || Number(mdfQty || 0) <= 0}
+                      onClick={async () => {
+                        setMdfBusy(true)
+                        try {
+                          await api.post(`/tasks/${task.id}/consume-mdf/`, {
+                            mdf_sku: Number(mdfSkuId),
+                            user: mdfWorkerId !== 'none' ? Number(mdfWorkerId) : undefined,
+                            quantity: Number(mdfQty),
+                            consumed_at: mdfDate,
+                            note: mdfNote.trim() || undefined,
+                          })
+                          await refreshTask()
+                          const mdfRes = await api.get('/mdf-skus/')
+                          setMdfSkus(
+                            (mdfRes.data || []).map((r: any) => ({
+                              id: String(r.id),
+                              label: `${r.thickness_mm} mm · ${r.width_cm} × ${r.height_cm} cm`,
+                              quantity: Number(r.quantity ?? 0),
+                            }))
+                          )
+                          setMdfQty('1')
+                          setMdfNote('')
+                          toast({ title: 'MDF tüketimi kaydedildi', description: 'Stoktan otomatik düşüldü.' })
+                        } catch (e: any) {
+                          toast({
+                            title: 'MDF tüketimi kaydedilemedi',
+                            description: e?.response?.data?.detail || String(e?.message || e),
+                            variant: 'destructive',
+                          })
+                        } finally {
+                          setMdfBusy(false)
+                        }
+                      }}
+                    >
+                      {mdfBusy ? 'Kaydediliyor…' : 'MDF tüketimi kaydet'}
+                    </Button>
+                  </div>
+                </div>
+                {task.mdfConsumptions && task.mdfConsumptions.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">Son tüketim kayıtları</p>
+                    <div className="space-y-1">
+                      {task.mdfConsumptions.slice(0, 8).map((row) => (
+                        <div key={row.id} className="text-xs rounded border px-2 py-1">
+                          {row.consumedAt} • {row.mdfLabel || row.mdfSku} • -{row.quantity} • {row.userName || '—'}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             <div className="rounded border p-3 space-y-2 mt-3">

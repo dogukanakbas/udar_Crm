@@ -621,6 +621,20 @@ export const useAppStore = create<AppState>()(
           note: pe.note,
           createdAt: pe.created_at,
         })),
+        mdfConsumptions: (t.mdf_consumptions || []).map((mc: any) => ({
+          id: String(mc.id),
+          task: String(mc.task),
+          user: mc.user != null ? String(mc.user) : undefined,
+          userName: mc.user_name,
+          team: mc.team != null ? String(mc.team) : undefined,
+          teamName: mc.team_name,
+          mdfSku: mc.mdf_sku != null ? String(mc.mdf_sku) : undefined,
+          mdfLabel: mc.mdf_label || '',
+          quantity: Number(mc.quantity ?? 0),
+          consumedAt: mc.consumed_at || '',
+          note: mc.note || '',
+          createdAt: mc.created_at,
+        })),
       }))
       set((state) => ({
         data: {

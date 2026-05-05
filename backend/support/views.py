@@ -2,13 +2,14 @@ from rest_framework import viewsets, permissions, filters
 from rest_framework.decorators import action
 from core.events import push_event
 from rest_framework.exceptions import PermissionDenied
+from django.db import transaction
 from django.db.models import Q, Exists, OuterRef, Max
 import re
 import os
 import uuid
 from permissions import IsOrgMember, HasAPIPermission, CommentOnlyRestriction, ViewOnlyRestriction
 from audit.utils import log_entity_action
-from .models import Ticket, TicketMessage, Task, TaskAttachment, TaskComment, TaskChecklist, TaskTimeEntry, TaskModel, TaskProductionEntry
+from .models import Ticket, TicketMessage, Task, TaskAttachment, TaskComment, TaskChecklist, TaskTimeEntry, TaskModel, TaskProductionEntry, TaskMdfConsumption
 from accounts.models import User, Team, TeamAssociate
 from .models_automation import AutomationRule
 from .utils import send_slack_webhook, send_email, generate_presigned_post, scan_file_with_clamav
@@ -1710,6 +1711,83 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                     next_produced = ordered
                 so.quantity_produced = next_produced
                 so.save(update_fields=['quantity_produced'])
+        return Response(TaskSerializer(task, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'], url_path='consume-mdf')
+    def consume_mdf(self, request, pk=None):
+        """
+        Giben/PVC ekiplerinin görev içi MDF tüketim kaydı.
+        Body: { mdf_sku, quantity, consumed_at?, user?, note? }
+        """
+        task = self.get_object()
+        if task.organization_id != request.user.organization_id:
+            raise PermissionDenied("Farklı organizasyon")
+        team = task.current_team or task.team
+        team_name = (getattr(team, 'name', '') or '').lower()
+        if ('giben' not in team_name) and ('pvc' not in team_name):
+            return Response({'detail': 'MDF tüketimi yalnızca Giben/PVC ekiplerinde kullanılabilir.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            sku_id = int(request.data.get('mdf_sku') or 0)
+            qty = int(request.data.get('quantity') or 0)
+        except (TypeError, ValueError):
+            return Response({'detail': 'mdf_sku ve quantity sayısal olmalı'}, status=status.HTTP_400_BAD_REQUEST)
+        if sku_id <= 0 or qty <= 0:
+            return Response({'detail': 'mdf_sku ve quantity zorunlu'}, status=status.HTTP_400_BAD_REQUEST)
+        user_id_raw = request.data.get('user')
+        consumed_user = None
+        if user_id_raw not in (None, ''):
+            try:
+                uid = int(user_id_raw)
+            except (TypeError, ValueError):
+                uid = 0
+            if uid > 0:
+                consumed_user = User.objects.filter(id=uid, organization_id=task.organization_id).first()
+        day_raw = request.data.get('consumed_at')
+        if day_raw:
+            try:
+                consumed_at = dt_datetime.strptime(str(day_raw)[:10], '%Y-%m-%d').date()
+            except ValueError:
+                return Response({'detail': 'consumed_at YYYY-MM-DD olmalı'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            consumed_at = timezone.now().date()
+        note = str(request.data.get('note', '') or '')[:255]
+
+        from mdf.models import MdfSku, MdfMovement
+
+        with transaction.atomic():
+            sku = MdfSku.objects.select_for_update().filter(id=sku_id, organization_id=task.organization_id).first()
+            if not sku:
+                return Response({'detail': 'MDF bulunamadı'}, status=status.HTTP_404_NOT_FOUND)
+            if int(sku.quantity or 0) < qty:
+                return Response({'detail': f'Yetersiz stok (mevcut: {sku.quantity})'}, status=status.HTTP_400_BAD_REQUEST)
+            sku.quantity = int(sku.quantity or 0) - qty
+            sku.save(update_fields=['quantity', 'updated_at'])
+            usage_note = (
+                f"Gorev #{task.id} - {(team.name if team else 'Ekip yok')} - "
+                f"Calisan: {(consumed_user.username if consumed_user else request.user.username)}"
+            )
+            if note:
+                usage_note = f"{usage_note} - {note}"
+            MdfMovement.objects.create(
+                organization_id=task.organization_id,
+                sku=sku,
+                kind='out',
+                quantity=qty,
+                movement_date=consumed_at,
+                note=usage_note[:500],
+                created_by=request.user,
+            )
+            TaskMdfConsumption.objects.create(
+                task=task,
+                user=consumed_user or request.user,
+                team=team,
+                mdf_sku=sku,
+                quantity=qty,
+                consumed_at=consumed_at,
+                note=note,
+                created_by=request.user,
+            )
+
         return Response(TaskSerializer(task, context={'request': request}).data)
 
     @action(detail=False, methods=['get'], url_path='production-report')
