@@ -1426,6 +1426,25 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                             break
         if tid is None:
             return Response({'detail': 'Bölüm (ekip) belirlenemedi'}, status=status.HTTP_400_BAD_REQUEST)
+        # Kalem-bazlı akışta ekip seçimi daima kalemin aktif aşamasından alınır.
+        # İstemciden gelen eski/stale team değeri yetki çakışması üretmesin.
+        if line_wf_ids:
+            line_state_fix = dict(active_line.get('workflow_stage_state') or {})
+            line_active_tid = active_line.get('current_team_id')
+            try:
+                line_active_tid = int(line_active_tid) if line_active_tid not in (None, '') else None
+            except (TypeError, ValueError):
+                line_active_tid = None
+            if line_active_tid not in line_wf_ids:
+                line_active_tid = None
+            if line_active_tid is None:
+                for ltid in line_wf_ids:
+                    st_fix = dict(line_state_fix.get(str(ltid)) or {})
+                    if not st_fix.get('stage_done'):
+                        line_active_tid = int(ltid)
+                        break
+            if line_active_tid is not None:
+                tid = int(line_active_tid)
         # Sıralı akışta ekip seçimi istemciden bağımsız olarak daima aktif aşamadır.
         # Böylece bir önceki aşamadan kalan/stale `team` değeri yanlış yetki hatası üretmez.
         if wf and not line_wf_ids and not getattr(task, 'workflow_parallel', False) and task.current_team_id:
@@ -1443,9 +1462,17 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         is_member_u = team_row.members.filter(id=user.id).exists()
         is_leader_u = bool(getattr(team_row, 'leader_id', None) and str(team_row.leader_id) == str(user.id))
         is_assignee_u = bool(task.assignee_id and str(task.assignee_id) == str(user.id))
+        line_stage_assignee_u = False
+        if line_wf_ids:
+            _lst_auth = dict((dict(active_line.get('workflow_stage_state') or {})).get(str(tid)) or {})
+            _aid = _lst_auth.get('assignee_id')
+            try:
+                line_stage_assignee_u = _aid not in (None, '') and int(_aid) == int(user.id)
+            except (TypeError, ValueError):
+                line_stage_assignee_u = False
         # user.teams ilişkisini de dikkate al (bazı canlı verilerde members M2M senkronu gecikebiliyor).
         is_team_linked_u = bool(tid in user_team_set)
-        if not (is_staff_u or is_member_u or is_leader_u or is_assignee_u or is_team_linked_u):
+        if not (is_staff_u or is_member_u or is_leader_u or is_assignee_u or is_team_linked_u or line_stage_assignee_u):
             # İstemci yanlış/eskimiş team göndermiş olabilir; kalem akışından yeniden çözmeyi dene.
             if line_wf_ids:
                 line_state_auth = dict(active_line.get('workflow_stage_state') or {})
@@ -1474,7 +1501,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                     is_member_u = team_row.members.filter(id=user.id).exists()
                     is_leader_u = bool(getattr(team_row, 'leader_id', None) and str(team_row.leader_id) == str(user.id))
                     is_team_linked_u = bool(tid in user_team_set)
-            if not (is_staff_u or is_member_u or is_leader_u or is_assignee_u or is_team_linked_u):
+            if not (is_staff_u or is_member_u or is_leader_u or is_assignee_u or is_team_linked_u or line_stage_assignee_u):
                 raise PermissionDenied("Bu ekibin üyesi/lideri değilsiniz")
         if (
             wf
