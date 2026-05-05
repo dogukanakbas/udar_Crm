@@ -82,6 +82,8 @@ const nav = [
       { label: 'Faturalama', to: '/erp/invoicing' },
       { label: 'Muhasebe', to: '/erp/accounting' },
       { label: 'Lojistik Takip', to: '/logistics/tracking' },
+      { label: 'MDF Yönetimi', to: '/mdf' },
+      { label: 'MDF Giriş / Çıkış', to: '/mdf/history' },
     ],
   },
   {

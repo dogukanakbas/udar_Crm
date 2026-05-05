@@ -4,6 +4,7 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Button } from '@/components/ui/button'
 import { cn, formatNumber, getWorkingMinutesPerDay } from '@/lib/utils'
 import type { Task } from '@/types'
 
@@ -55,6 +56,7 @@ export function TaskProductLineFields({
   apiTaskModels,
   orgSettings,
   modelPresets,
+  teams,
 }: {
   form: UseFormReturn<any>
   index: number
@@ -62,6 +64,7 @@ export function TaskProductLineFields({
   apiTaskModels: ApiModel[]
   orgSettings: { working_hours_start: string; working_hours_end: string; working_days: number[] } | null
   modelPresets: Preset[]
+  teams: { id: string; name: string }[]
 }) {
   const p = `productLines.${index}` as const
   const watchMode = form.watch(`${p}.mode`)
@@ -70,6 +73,8 @@ export function TaskProductLineFields({
   const watchVariant = form.watch(`${p}.variant`)
   const watchQty = form.watch(`${p}.quantity`)
   const watchDuration = form.watch(`${p}.modelDurationMinutes`)
+  const lineWfTeamIds = (form.watch(`${p}.workflowTeamIds`) || []) as string[]
+  const lineWfTargets = (form.watch(`${p}.workflowStageTargets`) || []) as number[]
   const errors = form.formState.errors as FieldErrors<any>
   const lineErr = (errors.productLines as any)?.[index] as Record<string, { message?: string }> | undefined
 
@@ -135,9 +140,79 @@ export function TaskProductLineFields({
   }, [watchMode, watchDuration, watchQty, p, form])
 
   const watchTotalPlanned = form.watch(`${p}.totalPlannedMinutes`)
+  const wfTargetsNormalized =
+    lineWfTargets.length === lineWfTeamIds.length
+      ? lineWfTargets
+      : lineWfTeamIds.map((_, i) => Number(lineWfTargets[i] ?? Math.max(1, Number(watchQty) || 1)))
+
+  const setLineWfTeam = (idx: number, teamId: string) => {
+    const next = [...lineWfTeamIds]
+    next[idx] = teamId
+    form.setValue(`${p}.workflowTeamIds`, next)
+  }
+  const setLineWfTarget = (idx: number, n: number) => {
+    const next = [...wfTargetsNormalized]
+    next[idx] = n
+    form.setValue(`${p}.workflowStageTargets`, next)
+  }
+  const addLineWfStep = () => {
+    form.setValue(`${p}.workflowTeamIds`, [...lineWfTeamIds, ''])
+    form.setValue(`${p}.workflowStageTargets`, [...wfTargetsNormalized, Math.max(1, Number(watchQty) || 1)])
+  }
+  const removeLineWfStep = (idx: number) => {
+    form.setValue(
+      `${p}.workflowTeamIds`,
+      lineWfTeamIds.filter((_, i) => i !== idx)
+    )
+    form.setValue(
+      `${p}.workflowStageTargets`,
+      wfTargetsNormalized.filter((_, i) => i !== idx)
+    )
+  }
 
   return (
     <div className="space-y-3 rounded-md border p-3 bg-muted/20">
+      <div className="space-y-2 rounded-md border bg-background p-2">
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">Bu kalemin iş akışı (ekip sırası)</Label>
+          <Button type="button" variant="outline" size="sm" onClick={addLineWfStep}>
+            Adım ekle
+          </Button>
+        </div>
+        {lineWfTeamIds.length === 0 ? (
+          <p className="text-xs text-muted-foreground">Bu kalem için ekip adımı tanımlı değil.</p>
+        ) : (
+          <div className="space-y-2">
+            {lineWfTeamIds.map((teamId, i) => (
+              <div key={`line-wf-${index}-${i}`} className="flex items-center gap-2">
+                <Select value={teamId || 'none'} onValueChange={(v) => setLineWfTeam(i, v === 'none' ? '' : v)}>
+                  <SelectTrigger className="flex-1 min-w-[8rem]">
+                    <SelectValue placeholder="Ekip seç" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— Ekip seç —</SelectItem>
+                    {teams.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  type="number"
+                  min={0}
+                  className="h-9 w-24"
+                  value={Number(wfTargetsNormalized[i] ?? 0)}
+                  onChange={(e) => setLineWfTarget(i, Math.max(0, Number(e.target.value) || 0))}
+                />
+                <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={() => removeLineWfStep(i)}>
+                  Sil
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div>
           <Label>Ürün rengi</Label>

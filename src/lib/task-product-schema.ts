@@ -32,6 +32,8 @@ export const taskProductLineSchema = z.object({
   ),
   fireReason: z.string().max(300, 'En fazla 300 karakter').optional(),
   fireImageDataUrl: z.string().optional(),
+  workflowTeamIds: z.array(z.string()).optional(),
+  workflowStageTargets: z.array(z.number()).optional(),
 })
 
 export type TaskProductLineFormValues = z.infer<typeof taskProductLineSchema>

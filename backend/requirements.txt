@@ -14,3 +14,4 @@ gevent==24.11.1
 pyotp==2.9.0
 openpyxl==3.1.5
 python-docx==1.2.0
+reportlab>=4.0.0

@@ -10,7 +10,7 @@ from .models import (
     TaskModel,
     TaskProductionEntry,
 )
-from .workflow_utils import apply_product_line_to_task, ensure_workflow_state, workflow_team_id_list
+from .workflow_utils import apply_product_line_to_task, ensure_product_line_workflows, ensure_workflow_state, workflow_team_id_list
 from .models_automation import AutomationRule
 
 
@@ -194,6 +194,7 @@ class TaskSerializer(serializers.ModelSerializer):
         update_fields = []
         if list(instance.product_lines or []):
             apply_product_line_to_task(instance, int(instance.active_product_index or 0))
+            ensure_product_line_workflows(instance)
             lines = list(instance.product_lines or [])
             if len(lines) > 1:
                 sum_min = 0.0
@@ -229,7 +230,11 @@ class TaskSerializer(serializers.ModelSerializer):
             ensure_workflow_state(instance)
             update_fields.append('workflow_stage_state')
         if update_fields:
-            instance.save(update_fields=list(dict.fromkeys(update_fields + ['updated_at'])))
+            instance.save(
+                update_fields=list(
+                    dict.fromkeys(update_fields + ['workflow_team_ids', 'workflow_parallel', 'current_team', 'team', 'updated_at'])
+                )
+            )
 
     def _apply_done_status_defaults(self, instance):
         """Durumu done olan görevlerde kalem üretimini hedefe eşitle."""

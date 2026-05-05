@@ -20,6 +20,8 @@ import { TaskHistoryPage } from '@/pages/task-history'
 import { LoginPage } from '@/pages/login'
 import { ActivatePage } from '@/pages/activate'
 import AccessLogsPage from '@/pages/access-logs'
+import { MdfHistoryPage } from '@/pages/mdf-history'
+import { MdfManagementPage } from '@/pages/mdf-management'
 import { getTokens } from '@/lib/auth'
 import { useAppStore } from '@/state/use-app-store'
 
@@ -223,6 +225,18 @@ const accessLogsRoute = new Route({
   component: AccessLogsPage,
 })
 
+const mdfManagementRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/mdf',
+  component: MdfManagementPage,
+})
+
+const mdfHistoryRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/mdf/history',
+  component: MdfHistoryPage,
+})
+
 const routeTree = rootRoute.addChildren([
   dashboardRoute,
   loginRoute,
@@ -254,6 +268,8 @@ const routeTree = rootRoute.addChildren([
   changePasswordRoute,
   taskHistoryRoute,
   accessLogsRoute,
+  mdfManagementRoute,
+  mdfHistoryRoute,
 ])
 
 export const router = createRouter({

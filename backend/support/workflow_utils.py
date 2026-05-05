@@ -248,6 +248,145 @@ def ensure_workflow_state(task):
     return state
 
 
+def ensure_product_line_workflows(task):
+    """
+    Her ürün kalemi için bağımsız workflow alanlarını normalize eder.
+    Eski görevleri otomatik dönüştürmek için kök workflow'dan kalemlere varsayılan kopya yapılır.
+    """
+    lines = list(getattr(task, 'product_lines', None) or [])
+    if not lines:
+        return False
+    root_ids = workflow_team_id_list(task)
+    root_targets = list(getattr(task, 'workflow_stage_targets', None) or [])
+    changed = False
+    next_lines = []
+    first_open_team_id = None
+    union_team_ids = []
+    for idx, raw in enumerate(lines):
+        ln = dict(raw or {})
+        raw_ids = ln.get('workflow_team_ids')
+        if isinstance(raw_ids, list):
+            ids = [int(x) for x in raw_ids if x is not None and str(x).isdigit()]
+        else:
+            ids = []
+        if not ids and root_ids:
+            ids = list(root_ids)
+            changed = True
+        ln['workflow_team_ids'] = ids
+        for tid in ids:
+            if int(tid) not in union_team_ids:
+                union_team_ids.append(int(tid))
+        raw_targets = ln.get('workflow_stage_targets')
+        targets = []
+        if isinstance(raw_targets, list):
+            for i in range(len(ids)):
+                v = raw_targets[i] if i < len(raw_targets) else None
+                try:
+                    targets.append(int(v) if v is not None and str(v).strip() != '' else 0)
+                except (TypeError, ValueError):
+                    targets.append(0)
+        else:
+            for i in range(len(ids)):
+                v = root_targets[i] if i < len(root_targets) else None
+                try:
+                    targets.append(int(v) if v is not None and str(v).strip() != '' else 0)
+                except (TypeError, ValueError):
+                    targets.append(0)
+            if ids:
+                changed = True
+        qty_default = 0
+        try:
+            qty_default = max(0, int(ln.get('quantity') or 0))
+        except (TypeError, ValueError):
+            qty_default = 0
+        if qty_default <= 0:
+            qty_default = 1
+        state = dict(ln.get('workflow_stage_state') or {})
+        for i, tid in enumerate(ids):
+            key = str(int(tid))
+            tgt = targets[i] if i < len(targets) and int(targets[i] or 0) > 0 else qty_default
+            if key not in state:
+                state[key] = {
+                    'assignee_id': None,
+                    'qty_target': tgt,
+                    'qty_done': 0,
+                    'pending_approval': False,
+                    'stage_done': False,
+                }
+                changed = True
+            else:
+                st = dict(state.get(key) or {})
+                if int(st.get('qty_target') or 0) != int(tgt):
+                    st['qty_target'] = int(tgt)
+                    changed = True
+                for f, dv in [('assignee_id', None), ('qty_done', 0), ('pending_approval', False), ('stage_done', False)]:
+                    if f not in st:
+                        st[f] = dv
+                        changed = True
+                state[key] = st
+        for k in list(state.keys()):
+            try:
+                if int(k) not in ids:
+                    del state[k]
+                    changed = True
+            except (TypeError, ValueError):
+                del state[k]
+                changed = True
+        prev_cur = ln.get('current_team_id')
+        if ids:
+            if prev_cur not in ids:
+                next_open = None
+                for tid in ids:
+                    if not (state.get(str(tid)) or {}).get('stage_done'):
+                        next_open = tid
+                        break
+                if next_open is None:
+                    next_open = ids[-1]
+                ln['current_team_id'] = int(next_open)
+                if prev_cur != ln['current_team_id']:
+                    changed = True
+            if first_open_team_id is None:
+                try:
+                    cur = int(ln.get('current_team_id')) if ln.get('current_team_id') not in (None, '') else None
+                except (TypeError, ValueError):
+                    cur = None
+                if cur:
+                    st_cur = dict(state.get(str(cur)) or {})
+                    if not st_cur.get('stage_done'):
+                        first_open_team_id = cur
+            if first_open_team_id is None:
+                for tid in ids:
+                    st_row = dict(state.get(str(tid)) or {})
+                    if not st_row.get('stage_done'):
+                        first_open_team_id = int(tid)
+                        break
+        else:
+            if prev_cur not in (None, ''):
+                ln['current_team_id'] = None
+                changed = True
+        ln['workflow_stage_targets'] = targets
+        ln['workflow_stage_state'] = state
+        next_lines.append(ln)
+    if first_open_team_id is not None:
+        if getattr(task, 'current_team_id', None) != int(first_open_team_id):
+            task.current_team_id = int(first_open_team_id)
+            changed = True
+        if getattr(task, 'team_id', None) != int(first_open_team_id):
+            task.team_id = int(first_open_team_id)
+            changed = True
+    # Kalem-bazlı akışta görev kökü de paralel akış gibi işaretlenmeli.
+    root_ids = [int(x) for x in (getattr(task, 'workflow_team_ids', None) or []) if str(x).isdigit()]
+    if union_team_ids and root_ids != union_team_ids:
+        task.workflow_team_ids = union_team_ids
+        changed = True
+    if union_team_ids and getattr(task, 'workflow_parallel', False) is not True:
+        task.workflow_parallel = True
+        changed = True
+    if changed:
+        task.product_lines = next_lines
+    return changed
+
+
 def parallel_queue_visible(task, user, user_team_ids):
     """Paralel akışta bu kullanıcı görevi ekip kuyruğunda görmeli mi?
 
@@ -256,7 +395,22 @@ def parallel_queue_visible(task, user, user_team_ids):
     """
     from accounts.models import Team
 
-    if not getattr(task, 'workflow_parallel', False) or task.status == 'done':
+    if task.status == 'done':
+        return False
+    lines = list(getattr(task, 'product_lines', None) or [])
+    user_set = set(user_team_ids)
+    for ln in lines:
+        ids = [int(x) for x in (ln or {}).get('workflow_team_ids', []) if str(x).isdigit()]
+        if not ids:
+            continue
+        st_map = dict((ln or {}).get('workflow_stage_state') or {})
+        for tid in ids:
+            if tid not in user_set:
+                continue
+            st = dict(st_map.get(str(tid)) or {})
+            if not st.get('stage_done'):
+                return True
+    if not getattr(task, 'workflow_parallel', False):
         return False
     ids = workflow_team_id_list(task)
     if not ids:
@@ -264,7 +418,6 @@ def parallel_queue_visible(task, user, user_team_ids):
     ensure_workflow_state(task)
     state = task.workflow_stage_state or {}
     uid = user.id
-    user_set = set(user_team_ids)
     role = getattr(user, 'role', '')
     staff = role in ('Admin', 'Manager')
     org_id = task.organization_id

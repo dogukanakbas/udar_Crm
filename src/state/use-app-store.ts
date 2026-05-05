@@ -946,6 +946,14 @@ export const useAppStore = create<AppState>()(
       const lines = t.productLines as any[] | undefined
       const activeIdx = Number(t.activeProductIndex ?? 0)
       const activeLine = lines?.length ? lines[Math.min(Math.max(0, activeIdx), lines.length - 1)] : null
+      const lineWorkflowTeamIds = Array.from(
+        new Set(
+          (lines || [])
+            .flatMap((ln: any) => (Array.isArray(ln?.workflowTeamIds) ? ln.workflowTeamIds : []))
+            .map((id: any) => Number(id))
+            .filter((n: number) => !Number.isNaN(n))
+        )
+      )
 
       const dateOrNull = (v: unknown): string | null =>
         v != null && typeof v === 'string' && String(v).trim() !== '' ? String(v) : null
@@ -985,8 +993,8 @@ export const useAppStore = create<AppState>()(
         model_sizes: activeLine?.modelSizes || t.modelSizes || [],
         product_color: String(activeLine?.productColor ?? t.productColor ?? '').trim(),
         product_color_code: String(activeLine?.productColorCode ?? t.productColorCode ?? '').trim(),
-        workflow_team_ids: wfIds,
-        workflow_parallel: t.workflowParallel === true,
+        workflow_team_ids: lineWorkflowTeamIds.length ? lineWorkflowTeamIds : wfIds,
+        workflow_parallel: lineWorkflowTeamIds.length > 0 ? true : t.workflowParallel === true,
         workflow_stage_targets: wfTargets,
         sales_order: t.salesOrderId ? Number(t.salesOrderId) : null,
       }

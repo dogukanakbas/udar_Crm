@@ -32,6 +32,7 @@ from openpyxl import load_workbook
 
 from .workflow_utils import (
     apply_product_line_to_task,
+    ensure_product_line_workflows,
     ensure_workflow_state,
     format_shortfall_reason_for_storage,
     workflow_team_id_list,
@@ -62,12 +63,30 @@ def user_can_see_claim_queue_entry(task, user):
     """my-team-queue: bu kullanıcı görevi üstlenebilecekleri listesinde görmeli mi?"""
     role = getattr(user, 'role', '')
     staff = role in ('Admin', 'Manager')
+    member_team_ids = set(user.teams.values_list('id', flat=True))
+    leader_team_ids = set(
+        Team.objects.filter(organization_id=task.organization_id, leader_id=user.id).values_list('id', flat=True)
+    )
+    user_team_ids = member_team_ids | leader_team_ids
     wf = workflow_team_id_list(task)
     if getattr(task, 'workflow_parallel', False) and wf:
         if staff:
             return True
-        user_team_ids = list(user.teams.values_list('id', flat=True))
-        return parallel_queue_visible(task, user, user_team_ids)
+        return parallel_queue_visible(task, user, list(user_team_ids))
+    # Kalem-bazlı bağımsız akış: kullanıcının üyesi olduğu ekipte açık kalem adımı varsa görünür.
+    lines = list(getattr(task, 'product_lines', None) or [])
+    if lines:
+        for ln in lines:
+            ids = [int(x) for x in (ln or {}).get('workflow_team_ids', []) if str(x).isdigit()]
+            if not ids:
+                continue
+            state = dict((ln or {}).get('workflow_stage_state') or {})
+            for tid in ids:
+                if not staff and tid not in user_team_ids:
+                    continue
+                st = dict(state.get(str(tid)) or {})
+                if not st.get('stage_done'):
+                    return True
     if task.assignee_id and not staff:
         return False
     if task.assignee_id and staff:
@@ -244,6 +263,21 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['title', 'status', 'priority']
     ordering_fields = ['due', 'priority', 'updated_at']
+
+    def _backfill_line_workflows(self, tasks):
+        for t in tasks:
+            if ensure_product_line_workflows(t):
+                t.save(
+                    update_fields=[
+                        'product_lines',
+                        'workflow_team_ids',
+                        'workflow_parallel',
+                        'current_team',
+                        'team',
+                        'updated_at',
+                    ]
+                )
+
     def get_queryset(self):
         qs = Task.objects.all()
         org = getattr(self.request.user, 'organization', None)
@@ -257,6 +291,17 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         elif role not in ['Admin', 'Manager']:
             qs = qs.filter(Q(owner=user) | Q(assignee=user) | Q(team__members=user)).distinct()
         return qs
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        self._backfill_line_workflows(queryset[:300])
+        return super().list(request, *args, **kwargs)
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self._backfill_line_workflows([instance])
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
 
     def perform_create(self, serializer):
         if getattr(self.request.user, 'role', '') == 'Worker':
@@ -1190,6 +1235,18 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             sync_workflow_checklist(task)
             return Response(TaskSerializer(task, context={'request': request}).data)
 
+        # Eski görevleri kalem-bazlı workflow formatına otomatik dönüştür.
+        if ensure_product_line_workflows(task):
+            task.save(
+                update_fields=[
+                    'product_lines',
+                    'workflow_team_ids',
+                    'workflow_parallel',
+                    'current_team',
+                    'team',
+                    'updated_at',
+                ]
+            )
         lines = list(getattr(task, 'product_lines', None) or [])
         active = int(getattr(task, 'active_product_index', 0) or 0)
         # NOT: Çoklu ürün olsa bile, son ekip onayından sonra workflow başa sarmaz.
@@ -1381,6 +1438,81 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
         save_lines = False
         prev_q = 0
+        active_line = dict(lines[line_idx] or {}) if (line_idx is not None and lines and 0 <= line_idx < len(lines)) else {}
+        line_wf_ids = [int(x) for x in (active_line or {}).get('workflow_team_ids', []) if str(x).isdigit()]
+        # Kalem-bazlı workflow: ekip doğrulaması + adım otomatik kapanışı bu kalem state'inde tutulur.
+        if line_wf_ids:
+            if tid not in line_wf_ids:
+                return Response({'detail': 'Bu kalem akışında bu ekip yok'}, status=status.HTTP_400_BAD_REQUEST)
+            lstate = dict(active_line.get('workflow_stage_state') or {})
+            lst = dict(lstate.get(str(tid)) or {})
+            prev_team_done = int(lst.get('qty_done') or 0)
+            lst['qty_done'] = qty
+            tgt = int(lst.get('qty_target') or max(1, int(active_line.get('quantity') or 1)))
+            if qty >= tgt:
+                lst['stage_done'] = True
+                lst['pending_approval'] = False
+                lst['assignee_id'] = None
+            lstate[str(tid)] = lst
+            # sıradaki açık ekip current_team olur
+            next_tid = None
+            for wtid in line_wf_ids:
+                st_row = dict(lstate.get(str(wtid)) or {})
+                if not st_row.get('stage_done'):
+                    next_tid = int(wtid)
+                    break
+            active_line['workflow_stage_state'] = lstate
+            active_line['current_team_id'] = next_tid
+            lines[line_idx] = active_line
+            task.product_lines = lines
+            save_lines = True
+            # tüm kalemlerin tüm adımları bittiyse görev kapanır
+            all_lines_done = True
+            for ln in lines:
+                ids_ln = [int(x) for x in (ln or {}).get('workflow_team_ids', []) if str(x).isdigit()]
+                if not ids_ln:
+                    continue
+                st_ln = dict((ln or {}).get('workflow_stage_state') or {})
+                for wtid in ids_ln:
+                    if not (st_ln.get(str(wtid)) or {}).get('stage_done'):
+                        all_lines_done = False
+                        break
+                if not all_lines_done:
+                    break
+            if all_lines_done and task.status in ('todo', 'in-progress'):
+                task.status = 'done'
+                task.assignee = None
+                task.save(update_fields=['product_lines', 'status', 'assignee', 'updated_at'])
+                TaskComment.objects.create(
+                    task=task,
+                    author=user,
+                    type='activity',
+                    text='✅ Tüm kalemlerin akış adımları tamamlandı — görev otomatik kapatıldı',
+                )
+            else:
+                task.save(update_fields=['product_lines', 'updated_at'])
+            TaskProductionEntry.objects.create(
+                task=task,
+                user=user,
+                team_id=tid,
+                product_line_index=line_idx,
+                entry_date=day,
+                quantity=qty,
+                note=str(request.data.get('note', '') or '')[:255],
+            )
+            if task.sales_order_id:
+                from erp.models import SalesOrder
+                so = SalesOrder.objects.filter(id=task.sales_order_id, organization_id=task.organization_id).first()
+                if so:
+                    ordered = int(getattr(so, 'order_quantity', 0) or 0)
+                    produced = int(getattr(so, 'quantity_produced', 0) or 0)
+                    delta_so = qty - prev_team_done
+                    next_produced = max(0, produced + delta_so)
+                    if ordered and next_produced > ordered:
+                        next_produced = ordered
+                    so.quantity_produced = next_produced
+                    so.save(update_fields=['quantity_produced'])
+            return Response(TaskSerializer(task, context={'request': request}).data)
         # Workflow varsa üretim "aşama/ekip" bazında tutulur (workflow_stage_state.qty_done).
         # product_lines.qty_produced yalnızca workflow olmayan görevlerde kullanılır.
         if not wf and line_idx is not None and lines and 0 <= line_idx < len(lines):
@@ -1641,7 +1773,9 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         org = getattr(user, 'organization', None)
         if not org:
             return Response([])
-        user_team_ids = list(user.teams.values_list('id', flat=True))
+        member_team_ids = set(user.teams.values_list('id', flat=True))
+        leader_team_ids = set(Team.objects.filter(organization=org, leader_id=user.id).values_list('id', flat=True))
+        user_team_ids = list(member_team_ids | leader_team_ids)
         if not user_team_ids:
             return Response([])
         assignee_in_current_team = Team.members.through.objects.filter(
@@ -1668,6 +1802,22 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 .first()
             )
             if t and parallel_queue_visible(t, user, user_team_ids):
+                out.append(t)
+                seen.add(t.id)
+        out.sort(key=lambda x: x.updated_at, reverse=True)
+        # Kalem-bazlı akışta current_team farklı olsa bile kullanıcı kendi açık kalemlerini görsün.
+        line_candidates = (
+            Task.objects.filter(organization=org)
+            .exclude(status='done')
+            .exclude(id__in=seen)
+            .select_related('team', 'current_team')
+            .order_by('-updated_at')[:400]
+        )
+        for t in line_candidates:
+            lines = list(getattr(t, 'product_lines', None) or [])
+            if not lines:
+                continue
+            if user_can_see_claim_queue_entry(t, user):
                 out.append(t)
                 seen.add(t.id)
         out.sort(key=lambda x: x.updated_at, reverse=True)

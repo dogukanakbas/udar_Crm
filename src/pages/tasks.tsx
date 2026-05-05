@@ -40,7 +40,7 @@ import {
   workflowTargetFallbackQty,
 } from '@/lib/task-product-lines-helpers'
 import { TaskProductLineFields } from '@/components/task-product-line-fields'
-import { Calendar, ChevronDown, Lock, Plus, Paperclip, Download, Trash2, GripVertical } from 'lucide-react'
+import { Calendar, ChevronDown, Lock, Plus, Paperclip, Download, Trash2 } from 'lucide-react'
 import { RbacGuard } from '@/components/rbac'
 import { useParams } from '@tanstack/react-router'
 import { CardDescription } from '@/components/ui/card'
@@ -206,9 +206,6 @@ const taskSchema = z
     notes: z.string().max(2000, 'Not çok uzun').optional(),
     productLines: z.array(taskProductLineSchema).min(1, 'En az bir ürün kalemi ekleyin'),
     activeProductIndex: z.number().int().min(0).optional(),
-    workflowTeamIds: z.array(z.string()).optional(),
-    workflowStageTargets: z.array(z.number()).optional(),
-    workflowParallel: z.boolean().optional(),
     salesOrderId: z.string().optional(),
     plannedHours: z.preprocess(
       (v) => (v === '' || v === undefined ? 0 : Number(v)),
@@ -414,17 +411,19 @@ export function TasksPage() {
       typeof window !== 'undefined' ? localStorage.getItem('current-user-id') : null
     const isWorker = data.settings.role === 'Worker'
     return tasks.filter((t) => {
+      const workerVisibleByLine = !!(isWorker && me && taskVisibleToWorkerTeamMember(t, me, data.teams))
       const assigneeMatch =
         assignee === 'all' ||
         String(t.assignee) === String(assignee) ||
-        (isWorker &&
-          me &&
-          assignee === me &&
-          taskVisibleToWorkerTeamMember(t, me, data.teams))
+        (workerVisibleByLine && (assignee === 'all' || assignee === me))
+      const teamMatch =
+        teamFilter === 'all' ||
+        String(t.teamId) === String(teamFilter) ||
+        (workerVisibleByLine && String(teamFilter) !== 'all')
       return (
         (status === 'all' || t.status === status) &&
         assigneeMatch &&
-        (teamFilter === 'all' || String(t.teamId) === String(teamFilter)) &&
+        teamMatch &&
         (search.trim().length === 0 ||
           t.title.toLowerCase().includes(search.trim().toLowerCase()) ||
           (t.notes || '').toLowerCase().includes(search.trim().toLowerCase()))
@@ -797,9 +796,6 @@ export function TasksPage() {
         priority: draft?.priority === 'high' || draft?.priority === 'low' ? draft.priority : 'medium',
         plannedHours: Number(draft?.planned_hours || 0),
         plannedCost: Number(draft?.planned_cost || 0),
-        workflowTeamIds: [],
-        workflowParallel: false,
-        workflowStageTargets: [],
         productLines: mappedLines.length ? mappedLines : [emptyProductLineRow()],
       })
       setExcelImportOpen(false)
@@ -1487,146 +1483,6 @@ export function TasksPage() {
           </Card>
         </div>
       )}
-    </div>
-  )
-}
-
-function WorkflowStepsEditor({
-  teams,
-  teamIds,
-  targets,
-  defaultTargetQty,
-  onTeamsChange,
-  onTargetsChange,
-}: {
-  teams: { id: string; name: string }[]
-  teamIds: string[]
-  targets: number[]
-  defaultTargetQty: number
-  onTeamsChange: (ids: string[]) => void
-  onTargetsChange: (t: number[]) => void
-}) {
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  )
-  const steps = teamIds.length ? teamIds : []
-  const tg = targets.length === steps.length ? targets : steps.map((_, i) => targets[i] ?? defaultTargetQty)
-  const handleDragEnd = (e: DragEndEvent) => {
-    const { active, over } = e
-    if (!over || active.id === over.id) return
-    const oldIdx = steps.findIndex((_, i) => `step-${i}` === String(active.id))
-    const newIdx = steps.findIndex((_, i) => `step-${i}` === String(over.id))
-    if (oldIdx === -1 || newIdx === -1) return
-    onTeamsChange(arrayMove([...steps], oldIdx, newIdx))
-    onTargetsChange(arrayMove([...tg], oldIdx, newIdx))
-  }
-  const updateStep = (idx: number, teamId: string) => {
-    const next = [...steps]
-    next[idx] = teamId
-    onTeamsChange(next)
-  }
-  const updateTarget = (idx: number, n: number) => {
-    const next = [...tg]
-    next[idx] = n
-    onTargetsChange(next)
-  }
-  const removeStep = (idx: number) => {
-    onTeamsChange(steps.filter((_, i) => i !== idx))
-    onTargetsChange(tg.filter((_, i) => i !== idx))
-  }
-  const addStep = () => {
-    onTeamsChange([...steps, ''])
-    onTargetsChange([...tg, defaultTargetQty])
-  }
-  return (
-    <div className="space-y-2">
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={steps.map((_, i) => `step-${i}`)} strategy={verticalListSortingStrategy}>
-          {steps.map((teamId, i) => (
-            <SortableWorkflowStep
-              key={`step-${i}`}
-              id={`step-${i}`}
-              teamId={teamId}
-              targetQty={tg[i] ?? defaultTargetQty}
-              teams={teams}
-              onTeamChange={(v) => updateStep(i, v)}
-              onTargetChange={(n) => updateTarget(i, n)}
-              onRemove={() => removeStep(i)}
-            />
-          ))}
-        </SortableContext>
-      </DndContext>
-      <Button type="button" variant="outline" size="sm" onClick={addStep}>
-        <Plus className="mr-2 h-4 w-4" />
-        Adım ekle
-      </Button>
-    </div>
-  )
-}
-
-function SortableWorkflowStep({
-  id,
-  teamId,
-  targetQty,
-  teams,
-  onTeamChange,
-  onTargetChange,
-  onRemove,
-}: {
-  id: string
-  teamId: string
-  targetQty: number
-  teams: { id: string; name: string }[]
-  onTeamChange: (teamId: string) => void
-  onTargetChange: (n: number) => void
-  onRemove: () => void
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
-  const style = { transform: CSS.Transform.toString(transform), transition }
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={cn(
-        'flex items-center gap-2 rounded border px-3 py-2',
-        isDragging && 'opacity-70 shadow-md z-10 bg-background'
-      )}
-    >
-      <span
-        {...attributes}
-        {...listeners}
-        className="cursor-grab active:cursor-grabbing touch-none text-muted-foreground hover:text-foreground"
-        aria-label="Sırayı değiştir"
-      >
-        <GripVertical className="h-4 w-4" />
-      </span>
-      <Select value={teamId || 'none'} onValueChange={(v) => onTeamChange(v === 'none' ? '' : v)}>
-        <SelectTrigger className="flex-1 min-w-[8rem]">
-          <SelectValue placeholder="Ekip seç" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="none">— Ekip seç —</SelectItem>
-          {teams.map((t) => (
-            <SelectItem key={t.id} value={t.id}>
-              {t.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <div className="flex flex-col gap-0.5">
-        <Label className="text-[10px] text-muted-foreground">Hedef adet</Label>
-        <Input
-          type="number"
-          min={0}
-          className="h-8 w-20"
-          value={targetQty}
-          onChange={(e) => onTargetChange(Math.max(0, Number(e.target.value) || 0))}
-        />
-      </div>
-      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={onRemove} aria-label="Kaldır">
-        <Trash2 className="h-4 w-4" />
-      </Button>
     </div>
   )
 }
@@ -3265,16 +3121,6 @@ function TaskModal({
 }) {
   const prefillLines = Array.isArray(prefill?.productLines) ? prefill.productLines : []
   const initialLines = task ? initialProductLinesForForm(task) : prefillLines.length ? prefillLines : [emptyProductLineRow()]
-  const wfIds = (task?.workflowTeamIds ?? prefill?.workflowTeamIds ?? []).filter(Boolean)
-  const activeIdxInit = Math.min(
-    Math.max(0, task?.activeProductIndex ?? 0),
-    Math.max(0, initialLines.length - 1)
-  )
-  const q0 = Number(initialLines[activeIdxInit]?.quantity ?? task?.quantity ?? 1)
-  const wfTargets =
-    task?.workflowStageTargets?.length === wfIds.length
-      ? task.workflowStageTargets
-      : wfIds.map(() => q0)
   const initialPlannedMinutesSum = sumProductLinesPlannedMinutes(initialLines)
   const form = useForm<z.infer<typeof taskSchema>>({
     resolver: zodResolver(taskSchema) as any,
@@ -3296,9 +3142,6 @@ function TaskModal({
       plannedCost: task?.plannedCost ?? prefill?.plannedCost ?? 0,
       productLines: initialLines,
       activeProductIndex: task?.activeProductIndex ?? 0,
-      workflowTeamIds: task?.workflowTeamIds ?? prefill?.workflowTeamIds ?? [],
-      workflowStageTargets: wfTargets,
-      workflowParallel: task ? task.workflowParallel === true : prefill?.workflowParallel === true,
       salesOrderId: task?.salesOrder ? String(task.salesOrder) : '',
     },
   })
@@ -3362,27 +3205,10 @@ function TaskModal({
   const watchLines =
     useWatch({ control: form.control, name: 'productLines', defaultValue: initialLines }) ?? initialLines
   const watchStart = useWatch({ control: form.control, name: 'start' })
-  const watchActiveLineIdx =
-    useWatch({ control: form.control, name: 'activeProductIndex', defaultValue: task?.activeProductIndex ?? 0 }) ?? 0
-  const watchWorkflowParallel = useWatch({ control: form.control, name: 'workflowParallel' }) === true
   const totalOrderQty = useMemo(
     () => (watchLines || []).reduce((s, l) => s + Math.max(0, Number((l as { quantity?: unknown })?.quantity) || 0), 0),
     [watchLines]
   )
-  const workflowDefaultTargetQty = useMemo(() => {
-    const lines = watchLines || []
-    if (!lines.length) return 1
-    if (lines.length > 1 && !watchWorkflowParallel) {
-      const ai = Math.min(
-        Math.max(0, Number(watchActiveLineIdx) || 0),
-        Math.max(0, lines.length - 1)
-      )
-      const q = Math.max(0, Number((lines[ai] as { quantity?: unknown })?.quantity) || 0)
-      return q > 0 ? q : 1
-    }
-    const sum = lines.reduce((s, l) => s + Math.max(0, Number((l as { quantity?: unknown })?.quantity) || 0), 0)
-    return sum > 0 ? sum : 1
-  }, [watchLines, watchActiveLineIdx, watchWorkflowParallel])
   const totalMinutesSum = useMemo(() => sumProductLinesPlannedMinutes(watchLines), [watchLines])
   const minsPerMesaiDay = useMemo(() => {
     const start = orgSettings?.working_hours_start || '08:00'
@@ -3527,15 +3353,6 @@ function TaskModal({
               ;(payload as any).productLines = normalizedLines
               ;(payload as any).plannedHours = Number((sumMin / 60).toFixed(2))
               ;(payload as any).activeProductIndex = task?.activeProductIndex ?? 0
-              const wf = ((payload as any).workflowTeamIds || []).filter((x: string) => x != null && x !== '')
-              let wt = [...((payload as any).workflowStageTargets || []).map((n: number) => Number(n))]
-              const ai = Math.min(
-                Math.max(0, (payload as any).activeProductIndex ?? 0),
-                Math.max(0, normalizedLines.length - 1)
-              )
-              const defQty = Number(normalizedLines[ai]?.quantity ?? 1)
-              while (wt.length < wf.length) wt.push(defQty)
-              ;(payload as any).workflowStageTargets = wt.slice(0, wf.length)
               await onSubmit(payload as any)
               if (task?.id) {
                 const buffered = droppedFiles.length > 0 ? droppedFiles : fileInputRef.current?.files ?? null
@@ -3643,6 +3460,7 @@ function TaskModal({
                           apiTaskModels={apiTaskModels}
                           orgSettings={orgSettings}
                           modelPresets={MODEL_PRESETS}
+                          teams={teams}
                         />
                         {fields.length > 1 ? (
                           <Button
@@ -3687,35 +3505,6 @@ function TaskModal({
                 gelir. Değişiklik için görev detayında devir / üstlenme kullanın.
               </p>
             </div>
-          </div>
-          <div className="space-y-2 rounded-md border p-3">
-            <div className="flex flex-wrap items-center gap-4">
-              <Label className="text-sm font-medium">Süreç adımları (iş akışı)</Label>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="workflow-parallel"
-                  checked={form.watch('workflowParallel') === true}
-                  onCheckedChange={(c) => form.setValue('workflowParallel', Boolean(c))}
-                />
-                <label htmlFor="workflow-parallel" className="text-xs cursor-pointer">
-                  Paralel bölümler (beklemeden başlasın; usta başı onayı ile kapanır)
-                </label>
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Her adım için ekip ve hedef adet seçin. Birden fazla ürün kaleminde varsayılan hedef,{' '}
-              <span className="font-medium text-foreground">aktif ürün satırının</span> sipariş adedidir (paralel modda
-              tüm kalemlerin toplamı arka planda kullanılır). Paralel bölümler aynı anda; sıralı akışta önceki bölüm
-              bitince sonrakine geçilir.
-            </p>
-            <WorkflowStepsEditor
-              teams={teams}
-              teamIds={form.watch('workflowTeamIds') || []}
-              targets={form.watch('workflowStageTargets') || []}
-              defaultTargetQty={workflowDefaultTargetQty}
-              onTeamsChange={(ids) => form.setValue('workflowTeamIds', ids)}
-              onTargetsChange={(t) => form.setValue('workflowStageTargets', t)}
-            />
           </div>
           <div>
             <Label>Bağlı satış siparişi (üretim düşümü) — isteğe bağlı</Label>

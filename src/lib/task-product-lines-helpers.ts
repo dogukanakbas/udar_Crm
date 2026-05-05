@@ -128,6 +128,23 @@ export function mapApiProductLineToTask(ln: any): TaskProductLine {
         : ln?.qtyProduced != null
           ? Number(ln.qtyProduced)
           : undefined,
+    workflowTeamIds: Array.isArray(ln?.workflow_team_ids)
+      ? ln.workflow_team_ids.map((id: unknown) => String(id))
+      : Array.isArray(ln?.workflowTeamIds)
+        ? ln.workflowTeamIds.map((id: unknown) => String(id))
+        : [],
+    workflowStageTargets: Array.isArray(ln?.workflow_stage_targets)
+      ? ln.workflow_stage_targets.map((x: unknown) => Number(x))
+      : Array.isArray(ln?.workflowStageTargets)
+        ? ln.workflowStageTargets.map((x: unknown) => Number(x))
+        : [],
+    workflowStageState: (ln?.workflow_stage_state || ln?.workflowStageState || {}) as Record<string, any>,
+    currentTeamId:
+      ln?.current_team_id != null && ln?.current_team_id !== ''
+        ? String(ln.current_team_id)
+        : ln?.currentTeamId != null && ln?.currentTeamId !== ''
+          ? String(ln.currentTeamId)
+          : undefined,
   }
 }
 
@@ -149,6 +166,10 @@ export function taskProductLinesToApiPayload(lines: TaskProductLineFormValues[])
     fire_reason: String((line as { fireReason?: unknown }).fireReason ?? '').trim().slice(0, 300),
     fire_image_data_url: String((line as { fireImageDataUrl?: unknown }).fireImageDataUrl ?? '').trim(),
     qty_produced: Math.max(0, Number((line as { qtyProduced?: unknown }).qtyProduced ?? 0)),
+    workflow_team_ids: ((line as { workflowTeamIds?: unknown[] }).workflowTeamIds || []).map((x) => Number(x)).filter((x) => !Number.isNaN(x)),
+    workflow_stage_targets: ((line as { workflowStageTargets?: unknown[] }).workflowStageTargets || [])
+      .map((x) => Number(x))
+      .filter((x) => !Number.isNaN(x)),
   }))
 }
 
@@ -171,6 +192,8 @@ export function initialProductLinesForForm(task?: Task): TaskProductLineFormValu
       fireReason: p.fireReason ?? '',
       fireImageDataUrl: p.fireImageDataUrl ?? '',
       qtyProduced: Number(p.qtyProduced ?? 0),
+      workflowTeamIds: p.workflowTeamIds ?? [],
+      workflowStageTargets: p.workflowStageTargets ?? [],
     }))
   }
   return [
@@ -191,6 +214,8 @@ export function initialProductLinesForForm(task?: Task): TaskProductLineFormValu
       fireReason: '',
       fireImageDataUrl: '',
       qtyProduced: 0,
+      workflowTeamIds: [],
+      workflowStageTargets: [],
     },
   ]
 }

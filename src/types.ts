@@ -204,6 +204,23 @@ export interface TaskProductLine {
   fireImageDataUrl?: string
   /** Bu kalem için raporlanan toplam üretim adedi (sunucu: qty_produced) */
   qtyProduced?: number
+  /** Kalem bazlı ekip sırası */
+  workflowTeamIds?: string[]
+  /** Kalem bazlı hedef adetler */
+  workflowStageTargets?: number[]
+  /** Kalem bazlı aşama durumu */
+  workflowStageState?: Record<
+    string,
+    {
+      assignee_id?: number | null
+      qty_target?: number
+      qty_done?: number
+      pending_approval?: boolean
+      stage_done?: boolean
+    }
+  >
+  /** Kalemde şu an açık ekip */
+  currentTeamId?: string | null
 }
 
 export interface Task {

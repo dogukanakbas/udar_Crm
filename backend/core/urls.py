@@ -23,6 +23,7 @@ from rest_framework import routers
 
 from crm.views import QuoteViewSet, PricingRuleViewSet, SellerCompanyViewSet, BusinessPartnerViewSet, LeadViewSet, OpportunityViewSet, ContactViewSet
 from erp.views import ProductViewSet as ERPProductViewSet, CategoryViewSet, InvoiceViewSet, SalesOrderViewSet, PurchaseOrderViewSet, StockMovementViewSet, VehicleViewSet
+from mdf.views import MdfSkuViewSet
 from accounts.views import TeamViewSet, TeamAssociateViewSet
 from core.views import DashboardKPIView, GlobalSearchView, CalendarICSView, SSEView
 from workflow.views import PendingApprovalsView, ApprovalInstanceViewSet, ApprovalActionView
@@ -60,6 +61,7 @@ router.register(r'invoices', InvoiceViewSet, basename='invoices')
 router.register(r'sales-orders', SalesOrderViewSet, basename='sales-orders')
 router.register(r'purchase-orders', PurchaseOrderViewSet, basename='purchase-orders')
 router.register(r'stock-movements', StockMovementViewSet, basename='stock-movements')
+router.register(r'mdf-skus', MdfSkuViewSet, basename='mdf-skus')
 router.register(r'vehicles', VehicleViewSet, basename='vehicles')
 router.register(r'tickets', TicketViewSet, basename='tickets')
 router.register(r'ticket-messages', TicketMessageViewSet, basename='ticket-messages')

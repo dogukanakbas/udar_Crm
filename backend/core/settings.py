@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     'accounts',
     'crm',
     'erp',
+    'mdf',
     'workflow',
     'audit.apps.AuditConfig',
     'support',
