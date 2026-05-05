@@ -2113,11 +2113,21 @@ export function TaskDetailPage() {
                     const lineTeamIds = (line.workflowTeamIds || []).map(String)
                     const lineState = (line.workflowStageState || {}) as Record<string, any>
                     if (!lineTeamIds.length) return null
+                    // Kalem bazlı akışta önce satırın kendi aktif ekibi esas alınır.
                     const currentTid =
-                      (task.currentTeam && lineTeamIds.includes(String(task.currentTeam)) ? String(task.currentTeam) : null) ||
                       (line.currentTeamId && lineTeamIds.includes(String(line.currentTeamId)) ? String(line.currentTeamId) : null) ||
+                      (task.currentTeam && lineTeamIds.includes(String(task.currentTeam)) ? String(task.currentTeam) : null) ||
                       null
-                    if (!currentTid) return 0
+                    if (!currentTid) {
+                      // Kalem kapanmışsa (aktif ekip yok), en yüksek bildirilen değeri göster.
+                      let maxDone = 0
+                      for (const tid of lineTeamIds) {
+                        const st = lineState[tid] || {}
+                        const done = Math.max(0, Number(st?.qty_done ?? 0))
+                        if (done > maxDone) maxDone = done
+                      }
+                      return maxDone
+                    }
                     const st = lineState[currentTid] || {}
                     return Math.max(0, Number(st?.qty_done ?? 0))
                   })()
