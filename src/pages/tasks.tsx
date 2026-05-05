@@ -2107,31 +2107,30 @@ export function TaskDetailPage() {
                   const active = (task.activeProductIndex ?? 0) === lidx
                   const hex = cssColorFromProductCode(line.productColorCode)
                   const lineTarget = Math.max(1, Number(line.quantity ?? 1))
-                  // Kalem kartında yalnızca aktif ekibin (veya kalemin current ekibinin) verisi gösterilir.
-                  // Böylece Giben'de girilen miktar CNC'de "üretilen" gibi görünmez.
-                  const stageProduced = (() => {
+                  // Kart üstündeki Üretilen/Kalan kalem geneli mutlak üretimi gösterir.
+                  // Giriş alanı varsayılanı ise aktif ekibin son kaydını kullanır.
+                  const lineProductionMeta = (() => {
                     const lineTeamIds = (line.workflowTeamIds || []).map(String)
                     const lineState = (line.workflowStageState || {}) as Record<string, any>
-                    if (!lineTeamIds.length) return null
-                    // Kalem bazlı akışta önce satırın kendi aktif ekibi esas alınır.
+                    if (!lineTeamIds.length) {
+                      const fallback = Math.max(0, Number(line.qtyProduced ?? 0))
+                      return { overall: fallback, currentStage: fallback }
+                    }
                     const currentTid =
                       (line.currentTeamId && lineTeamIds.includes(String(line.currentTeamId)) ? String(line.currentTeamId) : null) ||
                       (task.currentTeam && lineTeamIds.includes(String(task.currentTeam)) ? String(task.currentTeam) : null) ||
                       null
-                    if (!currentTid) {
-                      // Kalem kapanmışsa (aktif ekip yok), en yüksek bildirilen değeri göster.
-                      let maxDone = 0
-                      for (const tid of lineTeamIds) {
-                        const st = lineState[tid] || {}
-                        const done = Math.max(0, Number(st?.qty_done ?? 0))
-                        if (done > maxDone) maxDone = done
-                      }
-                      return maxDone
+                    let maxDone = 0
+                    for (const tid of lineTeamIds) {
+                      const st = lineState[tid] || {}
+                      const done = Math.max(0, Number(st?.qty_done ?? 0))
+                      if (done > maxDone) maxDone = done
                     }
-                    const st = lineState[currentTid] || {}
-                    return Math.max(0, Number(st?.qty_done ?? 0))
+                    const stCurrent = currentTid ? lineState[currentTid] || {} : {}
+                    const currentStage = Math.max(0, Number(stCurrent?.qty_done ?? 0))
+                    return { overall: maxDone, currentStage }
                   })()
-                  const lineProduced = stageProduced != null ? stageProduced : Math.max(0, Number(line.qtyProduced ?? 0))
+                  const lineProduced = lineProductionMeta.overall
                   const lineRemaining = Math.max(0, lineTarget - lineProduced)
                   const unit = line.unitType === 'metre' || isPvcStage ? 'metre' : 'adet'
                   const lineEntries = (task.productionEntries || []).filter((e) => {
@@ -2385,7 +2384,7 @@ export function TaskDetailPage() {
                             }
                             onClick={async () => {
                               const row = lineProdInput[lidx] || {
-                                q: String(Math.max(0, Number(lineProduced ?? 0))),
+                                q: String(Math.max(0, Number(lineProductionMeta.currentStage ?? lineProduced ?? 0))),
                                 d: prodDate,
                               }
                               const raw = (row.q || '').trim()
