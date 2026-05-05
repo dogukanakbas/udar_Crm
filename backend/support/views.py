@@ -1309,16 +1309,71 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                         status=status.HTTP_400_BAD_REQUEST,
                     )
         user = request.user
+        lines = list(getattr(task, 'product_lines', None) or [])
+        pl_raw = request.data.get('product_line_index')
+        line_idx = None
+        if pl_raw is not None and str(pl_raw).strip() != '':
+            try:
+                line_idx = int(pl_raw)
+            except (TypeError, ValueError):
+                return Response(
+                    {'detail': 'product_line_index geçerli bir tam sayı olmalı'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if line_idx < 0 or (lines and line_idx >= len(lines)):
+                return Response(
+                    {'detail': 'product_line_index bu görevdeki kalem aralığında değil'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        if len(lines) > 1 and line_idx is None:
+            return Response(
+                {
+                    'detail': (
+                        'Bu görevde birden fazla ürün kalemi var. '
+                        'Üretimi hangi kalem için girdiğinizi belirtin (product_line_index, 0 ile başlar).'
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        elif len(lines) == 1 and line_idx is None:
+            line_idx = 0
+        active_line = dict(lines[line_idx] or {}) if (line_idx is not None and lines and 0 <= line_idx < len(lines)) else {}
+        line_wf_ids = [int(x) for x in (active_line or {}).get('workflow_team_ids', []) if str(x).isdigit()]
         wf = workflow_team_id_list(task)
         user_teams = list(user.teams.values_list('id', flat=True))
         user_team_set = set(user_teams)
         team_raw = request.data.get('team')
         tid = int(team_raw) if team_raw not in (None, '') else None
         if tid is None:
+            if line_wf_ids:
+                line_state = dict(active_line.get('workflow_stage_state') or {})
+                cur_line_tid = active_line.get('current_team_id')
+                try:
+                    cur_line_tid = int(cur_line_tid) if cur_line_tid not in (None, '') else None
+                except (TypeError, ValueError):
+                    cur_line_tid = None
+                if cur_line_tid is not None and cur_line_tid in line_wf_ids and cur_line_tid in user_teams:
+                    tid = cur_line_tid
+                if tid is None:
+                    open_for_user = []
+                    for ltid in line_wf_ids:
+                        if ltid not in user_team_set:
+                            continue
+                        st = dict(line_state.get(str(ltid)) or {})
+                        if st.get('stage_done'):
+                            continue
+                        open_for_user.append(ltid)
+                    if len(open_for_user) == 1:
+                        tid = open_for_user[0]
+                    elif len(open_for_user) > 1:
+                        return Response(
+                            {'detail': 'Bu kalem için birden fazla ekipte yetkiniz var; team gönderin.'},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
             # Sıralı workflow'ta hangi ekip aktifse, üretim kaydı o ekibe gitmeli.
             # Kullanıcı birden fazla workflow ekibinin üyesi ise eski mantık ilk uygun ekibi
             # seçip A/B verisini karıştırabiliyordu.
-            if wf and not getattr(task, 'workflow_parallel', False) and getattr(task, 'current_team_id', None):
+            if tid is None and wf and not getattr(task, 'workflow_parallel', False) and getattr(task, 'current_team_id', None):
                 try:
                     cur_tid = int(task.current_team_id)
                 except (TypeError, ValueError):
@@ -1371,12 +1426,12 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             return Response({'detail': 'Bölüm (ekip) belirlenemedi'}, status=status.HTTP_400_BAD_REQUEST)
         # Sıralı akışta ekip seçimi istemciden bağımsız olarak daima aktif aşamadır.
         # Böylece bir önceki aşamadan kalan/stale `team` değeri yanlış yetki hatası üretmez.
-        if wf and not getattr(task, 'workflow_parallel', False) and task.current_team_id:
+        if wf and not line_wf_ids and not getattr(task, 'workflow_parallel', False) and task.current_team_id:
             try:
                 tid = int(task.current_team_id)
             except (TypeError, ValueError):
                 return Response({'detail': 'Aktif bölüm bilgisi geçersiz'}, status=status.HTTP_400_BAD_REQUEST)
-        if wf and tid not in wf:
+        if wf and not line_wf_ids and tid not in wf:
             return Response({'detail': 'Bu görev akışında bu ekip yok'}, status=status.HTTP_400_BAD_REQUEST)
         team_row = Team.objects.filter(id=tid, organization_id=task.organization_id).first()
         if not team_row:
@@ -1406,41 +1461,8 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        lines = list(getattr(task, 'product_lines', None) or [])
-        pl_raw = request.data.get('product_line_index')
-        line_idx = None
-        if pl_raw is not None and str(pl_raw).strip() != '':
-            try:
-                line_idx = int(pl_raw)
-            except (TypeError, ValueError):
-                return Response(
-                    {'detail': 'product_line_index geçerli bir tam sayı olmalı'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            if line_idx < 0 or (lines and line_idx >= len(lines)):
-                return Response(
-                    {'detail': 'product_line_index bu görevdeki kalem aralığında değil'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-        if len(lines) > 1:
-            if line_idx is None:
-                return Response(
-                    {
-                        'detail': (
-                            'Bu görevde birden fazla ürün kalemi var. '
-                            'Üretimi hangi kalem için girdiğinizi belirtin (product_line_index, 0 ile başlar).'
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-        elif len(lines) == 1:
-            if line_idx is None:
-                line_idx = 0
-
         save_lines = False
         prev_q = 0
-        active_line = dict(lines[line_idx] or {}) if (line_idx is not None and lines and 0 <= line_idx < len(lines)) else {}
-        line_wf_ids = [int(x) for x in (active_line or {}).get('workflow_team_ids', []) if str(x).isdigit()]
         # Kalem-bazlı workflow: ekip doğrulaması + adım otomatik kapanışı bu kalem state'inde tutulur.
         if line_wf_ids:
             if tid not in line_wf_ids:
