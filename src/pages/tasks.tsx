@@ -2159,11 +2159,23 @@ export function TaskDetailPage() {
                     let maxDone = 0
                     for (const tid of lineTeamIds) {
                       const st = lineState[tid] || {}
-                      const done = Math.max(0, Number(st?.qty_done ?? 0))
+                      const stTask = (taskState[tid] || {}) as Record<string, any>
+                      const qmapTask = (stTask.qty_done_by_line || {}) as Record<string, any>
+                      const done = Math.max(
+                        0,
+                        Number(st?.qty_done ?? 0),
+                        Number(qmapTask[String(lidx)] ?? 0)
+                      )
                       if (done > maxDone) maxDone = done
                     }
                     const stCurrent = currentTid ? lineState[currentTid] || {} : {}
-                    const currentStage = Math.max(0, Number(stCurrent?.qty_done ?? 0))
+                    const stCurrentTask = currentTid ? ((taskState[currentTid] || {}) as Record<string, any>) : {}
+                    const qmapCurrentTask = (stCurrentTask.qty_done_by_line || {}) as Record<string, any>
+                    const currentStage = Math.max(
+                      0,
+                      Number(stCurrent?.qty_done ?? 0),
+                      Number(qmapCurrentTask[String(lidx)] ?? 0)
+                    )
                     const hasOpenStage = Boolean(currentTid)
                     const display = hasOpenStage ? currentStage : maxDone
                     const currentTarget = Math.max(1, Number(stCurrent?.qty_target ?? lineTarget))
