@@ -2107,19 +2107,19 @@ export function TaskDetailPage() {
                   const active = (task.activeProductIndex ?? 0) === lidx
                   const hex = cssColorFromProductCode(line.productColorCode)
                   const lineTarget = Math.max(1, Number(line.quantity ?? 1))
-                  // Workflow'ta "üretilen" ekip/aşama bazındadır. Sıralı akışta aktif ekip değişince üretilen 0'dan başlar.
-                  const stageProduced =
-                    hasWfTeams && task.currentTeam
-                      ? (() => {
-                          const st: any = wfState?.[task.currentTeam] || {}
-                          const byLine = st?.qty_done_by_line || st?.qtyDoneByLine
-                          if (byLine && typeof byLine === 'object') {
-                            const v = (byLine[String(lidx)] ?? byLine[lidx]) as any
-                            return Math.max(0, Number(v ?? 0))
-                          }
-                          return Math.max(0, Number(st?.qty_done ?? 0))
-                        })()
-                      : null
+                  // Kalem-bazlı akışta üretim line.workflowStageState içinde tutulur.
+                  const stageProduced = (() => {
+                    const lineTeamIds = (line.workflowTeamIds || []).map(String)
+                    const lineState = (line.workflowStageState || {}) as Record<string, any>
+                    if (!lineTeamIds.length) return null
+                    let maxDone = 0
+                    for (const tid of lineTeamIds) {
+                      const st = lineState[tid] || lineState[String(tid)] || {}
+                      const done = Math.max(0, Number(st?.qty_done ?? 0))
+                      if (done > maxDone) maxDone = done
+                    }
+                    return maxDone
+                  })()
                   const lineProduced = stageProduced != null ? stageProduced : Math.max(0, Number(line.qtyProduced ?? 0))
                   const lineRemaining = Math.max(0, lineTarget - lineProduced)
                   const unit = line.unitType === 'metre' || isPvcStage ? 'metre' : 'adet'
