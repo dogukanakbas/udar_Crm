@@ -9,7 +9,7 @@ import os
 import uuid
 from permissions import IsOrgMember, HasAPIPermission, CommentOnlyRestriction, ViewOnlyRestriction
 from audit.utils import log_entity_action
-from .models import Ticket, TicketMessage, Task, TaskAttachment, TaskComment, TaskChecklist, TaskTimeEntry, TaskModel, TaskWorkflowTemplate, TaskProductionEntry, TaskMdfConsumption
+from .models import Ticket, TicketMessage, Task, TaskAttachment, TaskComment, TaskChecklist, TaskTimeEntry, TaskModel, TaskProductionEntry, TaskMdfConsumption, WorkflowTemplate
 from accounts.models import User, Team, TeamAssociate
 from .models_automation import AutomationRule
 from .utils import send_slack_webhook, send_email, generate_presigned_post, scan_file_with_clamav
@@ -22,9 +22,9 @@ from .serializers import (
     TaskCommentSerializer,
     TaskChecklistSerializer,
     TaskModelSerializer,
-    TaskWorkflowTemplateSerializer,
     AutomationRuleSerializer,
     TaskTimeEntrySerializer,
+    WorkflowTemplateSerializer,
 )
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -2631,9 +2631,10 @@ class TaskModelViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         serializer.save(organization=org)
 
 
-class TaskWorkflowTemplateViewSet(OrgScopedMixin, viewsets.ModelViewSet):
-    """Kalem-bazlı iş akışı şablonları (A İş Süreci vb.)."""
-    serializer_class = TaskWorkflowTemplateSerializer
+class WorkflowTemplateViewSet(OrgScopedMixin, viewsets.ModelViewSet):
+    """Kalem bazlı iş akışı için ekip sırası şablonları."""
+
+    serializer_class = WorkflowTemplateSerializer
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
     required_perm = 'tasks.view'
     permission_map = {
@@ -2642,11 +2643,11 @@ class TaskWorkflowTemplateViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         'partial_update': 'tasks.edit',
         'destroy': 'tasks.edit',
     }
-    queryset = TaskWorkflowTemplate.objects.all()
+    queryset = WorkflowTemplate.objects.all()
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name']
     ordering_fields = ['name', 'created_at']
-    ordering = ['name']
+    ordering = ['name', 'id']
 
     def get_queryset(self):
         qs = super().get_queryset()

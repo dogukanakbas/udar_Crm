@@ -8,9 +8,9 @@ from .models import (
     TaskChecklist,
     TaskTimeEntry,
     TaskModel,
-    TaskWorkflowTemplate,
     TaskProductionEntry,
     TaskMdfConsumption,
+    WorkflowTemplate,
 )
 from .workflow_utils import apply_product_line_to_task, ensure_product_line_workflows, ensure_workflow_state, workflow_team_id_list
 from .models_automation import AutomationRule
@@ -242,7 +242,6 @@ class TaskSerializer(serializers.ModelSerializer):
                 )
         return super().validate(attrs)
 
-
     def _sync_product_lines_and_workflow(self, instance):
         """Aktif kalemi kök alanlara yazar; birden fazla kalem varsa planned_hours tüm kalemlerin toplamına göre ayarlanır."""
         update_fields = []
@@ -429,33 +428,6 @@ class TaskModelSerializer(serializers.ModelSerializer):
         return None
 
 
-class TaskWorkflowTemplateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = TaskWorkflowTemplate
-        fields = ['id', 'name', 'team_ids', 'stage_targets', 'is_active', 'created_at', 'updated_at']
-        read_only_fields = ['created_at', 'updated_at']
-
-    def validate(self, attrs):
-        attrs = super().validate(attrs)
-        team_ids = attrs.get('team_ids')
-        targets = attrs.get('stage_targets')
-        if team_ids is not None:
-            ids = [int(x) for x in (team_ids or []) if str(x).isdigit()]
-            if len(ids) != len(team_ids or []):
-                raise serializers.ValidationError({'team_ids': 'team_ids yalnızca sayısal ekip id içermeli.'})
-            if len(ids) != len(set(ids)):
-                raise serializers.ValidationError({'team_ids': 'Aynı ekip şablonda iki kez olamaz.'})
-            attrs['team_ids'] = ids
-        if targets is not None:
-            vals = [max(1, int(x)) for x in (targets or [])]
-            attrs['stage_targets'] = vals
-        final_ids = attrs.get('team_ids', getattr(self.instance, 'team_ids', []))
-        final_targets = attrs.get('stage_targets', getattr(self.instance, 'stage_targets', []))
-        if final_targets and len(final_targets) != len(final_ids):
-            raise serializers.ValidationError({'stage_targets': 'stage_targets, team_ids ile aynı uzunlukta olmalı.'})
-        return attrs
-
-
 class TaskChecklistSerializer(serializers.ModelSerializer):
     class Meta:
         model = TaskChecklist
@@ -509,4 +481,37 @@ class AutomationRuleSerializer(serializers.ModelSerializer):
             if not payload.get('assignee'):
                 raise serializers.ValidationError("set_assignee için assignee zorunlu")
         return super().validate(attrs)
+
+
+class WorkflowTemplateSerializer(serializers.ModelSerializer):
+    team_names = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WorkflowTemplate
+        fields = ['id', 'name', 'team_ids', 'team_names', 'is_active', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at', 'team_names']
+
+    def validate_team_ids(self, value):
+        team_ids = [int(x) for x in (value or []) if str(x).isdigit()]
+        if not team_ids:
+            raise serializers.ValidationError('En az bir ekip adımı gerekli.')
+        if len(team_ids) != len(set(team_ids)):
+            raise serializers.ValidationError('Aynı ekip şablonda birden fazla kez olamaz.')
+        req = self.context.get('request')
+        org_id = getattr(getattr(req, 'user', None), 'organization_id', None)
+        if org_id:
+            from accounts.models import Team
+            existing = set(Team.objects.filter(organization_id=org_id, id__in=team_ids).values_list('id', flat=True))
+            if len(existing) != len(set(team_ids)):
+                raise serializers.ValidationError('Şablondaki bazı ekipler organizasyonda bulunamadı.')
+        return team_ids
+
+    def get_team_names(self, obj):
+        ids = [int(x) for x in (obj.team_ids or []) if str(x).isdigit()]
+        if not ids:
+            return []
+        from accounts.models import Team
+        rows = Team.objects.filter(id__in=ids).values('id', 'name')
+        names = {str(r['id']): r['name'] for r in rows}
+        return [names.get(str(i), f'Ekip {i}') for i in ids]
 

@@ -96,11 +96,11 @@ type TaskModelApiRow = {
   height_mm?: number
   thickness_mm?: number
 }
-type TaskWorkflowTemplateRow = {
+type WorkflowTemplateApiRow = {
   id: string
   name: string
   team_ids: number[]
-  stage_targets: number[]
+  team_names?: string[]
   is_active?: boolean
 }
 type OrgSettingsApi = { working_hours_start: string; working_hours_end: string; working_days: number[] } | null
@@ -313,12 +313,6 @@ export function TasksPage() {
   const [excelImporting, setExcelImporting] = useState(false)
   const [excelDraft, setExcelDraft] = useState<Partial<z.infer<typeof taskSchema>> | null>(null)
   const [createTaskModalOpen, setCreateTaskModalOpen] = useState(false)
-  const [workflowTemplateOpen, setWorkflowTemplateOpen] = useState(false)
-  const [workflowTemplates, setWorkflowTemplates] = useState<TaskWorkflowTemplateRow[]>([])
-  const [workflowTemplateName, setWorkflowTemplateName] = useState('')
-  const [workflowTemplateRows, setWorkflowTemplateRows] = useState<Array<{ teamId: string; target: string }>>([
-    { teamId: '', target: '1' },
-  ])
 
   useEffect(() => {
     const raw = localStorage.getItem('wip-limits')
@@ -335,22 +329,6 @@ export function TasksPage() {
   useEffect(() => {
     localStorage.setItem('wip-limits', JSON.stringify(wipLimits))
   }, [wipLimits])
-
-  useEffect(() => {
-    api
-      .get('/task-workflow-templates/')
-      .then((r) => {
-        const rows = ((r.data || []) as any[]).map((x) => ({
-          id: String(x.id),
-          name: String(x.name || ''),
-          team_ids: Array.isArray(x.team_ids) ? x.team_ids.map((v: any) => Number(v)).filter((n: number) => !Number.isNaN(n)) : [],
-          stage_targets: Array.isArray(x.stage_targets) ? x.stage_targets.map((v: any) => Number(v) || 1) : [],
-          is_active: x.is_active !== false,
-        }))
-        setWorkflowTemplates(rows)
-      })
-      .catch(() => setWorkflowTemplates([]))
-  }, [])
 
   useEffect(() => {
     const raw = localStorage.getItem('task-filters')
@@ -893,146 +871,6 @@ export function TasksPage() {
             {data.settings.role !== 'Worker' && (
               <RbacGuard perm="tasks.edit">
                 <div className="flex items-center gap-2">
-                  <Dialog open={workflowTemplateOpen} onOpenChange={setWorkflowTemplateOpen}>
-                    <DialogTrigger asChild>
-                      <Button size="sm" variant="outline">İş süreci şablonları</Button>
-                    </DialogTrigger>
-                    <DialogContent className="sm:max-w-xl">
-                      <DialogHeader>
-                        <DialogTitle>Kalem iş süreci şablonu oluştur</DialogTitle>
-                      </DialogHeader>
-                      <div className="space-y-3">
-                        <div className="space-y-1">
-                          <Label>Şablon adı</Label>
-                          <Input
-                            value={workflowTemplateName}
-                            onChange={(e) => setWorkflowTemplateName(e.target.value)}
-                            placeholder="A İş Süreci"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Ekip sırası</Label>
-                          {workflowTemplateRows.map((row, idx) => (
-                            <div key={`tpl-row-${idx}`} className="grid grid-cols-[1fr_120px_36px] gap-2 items-center">
-                              <Select
-                                value={row.teamId || 'none'}
-                                onValueChange={(v) =>
-                                  setWorkflowTemplateRows((prev) =>
-                                    prev.map((r, i) => (i === idx ? { ...r, teamId: v === 'none' ? '' : v } : r))
-                                  )
-                                }
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Ekip seçin" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="none">—</SelectItem>
-                                  {data.teams.map((t) => (
-                                    <SelectItem key={`tpl-team-${t.id}`} value={String(t.id)}>
-                                      {t.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <Input
-                                type="number"
-                                min={1}
-                                value={row.target}
-                                onChange={(e) =>
-                                  setWorkflowTemplateRows((prev) =>
-                                    prev.map((r, i) => (i === idx ? { ...r, target: e.target.value } : r))
-                                  )
-                                }
-                                placeholder="Hedef"
-                              />
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() =>
-                                  setWorkflowTemplateRows((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev))
-                                }
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          ))}
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setWorkflowTemplateRows((prev) => [...prev, { teamId: '', target: '1' }])}
-                          >
-                            <Plus className="h-4 w-4 mr-1" />
-                            Aşama ekle
-                          </Button>
-                        </div>
-                        {workflowTemplates.length > 0 ? (
-                          <div className="rounded border p-2">
-                            <p className="text-xs font-semibold text-muted-foreground mb-1">Mevcut şablonlar</p>
-                            <div className="text-xs space-y-1">
-                              {workflowTemplates
-                                .filter((t) => t.is_active !== false)
-                                .map((tpl) => (
-                                  <div key={`tpl-${tpl.id}`} className="flex items-center justify-between gap-2">
-                                    <span>{tpl.name}</span>
-                                    <span className="text-muted-foreground">{tpl.team_ids.length} ekip</span>
-                                  </div>
-                                ))}
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-                      <DialogFooter>
-                        <Button variant="ghost" onClick={() => setWorkflowTemplateOpen(false)}>
-                          Kapat
-                        </Button>
-                        <Button
-                          onClick={async () => {
-                            const name = workflowTemplateName.trim()
-                            const rows = workflowTemplateRows
-                              .map((r) => ({
-                                teamId: String(r.teamId || '').trim(),
-                                target: Math.max(1, Number(r.target || 1)),
-                              }))
-                              .filter((r) => /^\d+$/.test(r.teamId))
-                            if (!name || rows.length === 0) {
-                              toast({ title: 'Eksik bilgi', description: 'Şablon adı ve en az 1 ekip gerekli.', variant: 'destructive' })
-                              return
-                            }
-                            try {
-                              await api.post('/task-workflow-templates/', {
-                                name,
-                                team_ids: rows.map((r) => Number(r.teamId)),
-                                stage_targets: rows.map((r) => r.target),
-                                is_active: true,
-                              })
-                              const res = await api.get('/task-workflow-templates/')
-                              const next = ((res.data || []) as any[]).map((x) => ({
-                                id: String(x.id),
-                                name: String(x.name || ''),
-                                team_ids: Array.isArray(x.team_ids) ? x.team_ids.map((v: any) => Number(v)).filter((n: number) => !Number.isNaN(n)) : [],
-                                stage_targets: Array.isArray(x.stage_targets) ? x.stage_targets.map((v: any) => Number(v) || 1) : [],
-                                is_active: x.is_active !== false,
-                              }))
-                              setWorkflowTemplates(next)
-                              setWorkflowTemplateName('')
-                              setWorkflowTemplateRows([{ teamId: '', target: '1' }])
-                              toast({ title: 'Şablon kaydedildi' })
-                            } catch (e: any) {
-                              toast({
-                                title: 'Şablon kaydedilemedi',
-                                description: e?.response?.data?.detail || 'İşlem başarısız',
-                                variant: 'destructive',
-                              })
-                            }
-                          }}
-                        >
-                          Şablonu kaydet
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
                   <Dialog open={excelImportOpen} onOpenChange={setExcelImportOpen}>
                     <DialogTrigger asChild>
                       <Button size="sm" variant="outline">
@@ -3680,12 +3518,15 @@ function TaskModal({
 
   const { fields, append, remove } = useFieldArray({ control: form.control, name: 'productLines' })
   const [lineOpen, setLineOpen] = useState<Record<string, boolean>>({})
+  const [workflowTemplates, setWorkflowTemplates] = useState<WorkflowTemplateApiRow[]>([])
+  const [selectedWorkflowTemplateId, setSelectedWorkflowTemplateId] = useState<string>('none')
+  const [newWorkflowTemplateName, setNewWorkflowTemplateName] = useState('')
+  const [newWorkflowTemplateTeams, setNewWorkflowTemplateTeams] = useState<string[]>([])
+  const [workflowTemplateBusy, setWorkflowTemplateBusy] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [droppedFiles, setDroppedFiles] = useState<File[]>([])
   const [apiTaskModels, setApiTaskModels] = useState<TaskModelApiRow[]>(taskModelsCache || [])
-  const [workflowTemplates, setWorkflowTemplates] = useState<TaskWorkflowTemplateRow[]>([])
-  const [selectedWorkflowTemplateId, setSelectedWorkflowTemplateId] = useState<string>('none')
   const [orgSettings, setOrgSettings] = useState<OrgSettingsApi>(orgSettingsLoaded ? orgSettingsCache : null)
   const errors = form.formState.errors
 
@@ -3712,30 +3553,6 @@ function TaskModal({
     taskModelsReq.then((rows) => setApiTaskModels(rows))
   }, [])
   useEffect(() => {
-    let mounted = true
-    api
-      .get('/task-workflow-templates/')
-      .then((r) => {
-        if (!mounted) return
-        const rows = ((r.data || []) as any[])
-          .map((x) => ({
-            id: String(x.id),
-            name: String(x.name || ''),
-            team_ids: Array.isArray(x.team_ids) ? x.team_ids.map((v: any) => Number(v)).filter((n: number) => !Number.isNaN(n)) : [],
-            stage_targets: Array.isArray(x.stage_targets)
-              ? x.stage_targets.map((v: any) => Math.max(1, Number(v) || 1))
-              : [],
-            is_active: x.is_active !== false,
-          }))
-          .filter((x) => x.is_active !== false && x.team_ids.length > 0)
-        setWorkflowTemplates(rows)
-      })
-      .catch(() => setWorkflowTemplates([]))
-    return () => {
-      mounted = false
-    }
-  }, [])
-  useEffect(() => {
     if (orgSettingsLoaded) {
       setOrgSettings(orgSettingsCache)
       return
@@ -3758,6 +3575,26 @@ function TaskModal({
         })
     }
     orgSettingsReq.then((cfg) => setOrgSettings(cfg))
+  }, [])
+  useEffect(() => {
+    let alive = true
+    api
+      .get('/workflow-templates/')
+      .then((r) => {
+        if (!alive) return
+        const rows = ((r.data || []) as any[]).map((x) => ({
+          id: String(x.id),
+          name: String(x.name || ''),
+          team_ids: Array.isArray(x.team_ids) ? x.team_ids.map((n: any) => Number(n)).filter((n: number) => !Number.isNaN(n)) : [],
+          team_names: Array.isArray(x.team_names) ? x.team_names.map((n: any) => String(n)) : [],
+          is_active: x.is_active !== false,
+        }))
+        setWorkflowTemplates(rows.filter((x) => x.is_active !== false))
+      })
+      .catch(() => setWorkflowTemplates([]))
+    return () => {
+      alive = false
+    }
   }, [])
   const { toast } = useToast()
   const watchLines =
@@ -3801,6 +3638,58 @@ function TaskModal({
       const cur = prev[String(index)] !== false
       return { ...prev, [String(index)]: !cur }
     })
+  }
+  const addTemplateTeamRow = () => setNewWorkflowTemplateTeams((prev) => [...prev, ''])
+  const setTemplateTeamAt = (idx: number, teamId: string) =>
+    setNewWorkflowTemplateTeams((prev) => prev.map((x, i) => (i === idx ? teamId : x)))
+  const removeTemplateTeamAt = (idx: number) =>
+    setNewWorkflowTemplateTeams((prev) => prev.filter((_, i) => i !== idx))
+  const applyWorkflowTemplateToAllLines = () => {
+    const tpl = workflowTemplates.find((t) => String(t.id) === String(selectedWorkflowTemplateId))
+    if (!tpl || !tpl.team_ids.length) return
+    const lines = [...(form.getValues('productLines') || [])]
+    const next = lines.map((ln: any) => {
+      const qty = Math.max(1, Number(ln?.quantity ?? 1))
+      return {
+        ...ln,
+        workflowTeamIds: tpl.team_ids.map((id) => String(id)),
+        workflowStageTargets: tpl.team_ids.map(() => qty),
+      }
+    })
+    form.setValue('productLines', next as any, { shouldDirty: true, shouldValidate: true })
+    toast({ title: 'İş süreci uygulandı', description: `${tpl.name} tüm kalemlere uygulandı.` })
+  }
+  const createWorkflowTemplate = async () => {
+    const name = newWorkflowTemplateName.trim()
+    const ids = newWorkflowTemplateTeams.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0)
+    if (!name || ids.length === 0) {
+      toast({ title: 'Eksik bilgi', description: 'Şablon adı ve en az bir ekip adımı gerekli.', variant: 'destructive' })
+      return
+    }
+    setWorkflowTemplateBusy(true)
+    try {
+      const r = await api.post('/workflow-templates/', { name, team_ids: ids, is_active: true })
+      const row: WorkflowTemplateApiRow = {
+        id: String(r.data?.id),
+        name: String(r.data?.name || name),
+        team_ids: Array.isArray(r.data?.team_ids) ? r.data.team_ids.map((n: any) => Number(n)) : ids,
+        team_names: Array.isArray(r.data?.team_names) ? r.data.team_names.map((n: any) => String(n)) : [],
+        is_active: r.data?.is_active !== false,
+      }
+      setWorkflowTemplates((prev) => [...prev, row].sort((a, b) => a.name.localeCompare(b.name, 'tr')))
+      setSelectedWorkflowTemplateId(String(row.id))
+      setNewWorkflowTemplateName('')
+      setNewWorkflowTemplateTeams([])
+      toast({ title: 'Şablon kaydedildi' })
+    } catch (e: any) {
+      toast({
+        title: 'Şablon kaydedilemedi',
+        description: e?.response?.data?.detail || e?.response?.data?.name?.[0] || 'Hata',
+        variant: 'destructive',
+      })
+    } finally {
+      setWorkflowTemplateBusy(false)
+    }
   }
 
   const uploadAttachments = async (taskId: string, files: File[] | FileList | null) => {
@@ -3940,6 +3829,77 @@ function TaskModal({
             <Input {...form.register('title')} className={cn(errors.title && 'border-destructive')} />
             <FormError message={errors.title?.message} />
           </div>
+          <div className="space-y-3 rounded-md border p-3 bg-muted/20">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label className="text-base">İş süreci şablonu (ekip sırası)</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Şablon yalnız ekip sırasını tutar. Üretim hedefleri kalem adetlerinden otomatik gelir.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="min-w-[260px] flex-1">
+                <Label className="text-xs">Kayıtlı şablon</Label>
+                <Select value={selectedWorkflowTemplateId} onValueChange={setSelectedWorkflowTemplateId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Şablon seç" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— Şablon yok —</SelectItem>
+                    {workflowTemplates.map((tpl) => (
+                      <SelectItem key={tpl.id} value={String(tpl.id)}>
+                        {tpl.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button type="button" variant="outline" onClick={applyWorkflowTemplateToAllLines} disabled={selectedWorkflowTemplateId === 'none'}>
+                Tüm kalemlere uygula
+              </Button>
+            </div>
+            <div className="rounded border bg-background p-2 space-y-2">
+              <Label className="text-xs">Yeni şablon oluştur (Admin/Manager)</Label>
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-[180px] flex-1">
+                  <Label className="text-xs">Şablon adı</Label>
+                  <Input value={newWorkflowTemplateName} onChange={(e) => setNewWorkflowTemplateName(e.target.value)} placeholder="Örn. A İŞ SÜRECİ" />
+                </div>
+                <Button type="button" variant="outline" onClick={addTemplateTeamRow}>
+                  Ekip adımı ekle
+                </Button>
+              </div>
+              {newWorkflowTemplateTeams.length > 0 ? (
+                <div className="space-y-2">
+                  {newWorkflowTemplateTeams.map((teamId, idx) => (
+                    <div key={`wf-template-team-${idx}`} className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground w-5">{idx + 1}.</span>
+                      <Select value={teamId || 'none'} onValueChange={(v) => setTemplateTeamAt(idx, v === 'none' ? '' : v)}>
+                        <SelectTrigger className="flex-1">
+                          <SelectValue placeholder="Ekip seç" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">— Ekip seç —</SelectItem>
+                          {teams.map((t) => (
+                            <SelectItem key={t.id} value={String(t.id)}>
+                              {t.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={() => removeTemplateTeamAt(idx)}>
+                        Sil
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <Button type="button" onClick={createWorkflowTemplate} disabled={workflowTemplateBusy}>
+                {workflowTemplateBusy ? 'Kaydediliyor...' : 'Şablonu kaydet'}
+              </Button>
+            </div>
+          </div>
           <div className="space-y-3 rounded-md border p-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -3977,64 +3937,6 @@ function TaskModal({
                 ≈ {formatNumber(totalMinutesSum / minsPerMesaiDay)} mesai günü
               </p>
             )}
-            <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-2 items-end rounded-md border bg-muted/20 p-2">
-              <div>
-                <Label className="text-xs">Hazır iş süreci şablonu</Label>
-                <Select
-                  value={selectedWorkflowTemplateId}
-                  onValueChange={(v) => {
-                    setSelectedWorkflowTemplateId(v)
-                    if (v === 'none') return
-                    const tpl = workflowTemplates.find((t) => String(t.id) === String(v))
-                    if (!tpl) return
-                    const nextLines = (form.getValues('productLines') || []).map((line) => {
-                      const qtyBase = Math.max(1, Number((line as any)?.quantity ?? 1))
-                      const targets = tpl.stage_targets.length === tpl.team_ids.length
-                        ? tpl.stage_targets
-                        : tpl.team_ids.map(() => qtyBase)
-                      const state: Record<string, any> = {}
-                      tpl.team_ids.forEach((tid, idx) => {
-                        state[String(tid)] = {
-                          assignee_id: null,
-                          qty_target: Math.max(1, Number(targets[idx] ?? qtyBase)),
-                          qty_done: 0,
-                          pending_approval: false,
-                          stage_done: false,
-                        }
-                      })
-                      return {
-                        ...line,
-                        workflowTeamIds: tpl.team_ids.map(String),
-                        workflowStageTargets: targets.map((n) => Math.max(1, Number(n || qtyBase))),
-                        workflowStageState: state,
-                        currentTeamId: tpl.team_ids.length ? String(tpl.team_ids[0]) : null,
-                      }
-                    })
-                    form.setValue('productLines', nextLines as any, { shouldDirty: true, shouldValidate: true })
-                    toast({
-                      title: 'İş süreci uygulandı',
-                      description: `${tpl.name} tüm kalemlere uygulandı.`,
-                    })
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Şablon seçin" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">— Şablon yok —</SelectItem>
-                    {workflowTemplates.map((tpl) => (
-                      <SelectItem key={tpl.id} value={String(tpl.id)}>
-                        {tpl.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Admin, ekip sırasını bir kez şablon olarak tanımlar (A İş Süreci vb.). Buradan seçince tüm kalemlere aynı
-                iş adımı sırası otomatik uygulanır; isterseniz her kalemde ayrıca düzenleyebilirsiniz.
-              </p>
-            </div>
             <div className="space-y-2">
               {fields.map((field, index) => {
                 const line = watchLines?.[index]
