@@ -5,7 +5,7 @@ import django.db.models.deletion
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('accounts', '0015_organizationsettings'),
+        ('accounts', '0007_organizationsettings'),
         ('support', '0028_taskmdfconsumption'),
     ]
 
