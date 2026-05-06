@@ -5,28 +5,25 @@ import django.db.models.deletion
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('organizations', '0001_initial'),
+        ('accounts', '0015_organizationsettings'),
         ('support', '0028_taskmdfconsumption'),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='WorkflowTemplate',
+            name='TaskWorkflowTemplate',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('name', models.CharField(max_length=120)),
                 ('team_ids', models.JSONField(blank=True, default=list, help_text='Sıralı ekip id listesi')),
-                ('is_active', models.BooleanField(default=True)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
-                ('organization', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='workflow_templates', to='organizations.organization')),
+                ('created_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='task_workflow_templates', to='accounts.user')),
+                ('organization', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='task_workflow_templates', to='organizations.organization')),
             ],
             options={
                 'ordering': ['name', 'id'],
+                'unique_together': {('organization', 'name')},
             },
-        ),
-        migrations.AddConstraint(
-            model_name='workflowtemplate',
-            constraint=models.UniqueConstraint(fields=('organization', 'name'), name='unique_workflow_template_name_per_org'),
         ),
     ]

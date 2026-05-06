@@ -28,7 +28,7 @@ import {
   toDatetimeLocalFromISO,
 } from '@/lib/utils'
 import { taskPriorityLabelTR, taskSlaBucketLabelTR, taskStatusLabelTR } from '@/lib/task-labels'
-import type { Task, TaskChecklistItem, TaskTimeEntry, UserLite, WorkflowTemplate } from '@/types'
+import type { Task, TaskChecklistItem, TaskTimeEntry, UserLite } from '@/types'
 import { taskProductLineSchema } from '@/lib/task-product-schema'
 import {
   initialProductLinesForForm,
@@ -97,14 +97,14 @@ type TaskModelApiRow = {
   thickness_mm?: number
 }
 type OrgSettingsApi = { working_hours_start: string; working_hours_end: string; working_days: number[] } | null
-type WorkflowTemplateApiRow = { id: number | string; name: string; team_ids?: Array<number | string>; is_active?: boolean; created_at?: string; updated_at?: string }
+type WorkflowTemplateApiRow = { id: string | number; name: string; team_ids?: Array<string | number>; teamIds?: Array<string | number> }
 let taskModelsCache: TaskModelApiRow[] | null = null
 let taskModelsReq: Promise<TaskModelApiRow[]> | null = null
 let orgSettingsCache: OrgSettingsApi = null
 let orgSettingsReq: Promise<OrgSettingsApi> | null = null
 let orgSettingsLoaded = false
-let workflowTemplatesCache: WorkflowTemplate[] | null = null
-let workflowTemplatesReq: Promise<WorkflowTemplate[]> | null = null
+let workflowTemplatesCache: WorkflowTemplateApiRow[] | null = null
+let workflowTemplatesReq: Promise<WorkflowTemplateApiRow[]> | null = null
 const TASK_TEMPLATES: { id: string; name: string; checklist: string[] }[] = [
   { id: 'onboarding', name: 'Onboarding', checklist: ['Gereksinim topla', 'Ölçümleri tanımla', 'Kickoff planla'] },
   { id: 'bugfix', name: 'Bug fix', checklist: ['Reprodüksiyon', 'Kök neden analizi', 'Fix PR', 'Test ve onay'] },
@@ -3519,7 +3519,7 @@ function TaskModal({
   const [droppedFiles, setDroppedFiles] = useState<File[]>([])
   const [apiTaskModels, setApiTaskModels] = useState<TaskModelApiRow[]>(taskModelsCache || [])
   const [orgSettings, setOrgSettings] = useState<OrgSettingsApi>(orgSettingsLoaded ? orgSettingsCache : null)
-  const [workflowTemplates, setWorkflowTemplates] = useState<WorkflowTemplate[]>(workflowTemplatesCache || [])
+  const [workflowTemplates, setWorkflowTemplates] = useState<WorkflowTemplateApiRow[]>(workflowTemplatesCache || [])
   const errors = form.formState.errors
 
   useEffect(() => {
@@ -3545,6 +3545,28 @@ function TaskModal({
     taskModelsReq.then((rows) => setApiTaskModels(rows))
   }, [])
   useEffect(() => {
+    if (workflowTemplatesCache) {
+      setWorkflowTemplates(workflowTemplatesCache)
+      return
+    }
+    if (!workflowTemplatesReq) {
+      workflowTemplatesReq = api
+        .get('/task-workflow-templates/')
+        .then((r) => {
+          workflowTemplatesCache = (r.data || []) as WorkflowTemplateApiRow[]
+          return workflowTemplatesCache
+        })
+        .catch(() => {
+          workflowTemplatesCache = []
+          return []
+        })
+        .finally(() => {
+          workflowTemplatesReq = null
+        })
+    }
+    workflowTemplatesReq.then((rows) => setWorkflowTemplates(rows))
+  }, [])
+  useEffect(() => {
     if (orgSettingsLoaded) {
       setOrgSettings(orgSettingsCache)
       return
@@ -3567,35 +3589,6 @@ function TaskModal({
         })
     }
     orgSettingsReq.then((cfg) => setOrgSettings(cfg))
-  }, [])
-  useEffect(() => {
-    if (workflowTemplatesCache) {
-      setWorkflowTemplates(workflowTemplatesCache)
-      return
-    }
-    if (!workflowTemplatesReq) {
-      workflowTemplatesReq = api
-        .get('/workflow-templates/')
-        .then((r) => {
-          workflowTemplatesCache = ((r.data || []) as WorkflowTemplateApiRow[]).map((x) => ({
-            id: String(x.id),
-            name: String(x.name || ''),
-            teamIds: (x.team_ids || []).map((id) => String(id)),
-            isActive: Boolean(x.is_active ?? true),
-            createdAt: x.created_at,
-            updatedAt: x.updated_at,
-          }))
-          return workflowTemplatesCache
-        })
-        .catch(() => {
-          workflowTemplatesCache = []
-          return []
-        })
-        .finally(() => {
-          workflowTemplatesReq = null
-        })
-    }
-    workflowTemplatesReq.then((rows) => setWorkflowTemplates(rows))
   }, [])
   const { toast } = useToast()
   const watchLines =
@@ -3857,12 +3850,18 @@ function TaskModal({
                           orgSettings={orgSettings}
                           modelPresets={MODEL_PRESETS}
                           teams={teams}
-                          workflowTemplates={workflowTemplates}
-                          onTemplateCreated={(tpl) =>
-                            setWorkflowTemplates((prev) =>
-                              prev.some((x) => String(x.id) === String(tpl.id)) ? prev : [...prev, tpl]
-                            )
-                          }
+                          workflowTemplates={workflowTemplates.map((t) => ({
+                            id: String(t.id),
+                            name: t.name,
+                            teamIds: ((t.team_ids || t.teamIds || []) as Array<string | number>).map(String),
+                          }))}
+                          onCreateWorkflowTemplate={async ({ name, teamIds }) => {
+                            const payload = { name, team_ids: teamIds.map((id) => Number(id)).filter((n) => !Number.isNaN(n)) }
+                            await api.post('/task-workflow-templates/', payload)
+                            const listRes = await api.get('/task-workflow-templates/')
+                            workflowTemplatesCache = (listRes.data || []) as WorkflowTemplateApiRow[]
+                            setWorkflowTemplates(workflowTemplatesCache)
+                          }}
                         />
                         {fields.length > 1 ? (
                           <Button

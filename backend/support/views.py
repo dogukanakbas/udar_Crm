@@ -9,7 +9,7 @@ import os
 import uuid
 from permissions import IsOrgMember, HasAPIPermission, CommentOnlyRestriction, ViewOnlyRestriction
 from audit.utils import log_entity_action
-from .models import Ticket, TicketMessage, Task, TaskAttachment, TaskComment, TaskChecklist, TaskTimeEntry, TaskModel, TaskProductionEntry, TaskMdfConsumption, WorkflowTemplate
+from .models import Ticket, TicketMessage, Task, TaskAttachment, TaskComment, TaskChecklist, TaskTimeEntry, TaskModel, TaskProductionEntry, TaskMdfConsumption, TaskWorkflowTemplate
 from accounts.models import User, Team, TeamAssociate
 from .models_automation import AutomationRule
 from .utils import send_slack_webhook, send_email, generate_presigned_post, scan_file_with_clamav
@@ -22,9 +22,9 @@ from .serializers import (
     TaskCommentSerializer,
     TaskChecklistSerializer,
     TaskModelSerializer,
-    WorkflowTemplateSerializer,
     AutomationRuleSerializer,
     TaskTimeEntrySerializer,
+    TaskWorkflowTemplateSerializer,
 )
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -2448,6 +2448,25 @@ class TaskTimeEntryViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         serializer.save(user=self.request.user)
 
 
+class TaskWorkflowTemplateViewSet(OrgScopedMixin, viewsets.ModelViewSet):
+    serializer_class = TaskWorkflowTemplateSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'tasks.view'
+    permission_map = {
+        'create': 'tasks.edit',
+        'update': 'tasks.edit',
+        'partial_update': 'tasks.edit',
+        'destroy': 'tasks.edit',
+    }
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name']
+    ordering_fields = ['name', 'created_at', 'updated_at']
+    queryset = TaskWorkflowTemplate.objects.all()
+
+    def perform_create(self, serializer):
+        serializer.save(organization=self.request.user.organization, created_by=self.request.user)
+
+
 class AutomationRuleViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = AutomationRuleSerializer
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
@@ -2618,35 +2637,6 @@ class TaskModelViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['order', 'code']
     ordering = ['order', 'code']
-
-    def get_queryset(self):
-        qs = super().get_queryset()
-        org = getattr(self.request.user, 'organization', None)
-        if org:
-            qs = qs.filter(organization=org)
-        return qs
-
-    def perform_create(self, serializer):
-        org = getattr(self.request.user, 'organization', None)
-        serializer.save(organization=org)
-
-
-class WorkflowTemplateViewSet(OrgScopedMixin, viewsets.ModelViewSet):
-    """Kalem bazlı iş süreci şablonları (yalnız ekip sırası)."""
-    serializer_class = WorkflowTemplateSerializer
-    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
-    required_perm = 'tasks.view'
-    permission_map = {
-        'create': 'tasks.edit',
-        'update': 'tasks.edit',
-        'partial_update': 'tasks.edit',
-        'destroy': 'tasks.edit',
-    }
-    queryset = WorkflowTemplate.objects.all()
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['name']
-    ordering_fields = ['name', 'updated_at', 'created_at']
-    ordering = ['name']
 
     def get_queryset(self):
         qs = super().get_queryset()

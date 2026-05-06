@@ -10,7 +10,7 @@ from .models import (
     TaskModel,
     TaskProductionEntry,
     TaskMdfConsumption,
-    WorkflowTemplate,
+    TaskWorkflowTemplate,
 )
 from .workflow_utils import apply_product_line_to_task, ensure_product_line_workflows, ensure_workflow_state, workflow_team_id_list
 from .models_automation import AutomationRule
@@ -128,26 +128,35 @@ class TaskMdfConsumptionSerializer(serializers.ModelSerializer):
         return f"{sku.thickness_mm} mm · {sku.width_cm} × {sku.height_cm} cm"
 
 
-class WorkflowTemplateSerializer(serializers.ModelSerializer):
+class TaskWorkflowTemplateSerializer(serializers.ModelSerializer):
     class Meta:
-        model = WorkflowTemplate
-        fields = ['id', 'name', 'team_ids', 'is_active', 'created_at', 'updated_at']
-        read_only_fields = ['created_at', 'updated_at']
+        model = TaskWorkflowTemplate
+        fields = ['id', 'name', 'team_ids', 'created_by', 'created_at', 'updated_at']
+        read_only_fields = ['created_by', 'created_at', 'updated_at']
 
     def validate_team_ids(self, value):
-        ids = [int(x) for x in (value or []) if str(x).isdigit()]
-        if len(ids) != len(value or []):
-            raise serializers.ValidationError('team_ids yalnızca sayısal ekip id içermelidir.')
-        if len(ids) != len(set(ids)):
-            raise serializers.ValidationError('Aynı ekip şablonda birden fazla kez olamaz.')
+        if not isinstance(value, list) or not value:
+            raise serializers.ValidationError('En az bir ekip adımı gerekli.')
+        cleaned = []
+        seen = set()
+        for raw in value:
+            s = str(raw).strip()
+            if not s.isdigit():
+                raise serializers.ValidationError('Tüm ekip adımları sayısal ekip id olmalı.')
+            i = int(s)
+            if i in seen:
+                raise serializers.ValidationError('Aynı ekip şablonda iki kez olamaz.')
+            seen.add(i)
+            cleaned.append(i)
         req = self.context.get('request')
         org_id = getattr(getattr(req, 'user', None), 'organization_id', None)
-        if org_id and ids:
+        if org_id is not None:
             from accounts.models import Team
-            count = Team.objects.filter(organization_id=org_id, id__in=ids).count()
-            if count != len(ids):
-                raise serializers.ValidationError('team_ids içinde bu organizasyona ait olmayan ekip var.')
-        return ids
+            allowed = set(Team.objects.filter(organization_id=org_id, id__in=cleaned).values_list('id', flat=True))
+            missing = [tid for tid in cleaned if tid not in allowed]
+            if missing:
+                raise serializers.ValidationError('Şablondaki bazı ekipler organizasyonda bulunamadı.')
+        return cleaned
 
 
 class TaskSerializer(serializers.ModelSerializer):

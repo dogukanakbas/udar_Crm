@@ -6,9 +6,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { cn, formatNumber, getWorkingMinutesPerDay } from '@/lib/utils'
-import type { Task, WorkflowTemplate } from '@/types'
-import api from '@/lib/api'
-import { useToast } from '@/components/ui/use-toast'
+import type { Task } from '@/types'
 
 function FormError({ message }: { message?: string }) {
   if (!message) return null
@@ -60,7 +58,7 @@ export function TaskProductLineFields({
   modelPresets,
   teams,
   workflowTemplates,
-  onTemplateCreated,
+  onCreateWorkflowTemplate,
 }: {
   form: UseFormReturn<any>
   index: number
@@ -69,10 +67,9 @@ export function TaskProductLineFields({
   orgSettings: { working_hours_start: string; working_hours_end: string; working_days: number[] } | null
   modelPresets: Preset[]
   teams: { id: string; name: string }[]
-  workflowTemplates: WorkflowTemplate[]
-  onTemplateCreated?: (tpl: WorkflowTemplate) => void
+  workflowTemplates: { id: string; name: string; teamIds: string[] }[]
+  onCreateWorkflowTemplate: (payload: { name: string; teamIds: string[] }) => Promise<void>
 }) {
-  const { toast } = useToast()
   const p = `productLines.${index}` as const
   const watchMode = form.watch(`${p}.mode`)
   const watchUnit = form.watch(`${p}.unitType`) || 'adet'
@@ -84,7 +81,6 @@ export function TaskProductLineFields({
   const lineWfTargets = (form.watch(`${p}.workflowStageTargets`) || []) as number[]
   const errors = form.formState.errors as FieldErrors<any>
   const lineErr = (errors.productLines as any)?.[index] as Record<string, { message?: string }> | undefined
-  const [newTemplateName, setNewTemplateName] = useState('')
 
   const currentPreset = useMemo(
     () => modelPresets.find((m) => m.code === watchModel) || modelPresets[0],
@@ -152,6 +148,9 @@ export function TaskProductLineFields({
     lineWfTargets.length === lineWfTeamIds.length
       ? lineWfTargets
       : lineWfTeamIds.map((_, i) => Number(lineWfTargets[i] ?? Math.max(1, Number(watchQty) || 1)))
+  const [creatingTemplate, setCreatingTemplate] = useState(false)
+  const [tplName, setTplName] = useState('')
+  const [tplTeamIds, setTplTeamIds] = useState<string[]>([])
 
   const setLineWfTeam = (idx: number, teamId: string) => {
     const next = [...lineWfTeamIds]
@@ -161,6 +160,34 @@ export function TaskProductLineFields({
   const addLineWfStep = () => {
     form.setValue(`${p}.workflowTeamIds`, [...lineWfTeamIds, ''])
     form.setValue(`${p}.workflowStageTargets`, [...wfTargetsNormalized, Math.max(1, Number(watchQty) || 1)])
+  }
+  const applyTemplate = (templateId: string) => {
+    const tpl = workflowTemplates.find((x) => String(x.id) === String(templateId))
+    if (!tpl) return
+    const ids = (tpl.teamIds || []).map(String).filter(Boolean)
+    form.setValue(`${p}.workflowTeamIds`, ids)
+    form.setValue(
+      `${p}.workflowStageTargets`,
+      ids.map(() => Math.max(1, Number(watchQty) || 1))
+    )
+  }
+  const addTplStep = () => setTplTeamIds((prev) => [...prev, ''])
+  const setTplStep = (idx: number, teamId: string) => {
+    setTplTeamIds((prev) => {
+      const next = [...prev]
+      next[idx] = teamId
+      return next
+    })
+  }
+  const removeTplStep = (idx: number) => setTplTeamIds((prev) => prev.filter((_, i) => i !== idx))
+  const saveTemplate = async () => {
+    const name = tplName.trim()
+    const ids = tplTeamIds.map(String).map((x) => x.trim()).filter(Boolean)
+    if (!name || ids.length === 0) return
+    await onCreateWorkflowTemplate({ name, teamIds: ids })
+    setTplName('')
+    setTplTeamIds([])
+    setCreatingTemplate(false)
   }
   const removeLineWfStep = (idx: number) => {
     form.setValue(
@@ -172,84 +199,74 @@ export function TaskProductLineFields({
       wfTargetsNormalized.filter((_, i) => i !== idx)
     )
   }
-  const applyWorkflowTemplate = (templateId: string) => {
-    const tpl = workflowTemplates.find((t) => String(t.id) === String(templateId))
-    if (!tpl) return
-    const ids = (tpl.teamIds || []).map(String).filter(Boolean)
-    form.setValue(`${p}.workflowTeamIds`, ids)
-    form.setValue(
-      `${p}.workflowStageTargets`,
-      ids.map(() => Math.max(1, Number(watchQty) || 1))
-    )
-  }
-  const saveCurrentAsTemplate = async () => {
-    const ids = (lineWfTeamIds || []).map(String).filter((x) => /^\d+$/.test(x))
-    if (!newTemplateName.trim() || ids.length === 0) {
-      toast({ title: 'Şablon kaydedilemedi', description: 'Şablon adı ve en az bir ekip adımı gerekli.', variant: 'destructive' })
-      return
-    }
-    try {
-      const res = await api.post('/workflow-templates/', {
-        name: newTemplateName.trim(),
-        team_ids: ids.map((x) => Number(x)),
-        is_active: true,
-      })
-      const d = res.data || {}
-      onTemplateCreated?.({
-        id: String(d.id),
-        name: String(d.name || newTemplateName.trim()),
-        teamIds: (d.team_ids || ids).map((x: any) => String(x)),
-        isActive: Boolean(d.is_active ?? true),
-        createdAt: d.created_at,
-        updatedAt: d.updated_at,
-      })
-      setNewTemplateName('')
-      toast({ title: 'İş süreci şablonu kaydedildi' })
-    } catch (e: any) {
-      toast({ title: 'Şablon kaydedilemedi', description: e?.response?.data?.detail || 'Hata oluştu', variant: 'destructive' })
-    }
-  }
 
   return (
     <div className="space-y-3 rounded-md border p-3 bg-muted/20">
       <div className="space-y-2 rounded-md border bg-background p-2">
         <div className="flex items-center justify-between">
           <Label className="text-xs">Bu kalemin iş akışı (ekip sırası)</Label>
-          <Button type="button" variant="outline" size="sm" onClick={addLineWfStep}>
-            Adım ekle
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Button type="button" variant="outline" size="sm" onClick={addLineWfStep}>
+              Adım ekle
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => setCreatingTemplate((v) => !v)}>
+              Şablon oluştur
+            </Button>
+          </div>
         </div>
-        {workflowTemplates.length > 0 ? (
-          <div className="flex items-center gap-2">
-            <Select value={'none'} onValueChange={(v) => (v !== 'none' ? applyWorkflowTemplate(v) : undefined)}>
-              <SelectTrigger className="max-w-sm">
-                <SelectValue placeholder="Şablondan ekip sırası uygula" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">— Şablon seç —</SelectItem>
-                {workflowTemplates
-                  .filter((t) => t.isActive !== false)
-                  .map((t) => (
-                    <SelectItem key={t.id} value={String(t.id)}>
-                      {t.name}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-            <span className="text-[11px] text-muted-foreground">Sadece ekip sırası uygulanır.</span>
+        <div className="flex items-center gap-2">
+          <Select value={'none'} onValueChange={(v) => v !== 'none' && applyTemplate(v)}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Şablon seç (ekip sırası otomatik gelsin)" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">— Şablon seç —</SelectItem>
+              {workflowTemplates.map((tpl) => (
+                <SelectItem key={tpl.id} value={tpl.id}>
+                  {tpl.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {creatingTemplate ? (
+          <div className="space-y-2 rounded border bg-muted/20 p-2">
+            <div>
+              <Label className="text-xs">Şablon adı</Label>
+              <Input value={tplName} onChange={(e) => setTplName(e.target.value)} placeholder="Örn. A İş Süreci" />
+            </div>
+            <div className="space-y-2">
+              {tplTeamIds.map((teamId, i) => (
+                <div key={`tpl-step-${i}`} className="flex items-center gap-2">
+                  <Select value={teamId || 'none'} onValueChange={(v) => setTplStep(i, v === 'none' ? '' : v)}>
+                    <SelectTrigger className="flex-1 min-w-[8rem]">
+                      <SelectValue placeholder="Ekip seç" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">— Ekip seç —</SelectItem>
+                      {teams.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {t.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={() => removeTplStep(i)}>
+                    Sil
+                  </Button>
+                </div>
+              ))}
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={addTplStep}>
+                  Şablona adım ekle
+                </Button>
+                <Button type="button" size="sm" onClick={saveTemplate}>
+                  Şablonu kaydet
+                </Button>
+              </div>
+            </div>
           </div>
         ) : null}
-        <div className="flex items-center gap-2">
-          <Input
-            className="max-w-sm h-8"
-            placeholder="Yeni iş süreci şablon adı (örn. A İŞ SÜRECİ)"
-            value={newTemplateName}
-            onChange={(e) => setNewTemplateName(e.target.value)}
-          />
-          <Button type="button" variant="secondary" size="sm" onClick={saveCurrentAsTemplate}>
-            Şablon kaydet
-          </Button>
-        </div>
         {lineWfTeamIds.length === 0 ? (
           <p className="text-xs text-muted-foreground">Bu kalem için ekip adımı tanımlı değil.</p>
         ) : (
@@ -269,7 +286,6 @@ export function TaskProductLineFields({
                     ))}
                   </SelectContent>
                 </Select>
-                <span className="text-xs text-muted-foreground w-40">Hedef iş emrindeki kalem adedinden gelir</span>
                 <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={() => removeLineWfStep(i)}>
                   Sil
                 </Button>

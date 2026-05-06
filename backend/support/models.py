@@ -97,6 +97,23 @@ class Task(models.Model):
         return self.title
 
 
+class TaskWorkflowTemplate(models.Model):
+    """Kalem bazlı ekip sırası şablonu (hedef adet içermez)."""
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='task_workflow_templates')
+    name = models.CharField(max_length=120)
+    team_ids = models.JSONField(default=list, blank=True, help_text='Sıralı ekip id listesi')
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='task_workflow_templates')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name', 'id']
+        unique_together = [['organization', 'name']]
+
+    def __str__(self):
+        return self.name
+
+
 def task_model_image_path(instance, filename):
     return f"task_models/{instance.organization_id}/{instance.code}/{filename}"
 
@@ -257,24 +274,4 @@ class TaskMdfConsumption(models.Model):
 
     def __str__(self):
         return f"{self.task_id} MDF {self.mdf_sku_id} -{self.quantity}"
-
-
-class WorkflowTemplate(models.Model):
-    """Kalem bazlı iş süreci şablonu (yalnız ekip sırası)."""
-
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='workflow_templates')
-    name = models.CharField(max_length=120)
-    team_ids = models.JSONField(default=list, blank=True, help_text='Sıralı ekip id listesi')
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ['name', 'id']
-        constraints = [
-            models.UniqueConstraint(fields=['organization', 'name'], name='unique_workflow_template_name_per_org')
-        ]
-
-    def __str__(self):
-        return f"{self.name} ({self.organization_id})"
 

@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Task, TaskAttachment, TaskChecklist, TaskComment, TaskTimeEntry, Ticket, TicketMessage, WorkflowTemplate
+from .models import Task, TaskAttachment, TaskChecklist, TaskComment, TaskTimeEntry, Ticket, TicketMessage
 
 
 @admin.register(Task)
@@ -69,11 +69,4 @@ class TicketMessageAdmin(admin.ModelAdmin):
     list_display = ('id', 'ticket', 'author', 'internal', 'created_at')
     list_filter = ('internal',)
     search_fields = ('ticket__subject', 'author__username', 'message')
-
-
-@admin.register(WorkflowTemplate)
-class WorkflowTemplateAdmin(admin.ModelAdmin):
-    list_display = ('id', 'organization', 'name', 'is_active', 'updated_at')
-    list_filter = ('organization', 'is_active')
-    search_fields = ('name',)
 
