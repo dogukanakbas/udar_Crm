@@ -625,7 +625,7 @@ export function TasksPage() {
     return Array.from(map.values()).sort((a, b) => b.total - a.total)
   }, [filtered, data.teams])
   const completedTasksByAssignee = useMemo(() => {
-    const done = filtered
+    const done = tasks
       .filter((t) => t.status === 'done')
       .slice()
       .sort((a, b) => {
@@ -644,7 +644,7 @@ export function TasksPage() {
       bucket.set(key, row)
     }
     return Array.from(bucket.values()).sort((a, b) => b.tasks.length - a.tasks.length)
-  }, [filtered, data.users])
+  }, [tasks, data.users])
 
   const columns: ColumnDef<Task>[] = [
     {
