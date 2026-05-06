@@ -15,7 +15,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('name', models.CharField(max_length=120)),
-                ('team_ids', models.JSONField(blank=True, default=list, help_text='Sıralı ekip ID listesi')),
+                ('team_ids', models.JSONField(blank=True, default=list, help_text='Sıralı ekip id listesi')),
                 ('is_active', models.BooleanField(default=True)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
@@ -27,6 +27,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='workflowtemplate',
-            constraint=models.UniqueConstraint(fields=('organization', 'name'), name='uniq_workflow_template_org_name'),
+            constraint=models.UniqueConstraint(fields=('organization', 'name'), name='unique_workflow_template_name_per_org'),
         ),
     ]

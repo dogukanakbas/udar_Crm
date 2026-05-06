@@ -260,11 +260,11 @@ class TaskMdfConsumption(models.Model):
 
 
 class WorkflowTemplate(models.Model):
-    """Organizasyon bazlı iş akışı şablonu (yalnız ekip sırası)."""
+    """Kalem bazlı iş süreci şablonu (yalnız ekip sırası)."""
 
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='workflow_templates')
     name = models.CharField(max_length=120)
-    team_ids = models.JSONField(default=list, blank=True, help_text='Sıralı ekip ID listesi')
+    team_ids = models.JSONField(default=list, blank=True, help_text='Sıralı ekip id listesi')
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -272,7 +272,7 @@ class WorkflowTemplate(models.Model):
     class Meta:
         ordering = ['name', 'id']
         constraints = [
-            models.UniqueConstraint(fields=['organization', 'name'], name='uniq_workflow_template_org_name')
+            models.UniqueConstraint(fields=['organization', 'name'], name='unique_workflow_template_name_per_org')
         ]
 
     def __str__(self):

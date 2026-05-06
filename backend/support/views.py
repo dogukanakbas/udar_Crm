@@ -22,9 +22,9 @@ from .serializers import (
     TaskCommentSerializer,
     TaskChecklistSerializer,
     TaskModelSerializer,
+    WorkflowTemplateSerializer,
     AutomationRuleSerializer,
     TaskTimeEntrySerializer,
-    WorkflowTemplateSerializer,
 )
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -2632,8 +2632,7 @@ class TaskModelViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
 
 class WorkflowTemplateViewSet(OrgScopedMixin, viewsets.ModelViewSet):
-    """Kalem bazlı iş akışı için ekip sırası şablonları."""
-
+    """Kalem bazlı iş süreci şablonları (yalnız ekip sırası)."""
     serializer_class = WorkflowTemplateSerializer
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
     required_perm = 'tasks.view'
@@ -2646,8 +2645,8 @@ class WorkflowTemplateViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     queryset = WorkflowTemplate.objects.all()
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name']
-    ordering_fields = ['name', 'created_at']
-    ordering = ['name', 'id']
+    ordering_fields = ['name', 'updated_at', 'created_at']
+    ordering = ['name']
 
     def get_queryset(self):
         qs = super().get_queryset()

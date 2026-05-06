@@ -312,6 +312,15 @@ export interface TaskMdfConsumption {
   createdAt?: string
 }
 
+export interface WorkflowTemplate {
+  id: string
+  name: string
+  teamIds: string[]
+  isActive?: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
 export interface Team {
   id: string
   name: string

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { UseFormReturn, FieldErrors } from 'react-hook-form'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
@@ -6,7 +6,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { cn, formatNumber, getWorkingMinutesPerDay } from '@/lib/utils'
-import type { Task } from '@/types'
+import type { Task, WorkflowTemplate } from '@/types'
+import api from '@/lib/api'
+import { useToast } from '@/components/ui/use-toast'
 
 function FormError({ message }: { message?: string }) {
   if (!message) return null
@@ -57,6 +59,8 @@ export function TaskProductLineFields({
   orgSettings,
   modelPresets,
   teams,
+  workflowTemplates,
+  onTemplateCreated,
 }: {
   form: UseFormReturn<any>
   index: number
@@ -65,7 +69,10 @@ export function TaskProductLineFields({
   orgSettings: { working_hours_start: string; working_hours_end: string; working_days: number[] } | null
   modelPresets: Preset[]
   teams: { id: string; name: string }[]
+  workflowTemplates: WorkflowTemplate[]
+  onTemplateCreated?: (tpl: WorkflowTemplate) => void
 }) {
+  const { toast } = useToast()
   const p = `productLines.${index}` as const
   const watchMode = form.watch(`${p}.mode`)
   const watchUnit = form.watch(`${p}.unitType`) || 'adet'
@@ -77,6 +84,7 @@ export function TaskProductLineFields({
   const lineWfTargets = (form.watch(`${p}.workflowStageTargets`) || []) as number[]
   const errors = form.formState.errors as FieldErrors<any>
   const lineErr = (errors.productLines as any)?.[index] as Record<string, { message?: string }> | undefined
+  const [newTemplateName, setNewTemplateName] = useState('')
 
   const currentPreset = useMemo(
     () => modelPresets.find((m) => m.code === watchModel) || modelPresets[0],
@@ -150,11 +158,6 @@ export function TaskProductLineFields({
     next[idx] = teamId
     form.setValue(`${p}.workflowTeamIds`, next)
   }
-  const setLineWfTarget = (idx: number, n: number) => {
-    const next = [...wfTargetsNormalized]
-    next[idx] = n
-    form.setValue(`${p}.workflowStageTargets`, next)
-  }
   const addLineWfStep = () => {
     form.setValue(`${p}.workflowTeamIds`, [...lineWfTeamIds, ''])
     form.setValue(`${p}.workflowStageTargets`, [...wfTargetsNormalized, Math.max(1, Number(watchQty) || 1)])
@@ -169,6 +172,43 @@ export function TaskProductLineFields({
       wfTargetsNormalized.filter((_, i) => i !== idx)
     )
   }
+  const applyWorkflowTemplate = (templateId: string) => {
+    const tpl = workflowTemplates.find((t) => String(t.id) === String(templateId))
+    if (!tpl) return
+    const ids = (tpl.teamIds || []).map(String).filter(Boolean)
+    form.setValue(`${p}.workflowTeamIds`, ids)
+    form.setValue(
+      `${p}.workflowStageTargets`,
+      ids.map(() => Math.max(1, Number(watchQty) || 1))
+    )
+  }
+  const saveCurrentAsTemplate = async () => {
+    const ids = (lineWfTeamIds || []).map(String).filter((x) => /^\d+$/.test(x))
+    if (!newTemplateName.trim() || ids.length === 0) {
+      toast({ title: 'Şablon kaydedilemedi', description: 'Şablon adı ve en az bir ekip adımı gerekli.', variant: 'destructive' })
+      return
+    }
+    try {
+      const res = await api.post('/workflow-templates/', {
+        name: newTemplateName.trim(),
+        team_ids: ids.map((x) => Number(x)),
+        is_active: true,
+      })
+      const d = res.data || {}
+      onTemplateCreated?.({
+        id: String(d.id),
+        name: String(d.name || newTemplateName.trim()),
+        teamIds: (d.team_ids || ids).map((x: any) => String(x)),
+        isActive: Boolean(d.is_active ?? true),
+        createdAt: d.created_at,
+        updatedAt: d.updated_at,
+      })
+      setNewTemplateName('')
+      toast({ title: 'İş süreci şablonu kaydedildi' })
+    } catch (e: any) {
+      toast({ title: 'Şablon kaydedilemedi', description: e?.response?.data?.detail || 'Hata oluştu', variant: 'destructive' })
+    }
+  }
 
   return (
     <div className="space-y-3 rounded-md border p-3 bg-muted/20">
@@ -177,6 +217,37 @@ export function TaskProductLineFields({
           <Label className="text-xs">Bu kalemin iş akışı (ekip sırası)</Label>
           <Button type="button" variant="outline" size="sm" onClick={addLineWfStep}>
             Adım ekle
+          </Button>
+        </div>
+        {workflowTemplates.length > 0 ? (
+          <div className="flex items-center gap-2">
+            <Select value={'none'} onValueChange={(v) => (v !== 'none' ? applyWorkflowTemplate(v) : undefined)}>
+              <SelectTrigger className="max-w-sm">
+                <SelectValue placeholder="Şablondan ekip sırası uygula" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">— Şablon seç —</SelectItem>
+                {workflowTemplates
+                  .filter((t) => t.isActive !== false)
+                  .map((t) => (
+                    <SelectItem key={t.id} value={String(t.id)}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            <span className="text-[11px] text-muted-foreground">Sadece ekip sırası uygulanır.</span>
+          </div>
+        ) : null}
+        <div className="flex items-center gap-2">
+          <Input
+            className="max-w-sm h-8"
+            placeholder="Yeni iş süreci şablon adı (örn. A İŞ SÜRECİ)"
+            value={newTemplateName}
+            onChange={(e) => setNewTemplateName(e.target.value)}
+          />
+          <Button type="button" variant="secondary" size="sm" onClick={saveCurrentAsTemplate}>
+            Şablon kaydet
           </Button>
         </div>
         {lineWfTeamIds.length === 0 ? (
@@ -198,13 +269,7 @@ export function TaskProductLineFields({
                     ))}
                   </SelectContent>
                 </Select>
-                <Input
-                  type="number"
-                  min={0}
-                  className="h-9 w-24"
-                  value={Number(wfTargetsNormalized[i] ?? 0)}
-                  onChange={(e) => setLineWfTarget(i, Math.max(0, Number(e.target.value) || 0))}
-                />
+                <span className="text-xs text-muted-foreground w-40">Hedef iş emrindeki kalem adedinden gelir</span>
                 <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={() => removeLineWfStep(i)}>
                   Sil
                 </Button>

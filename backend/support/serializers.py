@@ -128,6 +128,28 @@ class TaskMdfConsumptionSerializer(serializers.ModelSerializer):
         return f"{sku.thickness_mm} mm · {sku.width_cm} × {sku.height_cm} cm"
 
 
+class WorkflowTemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WorkflowTemplate
+        fields = ['id', 'name', 'team_ids', 'is_active', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+    def validate_team_ids(self, value):
+        ids = [int(x) for x in (value or []) if str(x).isdigit()]
+        if len(ids) != len(value or []):
+            raise serializers.ValidationError('team_ids yalnızca sayısal ekip id içermelidir.')
+        if len(ids) != len(set(ids)):
+            raise serializers.ValidationError('Aynı ekip şablonda birden fazla kez olamaz.')
+        req = self.context.get('request')
+        org_id = getattr(getattr(req, 'user', None), 'organization_id', None)
+        if org_id and ids:
+            from accounts.models import Team
+            count = Team.objects.filter(organization_id=org_id, id__in=ids).count()
+            if count != len(ids):
+                raise serializers.ValidationError('team_ids içinde bu organizasyona ait olmayan ekip var.')
+        return ids
+
+
 class TaskSerializer(serializers.ModelSerializer):
     attachments = TaskAttachmentSerializer(many=True, read_only=True)
     comments = TaskCommentSerializer(many=True, read_only=True)
@@ -481,37 +503,4 @@ class AutomationRuleSerializer(serializers.ModelSerializer):
             if not payload.get('assignee'):
                 raise serializers.ValidationError("set_assignee için assignee zorunlu")
         return super().validate(attrs)
-
-
-class WorkflowTemplateSerializer(serializers.ModelSerializer):
-    team_names = serializers.SerializerMethodField()
-
-    class Meta:
-        model = WorkflowTemplate
-        fields = ['id', 'name', 'team_ids', 'team_names', 'is_active', 'created_at', 'updated_at']
-        read_only_fields = ['created_at', 'updated_at', 'team_names']
-
-    def validate_team_ids(self, value):
-        team_ids = [int(x) for x in (value or []) if str(x).isdigit()]
-        if not team_ids:
-            raise serializers.ValidationError('En az bir ekip adımı gerekli.')
-        if len(team_ids) != len(set(team_ids)):
-            raise serializers.ValidationError('Aynı ekip şablonda birden fazla kez olamaz.')
-        req = self.context.get('request')
-        org_id = getattr(getattr(req, 'user', None), 'organization_id', None)
-        if org_id:
-            from accounts.models import Team
-            existing = set(Team.objects.filter(organization_id=org_id, id__in=team_ids).values_list('id', flat=True))
-            if len(existing) != len(set(team_ids)):
-                raise serializers.ValidationError('Şablondaki bazı ekipler organizasyonda bulunamadı.')
-        return team_ids
-
-    def get_team_names(self, obj):
-        ids = [int(x) for x in (obj.team_ids or []) if str(x).isdigit()]
-        if not ids:
-            return []
-        from accounts.models import Team
-        rows = Team.objects.filter(id__in=ids).values('id', 'name')
-        names = {str(r['id']): r['name'] for r in rows}
-        return [names.get(str(i), f'Ekip {i}') for i in ids]
 
