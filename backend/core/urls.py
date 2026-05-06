@@ -38,6 +38,7 @@ from support.views import (
     TaskCommentViewSet,
     TaskChecklistViewSet,
     TaskModelViewSet,
+    TaskWorkflowTemplateViewSet,
     UploadPresignView,
     AutomationRuleViewSet,
     TaskTimeEntryViewSet,
@@ -72,6 +73,7 @@ router.register(r'task-attachments', TaskAttachmentViewSet, basename='task-attac
 router.register(r'task-comments', TaskCommentViewSet, basename='task-comments')
 router.register(r'task-checklist', TaskChecklistViewSet, basename='task-checklist')
 router.register(r'task-models', TaskModelViewSet, basename='task-models')
+router.register(r'task-workflow-templates', TaskWorkflowTemplateViewSet, basename='task-workflow-templates')
 router.register(r'automation-rules', AutomationRuleViewSet, basename='automation-rules')
 router.register(r'task-time-entries', TaskTimeEntryViewSet, basename='task-time-entries')
 router.register(r'teams', TeamViewSet, basename='teams')

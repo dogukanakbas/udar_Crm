@@ -8,6 +8,7 @@ from .models import (
     TaskChecklist,
     TaskTimeEntry,
     TaskModel,
+    TaskWorkflowTemplate,
     TaskProductionEntry,
     TaskMdfConsumption,
 )
@@ -241,6 +242,7 @@ class TaskSerializer(serializers.ModelSerializer):
                 )
         return super().validate(attrs)
 
+
     def _sync_product_lines_and_workflow(self, instance):
         """Aktif kalemi kök alanlara yazar; birden fazla kalem varsa planned_hours tüm kalemlerin toplamına göre ayarlanır."""
         update_fields = []
@@ -425,6 +427,33 @@ class TaskModelSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.image.url)
             return obj.image.url
         return None
+
+
+class TaskWorkflowTemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TaskWorkflowTemplate
+        fields = ['id', 'name', 'team_ids', 'stage_targets', 'is_active', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        team_ids = attrs.get('team_ids')
+        targets = attrs.get('stage_targets')
+        if team_ids is not None:
+            ids = [int(x) for x in (team_ids or []) if str(x).isdigit()]
+            if len(ids) != len(team_ids or []):
+                raise serializers.ValidationError({'team_ids': 'team_ids yalnızca sayısal ekip id içermeli.'})
+            if len(ids) != len(set(ids)):
+                raise serializers.ValidationError({'team_ids': 'Aynı ekip şablonda iki kez olamaz.'})
+            attrs['team_ids'] = ids
+        if targets is not None:
+            vals = [max(1, int(x)) for x in (targets or [])]
+            attrs['stage_targets'] = vals
+        final_ids = attrs.get('team_ids', getattr(self.instance, 'team_ids', []))
+        final_targets = attrs.get('stage_targets', getattr(self.instance, 'stage_targets', []))
+        if final_targets and len(final_targets) != len(final_ids):
+            raise serializers.ValidationError({'stage_targets': 'stage_targets, team_ids ile aynı uzunlukta olmalı.'})
+        return attrs
 
 
 class TaskChecklistSerializer(serializers.ModelSerializer):
