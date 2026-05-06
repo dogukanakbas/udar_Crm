@@ -2207,6 +2207,21 @@ export function TaskDetailPage() {
                     }
                     return lidx === 0 && (task.productLines?.length ?? 0) > 0
                   })
+                  const lineWorkflowRows = (() => {
+                    const ids = (line.workflowTeamIds || []).map(String).filter(Boolean)
+                    if (!ids.length) return []
+                    const stMap = (line.workflowStageState || {}) as Record<string, any>
+                    return ids.map((tid, idx) => {
+                      const st = (stMap[tid] || {}) as Record<string, any>
+                      const target = Math.max(1, Number(st.qty_target ?? line.quantity ?? 1))
+                      const done = Math.max(0, Number(st.qty_done ?? 0))
+                      const remaining = Math.max(0, target - done)
+                      const teamName = data.teams.find((t) => String(t.id) === tid)?.name || `Ekip ${tid}`
+                      const isCurrent = String(lineProductionMeta.currentTid || '') === tid
+                      const doneStage = Boolean(st.stage_done) || remaining === 0
+                      return { tid, idx, target, done, remaining, teamName, isCurrent, doneStage }
+                    })
+                  })()
                   const lineProduced = lineProductionMeta.display
                   const lineRemaining = Math.max(0, lineTarget - lineProduced)
                   const unit = line.unitType === 'metre' || isPvcStage ? 'metre' : 'adet'
@@ -2520,6 +2535,26 @@ export function TaskDetailPage() {
                                 </li>
                               ))}
                             </ul>
+                          </div>
+                        ) : null}
+                        {lineWorkflowRows.length > 0 ? (
+                          <div className="rounded-md border bg-muted/20 p-2 space-y-1.5">
+                            <p className="text-[10px] font-semibold uppercase text-muted-foreground">İş süreci — bu kalem</p>
+                            <div className="space-y-1">
+                              {lineWorkflowRows.map((row) => (
+                                <div key={`${lidx}-${row.tid}`} className="flex items-center justify-between gap-2 text-[11px]">
+                                  <div className="min-w-0 flex items-center gap-1.5">
+                                    <span className="text-muted-foreground shrink-0">{row.idx + 1}.</span>
+                                    <span className="truncate">{row.teamName}</span>
+                                    {row.isCurrent ? <Badge className="h-5 px-1.5 text-[10px]">Aktif</Badge> : null}
+                                    {row.doneStage ? <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">Tamamlandı</Badge> : null}
+                                  </div>
+                                  <span className="tabular-nums text-muted-foreground shrink-0">
+                                    {formatNumber(row.done)} / {formatNumber(row.target)} ({formatNumber(row.remaining)} kalan)
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         ) : null}
                       </div>
