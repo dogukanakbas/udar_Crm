@@ -191,7 +191,16 @@ class TaskSerializer(serializers.ModelSerializer):
             from accounts.models import Team
             first_id = workflow_ids[0]
             if first_id is not None:
-                first_team = Team.objects.filter(id=int(first_id)).first()
+                req = self.context.get('request')
+                org_id = getattr(getattr(req, 'user', None), 'organization_id', None)
+                q = Team.objects.filter(id=int(first_id))
+                if org_id is not None:
+                    q = q.filter(organization_id=org_id)
+                first_team = q.first()
+                if not first_team:
+                    raise serializers.ValidationError(
+                        {'workflow_team_ids': 'İlk iş akışı ekibi bu organizasyonda bulunamadı.'}
+                    )
                 if first_team and not attrs.get('team'):
                     attrs['team'] = first_team
                 if first_team and not attrs.get('current_team') and getattr(self.instance, 'current_team', None) is None:

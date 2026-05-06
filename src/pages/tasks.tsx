@@ -412,6 +412,15 @@ export function TasksPage() {
     const isWorker = data.settings.role === 'Worker'
     return tasks.filter((t) => {
       const workerVisibleByLine = !!(isWorker && me && taskVisibleToWorkerTeamMember(t, me, data.teams))
+      const teamSelected = String(teamFilter || 'all')
+      const selectedTeamOpenOnAnyLine =
+        teamSelected !== 'all' &&
+        !!(t.productLines || []).some((ln) => {
+          const ids = (ln.workflowTeamIds || []).map(String)
+          if (!ids.includes(teamSelected)) return false
+          const st = (ln.workflowStageState || {})[teamSelected] || {}
+          return !st.stage_done
+        })
       const assigneeMatch =
         assignee === 'all' ||
         String(t.assignee) === String(assignee) ||
@@ -419,7 +428,8 @@ export function TasksPage() {
       const teamMatch =
         teamFilter === 'all' ||
         String(t.teamId) === String(teamFilter) ||
-        (workerVisibleByLine && String(teamFilter) !== 'all')
+        String(t.currentTeam || '') === String(teamFilter) ||
+        selectedTeamOpenOnAnyLine
       return (
         (status === 'all' || t.status === status) &&
         assigneeMatch &&
@@ -1782,6 +1792,7 @@ export function TaskDetailPage() {
       ;(ln.workflowTeamIds || []).map(String).forEach(pushId)
     })
     const rows = ids.map((tid, idx) => {
+      const rootIndex = (task.workflowTeamIds || []).map(String).indexOf(String(tid))
       let target = 0
       let done = 0
       let lineCount = 0
@@ -1798,7 +1809,11 @@ export function TaskDetailPage() {
         if (st.stage_done) doneCount += 1
       }
       if (target <= 0) {
-        const fallback = Number(task.workflowStageTargets?.[idx] ?? workflowQtyFallback ?? 1)
+        const stageTargetRaw =
+          rootIndex >= 0
+            ? task.workflowStageTargets?.[rootIndex]
+            : task.workflowStageTargets?.[idx]
+        const fallback = Number(stageTargetRaw ?? workflowQtyFallback ?? 1)
         target = Number.isFinite(fallback) ? Math.max(1, fallback) : 1
       }
       const isCurrent =
@@ -2465,44 +2480,12 @@ export function TaskDetailPage() {
                                   entry_date: row.d || prodDate,
                                   product_line_index: lidx,
                                 }
-                                const candidateTeams: string[] = []
-                                const pushCandidate = (val: unknown) => {
-                                  const s = val != null ? String(val).trim() : ''
-                                  if (!/^\d+$/.test(s)) return
-                                  if (!candidateTeams.includes(s)) candidateTeams.push(s)
+                                const activeTeamId =
+                                  lineProductionMeta.currentTid != null ? String(lineProductionMeta.currentTid).trim() : ''
+                                if (activeTeamId && /^\d+$/.test(activeTeamId)) {
+                                  payload.team = Number(activeTeamId)
                                 }
-                                // Öncelik: kalemin aktif ekibi
-                                pushCandidate(line.currentTeamId)
-                                // Fallback: kullanıcının üyesi/lideri olduğu açık kalem aşamaları
-                                const lineState = (line.workflowStageState || {}) as Record<string, any>
-                                for (const tid of (line.workflowTeamIds || []).map(String)) {
-                                  const st = (lineState[tid] || {}) as Record<string, any>
-                                  if (st.stage_done) continue
-                                  const tr = data.teams.find((t) => String(t.id) === tid)
-                                  const isMember = !!(currentUserId && tr?.memberIds?.includes(String(currentUserId)))
-                                  const isLeader = !!(currentUserId && tr?.leaderId && String(tr.leaderId) === String(currentUserId))
-                                  if (isMember || isLeader) pushCandidate(tid)
-                                }
-
-                                let posted = false
-                                let lastErr: any = null
-                                if (candidateTeams.length === 0) {
-                                  await api.post(`/tasks/${task.id}/log-production/`, payload)
-                                  posted = true
-                                } else {
-                                  for (const teamId of candidateTeams) {
-                                    try {
-                                      await api.post(`/tasks/${task.id}/log-production/`, { ...payload, team: Number(teamId) })
-                                      posted = true
-                                      break
-                                    } catch (err: any) {
-                                      lastErr = err
-                                      const s = Number(err?.response?.status || 0)
-                                      if (s !== 400 && s !== 403) throw err
-                                    }
-                                  }
-                                }
-                                if (!posted && lastErr) throw lastErr
+                                await api.post(`/tasks/${task.id}/log-production/`, payload)
                                 await hydrateFromApi()
                                 setLineProdInput((prev) => {
                                   const next = { ...prev }

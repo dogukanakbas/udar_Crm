@@ -581,8 +581,11 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             raise PermissionDenied("Farklı organizasyon")
         if getattr(task, 'workflow_parallel', False) and workflow_team_id_list(task):
             wf = workflow_team_id_list(task)
-            user_teams = list(request.user.teams.values_list('id', flat=True))
-            user_set = set(user_teams)
+            user_teams = set(request.user.teams.values_list('id', flat=True))
+            leader_teams = set(
+                Team.objects.filter(organization_id=task.organization_id, leader_id=request.user.id).values_list('id', flat=True)
+            )
+            user_set = user_teams | leader_teams
             ensure_workflow_state(task)
             state = dict(task.workflow_stage_state or {})
             claimed_tid = None
@@ -725,6 +728,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             }
         )
         task.current_team = target_team or task.current_team or task.team
+        task.team = task.current_team
         if target_user:
             task.assignee = target_user
         else:
@@ -732,7 +736,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         task.handover_reason = note
         task.handover_at = timezone.now()
         task.handover_history = history
-        task.save(update_fields=['current_team', 'assignee', 'handover_reason', 'handover_at', 'handover_history', 'updated_at'])
+        task.save(update_fields=['current_team', 'team', 'assignee', 'handover_reason', 'handover_at', 'handover_history', 'updated_at'])
         TaskComment.objects.create(
             task=task,
             author=request.user,
@@ -787,11 +791,12 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         )
         
         task.current_team = target_team
+        task.team = target_team
         assign_task_to_team_leader(task, target_team)
         task.handover_reason = reason
         task.handover_at = timezone.now()
         task.handover_history = history
-        task.save(update_fields=['current_team', 'assignee', 'handover_reason', 'handover_at', 'handover_history', 'updated_at'])
+        task.save(update_fields=['current_team', 'team', 'assignee', 'handover_reason', 'handover_at', 'handover_history', 'updated_at'])
         
         TaskComment.objects.create(
             task=task,
@@ -896,6 +901,10 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         if getattr(task, 'workflow_parallel', False) and workflow_team_id_list(task):
             wf = workflow_team_id_list(task)
             user_teams = set(request.user.teams.values_list('id', flat=True))
+            leader_teams = set(
+                Team.objects.filter(organization_id=task.organization_id, leader_id=request.user.id).values_list('id', flat=True)
+            )
+            user_team_set = user_teams | leader_teams
             ensure_workflow_state(task)
             state = dict(task.workflow_stage_state or {})
             active_tid = None
@@ -904,14 +913,14 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             except (TypeError, ValueError):
                 current_tid = None
             # Otomatik paralel mod: yalnızca aktif akış ekibi çalışır; ekipten herhangi bir üye bitirebilir.
-            if current_tid is not None and current_tid in wf and current_tid in user_teams:
+            if current_tid is not None and current_tid in wf and current_tid in user_team_set:
                 st_cur = state.get(str(current_tid), {}) or {}
                 if not st_cur.get('stage_done'):
                     active_tid = current_tid
             if active_tid is None:
                 # current_team boş/bozuksa güvenli geri dönüş: ilk açık ekipten devam et.
                 for tid in wf:
-                    if tid not in user_teams:
+                    if tid not in user_team_set:
                         continue
                     st = state.get(str(tid), {}) or {}
                     if st.get('stage_done'):
@@ -1046,11 +1055,12 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 "at": timezone.now().isoformat(),
             })
             task.current_team = next_team
+            task.team = next_team
             assign_task_to_team_leader(task, next_team)
             task.handover_reason = "Aşama tamamlandı"
             task.handover_at = timezone.now()
             task.handover_history = history
-            task.save(update_fields=['current_team', 'assignee', 'handover_reason', 'handover_at', 'handover_history', 'updated_at'])
+            task.save(update_fields=['current_team', 'team', 'assignee', 'handover_reason', 'handover_at', 'handover_history', 'updated_at'])
             TaskComment.objects.create(
                 task=task,
                 author=request.user,

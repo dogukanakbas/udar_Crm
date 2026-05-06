@@ -18,7 +18,7 @@ export function sumProductLineQtyProduced(
   }, 0)
 }
 
-/** İş akışı hedef yedeği: sıralı çoklu kalemde aktif satır adedi; aksi halde satır toplamı veya görev adedi. */
+/** İş akışı hedef yedeği: backend ile uyumlu olarak satır toplamı; yoksa görev adedi. */
 export function workflowTargetFallbackQty(task: {
   productLines?: { quantity?: unknown }[]
   workflowParallel?: boolean
@@ -26,14 +26,6 @@ export function workflowTargetFallbackQty(task: {
   quantity?: unknown
 }): number {
   const lines = task.productLines || []
-  if (lines.length > 1 && !task.workflowParallel) {
-    const ai = Math.min(
-      Math.max(0, Number(task.activeProductIndex) || 0),
-      Math.max(0, lines.length - 1)
-    )
-    const q = Math.max(0, Number(lines[ai]?.quantity) || 0)
-    return q > 0 ? q : Number(task.quantity ?? 1) || 1
-  }
   const sum = sumProductLineQuantities(lines)
   return sum > 0 ? sum : Number(task.quantity ?? 1) || 1
 }

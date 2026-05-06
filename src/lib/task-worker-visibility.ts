@@ -66,7 +66,16 @@ export function workerMayClaimTask(
   const parallel = t.workflowParallel === true && hasWf
   const sequential = hasWf && !t.workflowParallel
   if (parallel) {
-    // Otomatik paralel modda explicit "Üstlen" adımı yok.
+    // Root-paralel fallback: açık workflow aşamasında kullanıcı ilgili ekipteyse claim gösterebilir.
+    const wfState = t.workflowStageState || {}
+    for (const tid of t.workflowTeamIds || []) {
+      const tidStr = String(tid)
+      if (!teamIds.includes(tidStr)) continue
+      const st: any = (wfState as any)[tidStr] || {}
+      if (st?.stage_done) continue
+      const aid = st?.assignee_id
+      if (aid == null || String(aid) === '' || String(aid) === String(userId)) return true
+    }
     return false
   }
   if (sequential) {
