@@ -1779,6 +1779,10 @@ export function TaskDetailPage() {
     !curStageSt?.pending_approval
 
   const wfState = task.workflowStageState || {}
+  const hasPerLineWorkflow = useMemo(
+    () => !!(task.productLines || []).some((ln) => (ln.workflowTeamIds?.length ?? 0) > 0),
+    [task.productLines]
+  )
   const lineWorkflowRows = useMemo(() => {
     const lines = task.productLines || []
     const rootIds = (task.workflowTeamIds || []).map(String)
@@ -2609,7 +2613,7 @@ export function TaskDetailPage() {
                 <DetailRow label="Bitiş" value={task.end ? formatDate(task.end) : '—'} />
               </div>
             )}
-            {lineWorkflowRows.length > 0 && (
+            {lineWorkflowRows.length > 0 && !hasPerLineWorkflow && (
               <div className="rounded border bg-background/70 p-3 space-y-2">
                 <p className="text-xs font-semibold uppercase text-muted-foreground">İş akışı — bölüm hedefleri</p>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -2991,7 +2995,7 @@ export function TaskDetailPage() {
                 {!te.ended_at && <Badge variant="secondary">Açık</Badge>}
               </div>
             ))}
-            {lineWorkflowRows.length > 0 && (
+            {lineWorkflowRows.length > 0 && !hasPerLineWorkflow && (
               <div className="rounded border p-3 space-y-1 mt-3">
                 <p className="text-sm font-semibold">Bölüm durumu</p>
                 <ul className="text-xs text-muted-foreground space-y-1">

@@ -1483,11 +1483,12 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 line_stage_assignee_u = False
         # user.teams ilişkisini de dikkate al (bazı canlı verilerde members M2M senkronu gecikebiliyor).
         is_team_linked_u = bool(tid in user_team_set)
+        allow_task_assignee = is_assignee_u if not line_wf_ids else False
         if not (
             is_staff_u
             or is_member_u
             or is_leader_u
-            or is_assignee_u
+            or allow_task_assignee
             or is_team_linked_u
             or line_stage_assignee_u
         ):
@@ -1523,7 +1524,7 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 is_staff_u
                 or is_member_u
                 or is_leader_u
-                or is_assignee_u
+                or allow_task_assignee
                 or is_team_linked_u
                 or line_stage_assignee_u
             ):
