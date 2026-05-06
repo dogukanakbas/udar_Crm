@@ -624,6 +624,27 @@ export function TasksPage() {
     })
     return Array.from(map.values()).sort((a, b) => b.total - a.total)
   }, [filtered, data.teams])
+  const completedTasksByAssignee = useMemo(() => {
+    const done = filtered
+      .filter((t) => t.status === 'done')
+      .slice()
+      .sort((a, b) => {
+        const ad = new Date(a.end || a.due || '').getTime()
+        const bd = new Date(b.end || b.due || '').getTime()
+        if (!Number.isNaN(bd) && !Number.isNaN(ad) && bd !== ad) return bd - ad
+        return Number(b.id || 0) - Number(a.id || 0)
+      })
+    const bucket = new Map<string, { userId: string; userLabel: string; tasks: Task[] }>()
+    for (const t of done) {
+      const uid = String(t.assignee || '')
+      const key = uid || 'unassigned'
+      const label = uid ? data.users.find((u) => String(u.id) === uid)?.username || uid : 'Atanmamış'
+      const row = bucket.get(key) || { userId: key, userLabel: label, tasks: [] }
+      row.tasks.push(t)
+      bucket.set(key, row)
+    }
+    return Array.from(bucket.values()).sort((a, b) => b.tasks.length - a.tasks.length)
+  }, [filtered, data.users])
 
   const columns: ColumnDef<Task>[] = [
     {
@@ -1162,22 +1183,51 @@ export function TasksPage() {
       </div>
 
       {view === 'table' ? (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle>Görev listesi</CardTitle>
-            </div>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Calendar className="h-4 w-4" />
-              {filtered.filter((t) => t.status !== 'done').length} açık görev
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <DataTable columns={columns} data={filtered} />
-            </div>
-          </CardContent>
-        </Card>
+        <div className="space-y-3">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Görev listesi</CardTitle>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Calendar className="h-4 w-4" />
+                {filtered.filter((t) => t.status !== 'done').length} açık görev
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <DataTable columns={columns} data={filtered} />
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Geçmiş görevler (kullanıcıya göre)</CardTitle>
+              <CardDescription>Tamamlanan görevler atanan kullanıcı bazında sıralanır.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {completedTasksByAssignee.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Tamamlanan görev yok.</p>
+              ) : (
+                completedTasksByAssignee.map((grp) => (
+                  <div key={grp.userId} className="rounded border p-2">
+                    <p className="text-sm font-semibold">
+                      {grp.userLabel} <span className="text-muted-foreground font-normal">({grp.tasks.length})</span>
+                    </p>
+                    <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+                      {grp.tasks.slice(0, 12).map((t) => (
+                        <li key={`${grp.userId}-${t.id}`} className="flex items-center justify-between gap-2">
+                          <span className="truncate">{t.title}</span>
+                          <span className="shrink-0">{formatDate(t.end || t.due || '')}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+        </div>
       ) : view === 'board' ? (
         <div className="space-y-3">
           <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">

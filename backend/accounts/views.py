@@ -7,6 +7,7 @@ from django.contrib.auth.tokens import default_token_generator
 from django.contrib.auth import get_user_model
 from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
 from django.conf import settings
+import os
 import pyotp
 import secrets
 from .serializers import TwoFATokenObtainPairSerializer
@@ -505,7 +506,11 @@ class ChangePasswordView(APIView):
       return Response({"detail": "Şifre en az bir küçük, bir büyük harf ve bir rakam içermeli"}, status=status.HTTP_400_BAD_REQUEST)
     user.set_password(new_password)
     user.save(update_fields=["password"])
-    log_entity_action(user, 'password_change', user=user)
+    try:
+      log_entity_action(user, 'password_change', user=user)
+    except Exception:
+      # Audit yazımı başarısız olsa da şifre değişimi başarılı kalmalı.
+      pass
     return Response({"detail": "Şifre güncellendi"})
 
 
