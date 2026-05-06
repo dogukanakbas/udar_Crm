@@ -1571,6 +1571,25 @@ class TaskViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             if tid not in line_wf_ids:
                 return Response({'detail': 'Bu kalem akışında bu ekip yok'}, status=status.HTTP_400_BAD_REQUEST)
             lstate = dict(active_line.get('workflow_stage_state') or {})
+            # Kalem-bazlı akışta üretim sadece kalemin aktif adım ekibi tarafından girilebilir.
+            active_line_tid = active_line.get('current_team_id')
+            try:
+                active_line_tid = int(active_line_tid) if active_line_tid not in (None, '') else None
+            except (TypeError, ValueError):
+                active_line_tid = None
+            if active_line_tid not in line_wf_ids:
+                active_line_tid = None
+            if active_line_tid is None:
+                for wtid in line_wf_ids:
+                    st_row = dict(lstate.get(str(wtid)) or {})
+                    if not st_row.get('stage_done'):
+                        active_line_tid = int(wtid)
+                        break
+            if active_line_tid is not None and int(tid) != int(active_line_tid):
+                return Response(
+                    {'detail': 'Bu kalemde şu an bu ekip aktif değil; sırası gelen ekip veri girebilir.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             lst = dict(lstate.get(str(tid)) or {})
             prev_team_done = int(lst.get('qty_done') or 0)
             lst['qty_done'] = qty
