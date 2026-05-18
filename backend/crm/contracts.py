@@ -122,8 +122,18 @@ CURRENCY_SYMBOLS = {
 
 ASSETS_DIR = Path(__file__).resolve().parent / 'assets'
 SELLER_MASTER_TEMPLATE_KEY = 'seller_master'
-SELLER_MASTER_TEMPLATE_PATH = ASSETS_DIR / 'contract-templates' / 'MASTER' / 'MASTER_COMBINED_CONTRACT.xlsx'
+SELLER_MASTER_TEMPLATE_PATH = ASSETS_DIR / 'contract-templates' / 'MASTER' / 'SELLER_MASTER_TEMPLATE.xlsx'
 PRODUCT_GROUP_ANCHORS = {'urunGruplari', 'kalemTablolari', 'urunTablolari'}
+YEKUN_SUMMARY_GROUPS = [
+    ('steel_door', 'ÇELİK KAPI GRUBU'),
+    ('interior_door', 'İÇ ODA KAPI GRUBU'),
+    ('kitchen', 'MUTFAK GRUBU'),
+    ('wardrobe', 'PORTMANTO GRUBU'),
+    ('bathroom', 'BANYO DOLAPLARI'),
+    ('accessory', 'AKSESUARLAR'),
+    ('laminate', 'PARKE'),
+    ('service', 'HİZMETLER & MONTAJ'),
+]
 DEFAULT_DYNAMIC_DOCUMENT_COLUMNS = ['Kod', 'Satış Birimi', 'Ölçü / Gövde', 'Renk / Kapak', 'Miktar', 'Liste Fiyatı', '1-İskonto %', '2-İskonto %', 'Birim', 'Birim Net Fiyatı', 'Tutar']
 SPECIAL_PRODUCT_DOCUMENT_GROUPS = [
     {
@@ -572,6 +582,9 @@ def _template_entry_path(entry):
 
 
 def _default_seller_master_template_path():
+    if SELLER_MASTER_TEMPLATE_PATH.exists():
+        return SELLER_MASTER_TEMPLATE_PATH
+
     target_dir = Path(settings.MEDIA_ROOT) / 'document-templates' / 'defaults'
     target_dir.mkdir(parents=True, exist_ok=True)
     target_path = target_dir / 'seller-master-template.xlsx'
@@ -1035,6 +1048,7 @@ def _build_seller_master_document_export(quote):
     workbook = load_workbook(template_path)
     workbook.template = False
     worksheet = workbook['Belge'] if 'Belge' in workbook.sheetnames else workbook[workbook.sheetnames[0]]
+    banner_images = _detach_template_banner_images(worksheet)
     template = {
         'template_key': SELLER_MASTER_TEMPLATE_KEY,
         'document_type': quote.document_type,
@@ -1044,7 +1058,8 @@ def _build_seller_master_document_export(quote):
     _apply_logo_placeholders(worksheet, quote)
     _apply_template_placeholders(worksheet, quote, template)
     tail_row = _render_dynamic_product_group_tables(worksheet, quote)
-    _render_seller_master_tail(worksheet, quote, tail_row)
+    _render_seller_master_tail(worksheet, quote, tail_row, banner_images=banner_images)
+    _apply_times_new_roman_font(worksheet)
     _prepare_pdf_print_layout(worksheet)
 
     output = BytesIO()
@@ -1353,6 +1368,30 @@ def _apply_logo_placeholders(ws, quote):
                 continue
             image = _fit_excel_image(image, 260, 86)
             ws.add_image(image, cell.coordinate)
+
+
+def _image_anchor_row(image):
+    anchor = getattr(image, 'anchor', None)
+    marker = getattr(anchor, '_from', None)
+    if marker is None:
+        return None
+    try:
+        return int(marker.row) + 1
+    except (TypeError, ValueError):
+        return None
+
+
+def _detach_template_banner_images(ws):
+    banners = []
+    kept = []
+    for image in list(getattr(ws, '_images', []) or []):
+        anchor_row = _image_anchor_row(image)
+        if anchor_row and anchor_row >= 30:
+            banners.append(image)
+        else:
+            kept.append(image)
+    ws._images = kept
+    return banners
 
 
 def _render_dynamic_product_group_tables(ws, quote):
@@ -1734,16 +1773,18 @@ def _write_service_summary_row(ws, row, column, spans, values, currency_code, bo
     return row + 1
 
 
-def _render_seller_master_tail(ws, quote, start_row):
+def _render_seller_master_tail(ws, quote, start_row, banner_images=None):
     if start_row <= ws.max_row:
         ws.delete_rows(start_row, ws.max_row - start_row + 1)
     _reset_seller_master_columns(ws)
 
     row = start_row
-    row = _write_payment_delivery_tail(ws, quote, row)
+    row = _write_yekun_summary_tail(ws, quote, row)
+    row = _write_payment_delivery_tail(ws, quote, row + 1)
     row = _write_terms_tail(ws, quote, row + 1)
     row = _write_bank_tail(ws, quote, row + 1)
-    _write_signature_tail(ws, quote, row + 2)
+    row = _write_signature_tail(ws, quote, row + 2)
+    _write_bottom_banner_tail(ws, row + 1, banner_images or [])
 
 
 def _reset_seller_master_columns(ws):
@@ -1802,6 +1843,42 @@ def _tail_label_value(ws, row, label, value):
     _tail_merge(ws, row, 2, 4, label, styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
     _tail_merge(ws, row, 5, 13, value, None, styles['text_font'], styles['left'], styles['section_border'])
     ws.row_dimensions[row].height = 24
+
+
+def _build_yekun_summary_totals(quote):
+    totals = {key: Decimal('0') for key, _label in YEKUN_SUMMARY_GROUPS}
+    for line in quote.lines.select_related('product__category').order_by('sort_order', 'id'):
+        if not _line_is_meaningful(line):
+            continue
+        group_key = _line_dynamic_group(line)['key']
+        if group_key not in totals:
+            group_key = 'service'
+        totals[group_key] += _line_subtotal(line) + _line_tax(line)
+    return totals
+
+
+def _write_yekun_summary_tail(ws, quote, row):
+    styles = _tail_styles()
+    currency_code = _quote_currency(quote)
+    totals = _build_yekun_summary_totals(quote)
+
+    _tail_section_header(ws, row, 'YEKÜN İCMAALLERİ')
+    current_row = row + 1
+    for key, label in YEKUN_SUMMARY_GROUPS:
+        _tail_merge(ws, current_row, 2, 4, label, styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
+        amount_cell = _tail_merge(ws, current_row, 5, 13, float(totals.get(key, Decimal('0'))), None, styles['text_font'], styles['left'], styles['section_border'])
+        amount_cell.number_format = _currency_number_format(currency_code)
+        amount_cell.alignment = Alignment(horizontal='right', vertical='center', shrink_to_fit=True)
+        ws.row_dimensions[current_row].height = 22
+        current_row += 1
+
+    grand_total = sum(totals.values(), Decimal('0'))
+    _tail_merge(ws, current_row, 2, 4, 'TOPLAM YEKÜN', styles['title_fill'], styles['white_font'], styles['center'], styles['section_border'])
+    total_cell = _tail_merge(ws, current_row, 5, 13, float(grand_total), None, Font(color='203864', bold=True), styles['left'], styles['section_border'])
+    total_cell.number_format = _currency_number_format(currency_code)
+    total_cell.alignment = Alignment(horizontal='right', vertical='center', shrink_to_fit=True)
+    ws.row_dimensions[current_row].height = 24
+    return current_row + 1
 
 
 def _config_text(config, *keys):
@@ -1879,6 +1956,27 @@ def _write_signature_tail(ws, quote, row):
     _tail_merge(ws, row + 1, 2, 7, f"SATICI\n{_normalize_display_name(seller.get('display_name', ''))}", None, styles['text_font'], styles['center'], styles['section_border'])
     _tail_merge(ws, row + 1, 8, 13, f"ALICI\n{customer.get('name') or getattr(quote.customer, 'name', '') or ''}", None, styles['text_font'], styles['center'], styles['section_border'])
     ws.row_dimensions[row + 1].height = 110
+    return row + 2
+
+
+def _write_bottom_banner_tail(ws, row, banner_images):
+    if not banner_images:
+        return row
+    banner = banner_images[0]
+    banner = _fit_excel_image(banner, 980, 150)
+    for offset in range(0, 7):
+        ws.row_dimensions[row + offset].height = 22
+    ws.cell(row + 6, 13).value = ' '
+    ws.add_image(banner, f'B{row}')
+    return row + 7
+
+
+def _apply_times_new_roman_font(ws):
+    for row in ws.iter_rows():
+        for cell in row:
+            font = copy(cell.font)
+            font.name = 'Times New Roman'
+            cell.font = font
 
 
 def _dynamic_column_value(line, header):
