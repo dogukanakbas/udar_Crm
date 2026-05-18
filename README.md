@@ -16,6 +16,7 @@ Production-grade demo UI with mock data, localStorage persistence, shadcn/ui sty
 ## Docker Kurulum Notları
 - Geliştirme ortamı ana `docker-compose.yml` dosyasını kullanır. Backend ve frontend kodu container içine mount edilir; değişiklikler canlı geliştirmeye uygundur.
 - Docker Desktop'ta containerlar okunur adlarla görünür: `udar-crm-frontend`, `udar-crm-backend`, `udar-crm-postgres`, `udar-crm-redis`, `udar-crm-celery-worker`, `udar-crm-celery-beat`.
+- Yapılan Docker, production compose, fiyat listesi ve katalog yapılandırmalarının detaylı açıklaması için `docs/CONFIGURATION_NOTES.md` dosyasına bakın.
 - Postgres arayüzü: `http://localhost:8080`
   - Sistem: `PostgreSQL`
   - Sunucu: `db`
