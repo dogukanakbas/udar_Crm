@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: true,
-    allowedHosts: ['crm.udarsoft.com'],
+    allowedHosts: ['localhost', '127.0.0.1', 'frontend', 'crm.udarsoft.com'],
   },
   resolve: {
     alias: {

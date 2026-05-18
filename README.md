@@ -3,12 +3,35 @@
 Production-grade demo UI with mock data, localStorage persistence, shadcn/ui styling, TanStack Router/Table, Zustand state, RHF + Zod forms, Recharts, and Framer Motion micro-interactions.
 
 ## Quickstart
-- Install: `npm install`
-- Run dev server: `npm run dev`
-- Build: `npm run build` then `npm run preview`
-- Full stack: `docker-compose up -d db redis backend celery_worker celery_beat frontend`
-- Seed demo (backend container): `python manage.py seed_demo` (ve `seed_permissions`)
-- Login: `admin / password` — `VITE_API_BASE_URL=http://localhost:8000/api`
+- Lokal Docker stack: `docker compose up --build`
+- Frontend: `http://localhost:5173`
+- Backend API: `http://localhost:8000/api`
+- Healthcheck: `http://localhost:8000/api/health/`
+- Seed demo: `docker compose exec backend python manage.py seed_demo` (ve gerekirse `seed_permissions`)
+- Kapatma: `docker compose down`
+- Temiz veriyle başlatma: `docker compose down -v`
+- Demo login: `admin@demo.com / Admin123!`
+- Superadmin login: `superadmin@udarsoft.com / SuperAdmin123!`
+
+## Docker Kurulum Notları
+- Geliştirme ortamı ana `docker-compose.yml` dosyasını kullanır. Backend ve frontend kodu container içine mount edilir; değişiklikler canlı geliştirmeye uygundur.
+- Docker Desktop'ta containerlar okunur adlarla görünür: `udar-crm-frontend`, `udar-crm-backend`, `udar-crm-postgres`, `udar-crm-redis`, `udar-crm-celery-worker`, `udar-crm-celery-beat`.
+- Postgres arayüzü: `http://localhost:8080`
+  - Sistem: `PostgreSQL`
+  - Sunucu: `db`
+  - Kullanıcı: `udar`
+  - Şifre: `udar`
+  - Veritabanı: `udar_crm`
+- Redis arayüzü: `http://localhost:5540`
+  - Bağlantı hostu: `redis`
+  - Port: `6379`
+- Direkt host bağlantıları gerekirse:
+  - Postgres: `localhost:5432`
+  - Redis: `localhost:6379`
+- Firma/production kurulumu `docker-compose.prod.yml` dosyasını kullanır. Örnek ayarlar için `backend/env.prod.example` ve `.env.prod.example` kopyalanıp gerçek domain/secret değerleriyle düzenlenmelidir.
+- Production başlatma örneği: `docker compose --env-file .env.prod -f docker-compose.prod.yml up --build -d`
+- Production frontend API adresi `PROD_VITE_API_BASE_URL` ile build-time verilir. Örnek: `https://crm.udarsoft.com/api`
+- Production nginx konfigürasyonu `deploy/nginx.conf` dosyasındadır ve `/etc/letsencrypt` altında SSL sertifikası bekler.
 
 ## Demo basics
 - Artık JWT auth + API çağrıları; login ekranı sonrası modüller açılır.

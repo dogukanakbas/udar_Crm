@@ -18,6 +18,6 @@ COPY . .
 
 ENV DJANGO_SETTINGS_MODULE=core.settings
 
-# Run migrations, collect static, then start gunicorn with gevent for SSE support
-CMD ["bash", "-c", "python manage.py migrate && python manage.py collectstatic --noinput && gunicorn core.wsgi:application --bind 0.0.0.0:8000 --worker-class gevent --workers ${GUNICORN_WORKERS:-4} --timeout 120"]
+EXPOSE 8000
 
+CMD ["bash", "/app/docker/entrypoint.sh", "web"]

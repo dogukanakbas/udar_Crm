@@ -12,6 +12,7 @@ dist
 dist-ssr
 TASLAKLAR
 *.local
+backend/celerybeat-schedule
 
 # Editor directories and files
 .vscode/*

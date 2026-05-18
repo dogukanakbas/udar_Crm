@@ -1,78 +1,109 @@
 services:
   db:
-    image: postgres:15
+    image: postgres:15-alpine
     env_file:
       - ./backend/.env
-    environment:
-      - POSTGRES_DB
-      - POSTGRES_USER
-      - POSTGRES_PASSWORD
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   redis:
-    image: redis:7
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   backend:
+    image: udar_crm-backend-prod
     build:
       context: ./backend
       dockerfile: Dockerfile
     env_file:
       - ./backend/.env
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - static:/app/staticfiles
       - media:/app/media
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python - <<'PY'\nimport json, urllib.request\npayload = json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=3))\nraise SystemExit(0 if payload.get('db') == 'ok' and payload.get('redis') == 'ok' else 1)\nPY"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
 
   celery_worker:
+    image: udar_crm-backend-prod
     build:
       context: ./backend
       dockerfile: Dockerfile
     env_file:
       - ./backend/.env
-    command: ["celery", "-A", "core", "worker", "-l", "info"]
+    command: ["bash", "/app/docker/entrypoint.sh", "celery-worker"]
     depends_on:
-      - db
-      - redis
+      backend:
+        condition: service_healthy
+    volumes:
+      - media:/app/media
     restart: unless-stopped
 
   celery_beat:
+    image: udar_crm-backend-prod
     build:
       context: ./backend
       dockerfile: Dockerfile
     env_file:
       - ./backend/.env
-    command: ["celery", "-A", "core", "beat", "-l", "info"]
+    command: ["bash", "/app/docker/entrypoint.sh", "celery-beat"]
     depends_on:
-      - db
-      - redis
+      backend:
+        condition: service_healthy
+    volumes:
+      - media:/app/media
     restart: unless-stopped
 
   frontend:
+    image: udar_crm-frontend-prod
     build:
       context: .
       dockerfile: frontend.Dockerfile
-    environment:
-      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-https://crm.udarsoft.com/api}
+      target: preview
+      args:
+        VITE_API_BASE_URL: ${PROD_VITE_API_BASE_URL:-https://crm.udarsoft.com/api}
     depends_on:
-      - backend
-    ports:
-      - "5173:5173"
+      backend:
+        condition: service_healthy
     restart: unless-stopped
 
   nginx:
     image: nginx:1.27-alpine
     depends_on:
-      - frontend
-      - backend
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
     ports:
-      - "80:80"
-      - "443:443"
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
     volumes:
       - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - static:/static:ro
@@ -82,6 +113,6 @@ services:
 
 volumes:
   pgdata:
+  redisdata:
   static:
   media:
-

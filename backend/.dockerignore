@@ -1,5 +1,11 @@
-__pycache__
-.pytest_cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+env/
+.env
 db.sqlite3
-media
-staticfiles
+celerybeat-schedule
+media/
+staticfiles/
