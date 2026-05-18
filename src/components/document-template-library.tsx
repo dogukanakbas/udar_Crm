@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Download, GripVertical, Plus, Save, Upload } from 'lucide-react'
+import { Download, GripVertical, Plus, Save, Trash2, Upload } from 'lucide-react'
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
 import { useAppStore } from '@/state/use-app-store'
+import { getDefaultPriceList, normalizePriceListKey, normalizePriceLists, type PriceListOption } from '@/lib/price-lists'
 
 type DocumentTemplateLibraryItem = {
   template_key: string
@@ -364,7 +365,7 @@ export function DocumentTemplateLibrary() {
   const [loading, setLoading] = useState(true)
   const [uploadingKey, setUploadingKey] = useState<string | null>(null)
   const [pendingTemplate, setPendingTemplate] = useState<{ templateKey: string; sellerCompanyKey: string } | null>(null)
-  const [priceListLabel, setPriceListLabel] = useState('2026/1. LİSTE')
+  const [priceLists, setPriceLists] = useState<PriceListOption[]>(normalizePriceLists())
   const [savingSettings, setSavingSettings] = useState(false)
   const [placeholderGroups, setPlaceholderGroups] = useState<TemplatePlaceholderGroup[]>([])
 
@@ -391,8 +392,8 @@ export function DocumentTemplateLibrary() {
   useEffect(() => {
     api
       .get('/auth/organization-settings/')
-      .then((response) => setPriceListLabel(response.data?.price_list_label || '2026/1. LİSTE'))
-      .catch(() => setPriceListLabel('2026/1. LİSTE'))
+      .then((response) => setPriceLists(normalizePriceLists(response.data?.price_lists)))
+      .catch(() => setPriceLists(normalizePriceLists()))
   }, [])
 
   useEffect(() => {
@@ -418,6 +419,37 @@ export function DocumentTemplateLibrary() {
   const openUploadPicker = (templateKey: string, sellerCompanyKey = '') => {
     setPendingTemplate({ templateKey, sellerCompanyKey })
     fileInputRef.current?.click()
+  }
+
+  const updatePriceList = (key: string, patch: Partial<PriceListOption>) => {
+    setPriceLists((current) =>
+      normalizePriceLists(
+        current.map((priceList) =>
+          priceList.key === key
+            ? {
+                ...priceList,
+                ...patch,
+                key: patch.key ? normalizePriceListKey(patch.key, priceList.key) : priceList.key,
+              }
+            : patch.is_default
+              ? { ...priceList, is_default: false }
+              : priceList
+        )
+      )
+    )
+  }
+
+  const addPriceList = () => {
+    setPriceLists((current) =>
+      normalizePriceLists([
+        ...current,
+        { key: `list_${current.length + 1}`, label: `2026/${current.length + 1}. LİSTE`, is_default: false },
+      ])
+    )
+  }
+
+  const removePriceList = (key: string) => {
+    setPriceLists((current) => normalizePriceLists(current.filter((priceList) => priceList.key !== key)))
   }
 
   const handleUploadChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -465,19 +497,53 @@ export function DocumentTemplateLibrary() {
         <Card className="border-dashed">
           <CardHeader>
             <CardTitle>Belge sabitleri</CardTitle>
-            <CardDescription>
-              Fiyat listesi etiketi gibi kilitli şablon sabitlerini yalnızca Admin değiştirebilir. Belge oluşturma ekranında bu alan salt okunur görünür.
-            </CardDescription>
+            <CardDescription>Fiyat listelerini burada tanımlayın; müşteriler ve teklifler bu listelerden birini kullanır.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="space-y-2">
-              <Label>Fiyat listesi etiketi</Label>
-              <Input
-                value={priceListLabel}
-                onChange={(event) => setPriceListLabel(event.target.value)}
-                disabled={data.settings.role !== 'Admin' || savingSettings}
-              />
-              <p className="text-xs text-muted-foreground">Örn. `2026/2. LİSTE`. Burada ne yazıyorsa teklifler ve sözleşmeler o etiketi kullanır.</p>
+            <div className="space-y-3">
+              {priceLists.map((priceList, index) => (
+                <div key={priceList.key} className="grid gap-2 md:grid-cols-[minmax(120px,0.8fr)_minmax(180px,1.4fr)_auto_auto] md:items-end">
+                  <div className="space-y-2">
+                    <Label>Kod</Label>
+                    <Input
+                      value={priceList.key}
+                      onChange={(event) => updatePriceList(priceList.key, { key: event.target.value })}
+                      disabled={data.settings.role !== 'Admin' || savingSettings}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Etiket</Label>
+                    <Input
+                      value={priceList.label}
+                      onChange={(event) => updatePriceList(priceList.key, { label: event.target.value })}
+                      disabled={data.settings.role !== 'Admin' || savingSettings}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant={priceList.is_default ? 'default' : 'outline'}
+                    disabled={data.settings.role !== 'Admin' || savingSettings}
+                    onClick={() => updatePriceList(priceList.key, { is_default: true })}
+                  >
+                    {priceList.is_default ? 'Varsayılan' : 'Varsayılan yap'}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    disabled={data.settings.role !== 'Admin' || savingSettings || priceLists.length <= 1}
+                    onClick={() => removePriceList(priceList.key)}
+                    title="Fiyat listesini sil"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                  {index === 0 ? <p className="text-xs text-muted-foreground md:col-span-4">Varsayılan liste yeni müşteri ve teklifler için otomatik seçilir.</p> : null}
+                </div>
+              ))}
+              <Button type="button" variant="outline" onClick={addPriceList} disabled={data.settings.role !== 'Admin' || savingSettings}>
+                <Plus className="mr-2 h-4 w-4" />
+                Fiyat listesi ekle
+              </Button>
             </div>
             <RbacGuard perm="quotes.edit">
               <Button
@@ -485,12 +551,12 @@ export function DocumentTemplateLibrary() {
                   setSavingSettings(true)
                   try {
                     const response = await api.patch('/auth/organization-settings/', {
-                      price_list_label: priceListLabel,
+                      price_lists: priceLists,
                     })
-                    setPriceListLabel(response.data?.price_list_label || priceListLabel)
+                    setPriceLists(normalizePriceLists(response.data?.price_lists))
                     toast({
                       title: 'Belge sabitleri güncellendi',
-                      description: 'Fiyat listesi etiketi artık yeni belge kayıtlarında otomatik kullanılacak.',
+                      description: `${getDefaultPriceList(response.data?.price_lists).label} yeni varsayılan fiyat listesi olarak kullanılacak.`,
                     })
                   } catch (error: any) {
                     toast({

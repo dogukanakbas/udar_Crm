@@ -182,6 +182,7 @@ const serializeCompanyPayload = (payload: Partial<Company>) => ({
   city: payload.region || '',
   country: normalizeCountryLabel(payload.country),
   currency: resolveCompanyCurrency(payload.currency, payload.country),
+  price_list_key: payload.priceListKey || '',
   size: normalizeCompanySize(payload.size),
   address: payload.address || '',
   tax_office: payload.taxOffice || '',
@@ -364,6 +365,7 @@ export const useAppStore = create<AppState>()(
         reorderPoint: Number(p.reorder_point ?? 0),
         warehouse: '',
         price: Number(p.price ?? 0),
+        priceLists: p.price_lists || {},
         templateFamily: p.template_defaults?.template_family || p.category_template_defaults?.template_family || '',
         templateDefaults: p.template_defaults || {},
         categoryTemplateDefaults: p.category_template_defaults || {},
@@ -382,6 +384,7 @@ export const useAppStore = create<AppState>()(
         owner: 'N/A',
         rating: 0,
         currency: resolveCompanyCurrency(c.currency, c.country),
+        priceListKey: c.price_list_key || '',
         annualRevenue: 0,
         address: c.address || '',
         taxOffice: c.tax_office || '',
@@ -871,6 +874,8 @@ export const useAppStore = create<AppState>()(
       const payload: any = { ...product }
       if (!payload.sku) payload.sku = ''
       payload.category = payload.categoryId || payload.category || null
+      payload.price_lists = payload.price_lists || payload.priceLists || {}
+      delete payload.priceLists
       delete payload.categoryId
       if ((product as any).id) {
         await api.patch(`/products/${(product as any).id}/`, payload)
@@ -1383,5 +1388,4 @@ export const useAppStore = create<AppState>()(
     }
   )
 )
-
 

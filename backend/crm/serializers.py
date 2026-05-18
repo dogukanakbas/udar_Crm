@@ -4,7 +4,13 @@ from decimal import Decimal, InvalidOperation
 from django.utils import timezone
 from rest_framework import serializers
 
-from accounts.models import OrganizationSettings
+from accounts.price_lists import (
+    get_org_default_price_list,
+    get_org_price_list_label,
+    get_org_price_lists,
+    get_product_price_for_list,
+    normalize_product_price_lists,
+)
 from audit.utils import log_entity_action
 from erp.models import Product
 
@@ -43,16 +49,6 @@ def default_partner_currency(country):
     return 'TRY' if is_turkey_country(country) else 'USD'
 
 
-def get_org_price_list_label(organization):
-    if not organization:
-        return '2026/1. LİSTE'
-    try:
-        settings = OrganizationSettings.objects.get(organization=organization)
-    except OrganizationSettings.DoesNotExist:
-        return '2026/1. LİSTE'
-    return str(settings.price_list_label or '2026/1. LİSTE').strip() or '2026/1. LİSTE'
-
-
 def add_business_days(start_date, days):
     try:
         remaining = max(0, int(days or 0))
@@ -86,6 +82,7 @@ class BusinessPartnerSerializer(serializers.ModelSerializer):
             'country': {'required': False, 'allow_blank': True},
             'currency': {'required': False, 'allow_blank': True},
             'size': {'required': False, 'allow_blank': True},
+            'price_list_key': {'required': False, 'allow_blank': True},
             'address': {'required': False, 'allow_blank': True},
             'tax_office': {'required': False, 'allow_blank': True},
             'tax_number': {'required': False, 'allow_blank': True},
@@ -103,6 +100,12 @@ class BusinessPartnerSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'currency': 'Yurt disi sirketlerde para birimi USD veya EUR olmalidir.'})
 
         attrs['currency'] = normalized_currency
+        price_list_key = str(attrs.get('price_list_key', getattr(self.instance, 'price_list_key', '')) or '').strip()
+        if org and price_list_key:
+            valid_keys = {item.get('key') for item in get_org_price_lists(org)}
+            if price_list_key not in valid_keys:
+                raise serializers.ValidationError({'price_list_key': 'Fiyat listesi bulunamadi.'})
+        attrs['price_list_key'] = price_list_key
         if email and org:
             qs = BusinessPartner.objects.filter(organization=org, email__iexact=email)
             if self.instance:
@@ -179,12 +182,33 @@ class ProductSerializer(serializers.ModelSerializer):
             'sku': {'required': False, 'allow_blank': True},
             'name': {'required': False, 'allow_blank': True},
             'price': {'required': False},
+            'price_lists': {'required': False},
             'stock': {'required': False},
             'reserved': {'required': False},
             'reorder_point': {'required': False},
             'category': {'required': False, 'allow_null': True},
             'template_defaults': {'required': False},
         }
+
+    def create(self, validated_data):
+        validated_data['price_lists'] = normalize_product_price_lists(
+            validated_data.get('price_lists'),
+            validated_data.get('price'),
+        )
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if 'price_lists' in validated_data or 'price' in validated_data:
+            validated_data['price_lists'] = normalize_product_price_lists(
+                validated_data.get('price_lists', instance.price_lists),
+                validated_data.get('price', instance.price),
+            )
+        return super().update(instance, validated_data)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['price_lists'] = normalize_product_price_lists(instance.price_lists, instance.price)
+        return data
 
 
 class QuoteLineSerializer(serializers.ModelSerializer):
@@ -492,12 +516,24 @@ class QuoteSerializer(serializers.ModelSerializer):
                 'role': preparer.role,
             }
 
+        selected_price_list_key = (
+            config.get('price_list_key')
+            or config.get('priceListKey')
+            or getattr(customer, 'price_list_key', '')
+            or get_org_default_price_list(organization).get('key')
+        )
+        price_list = next(
+            (item for item in get_org_price_lists(organization) if item.get('key') == selected_price_list_key),
+            get_org_default_price_list(organization),
+        )
+        config['price_list_key'] = price_list.get('key')
+        config['price_list_label'] = get_org_price_list_label(organization, config['price_list_key'])
+
         config.setdefault('template_mode', 'auto')
         config.setdefault('template_key', '')
-        config['price_list_label'] = get_org_price_list_label(organization)
         config.setdefault('validity_days', 7)
         config['validity_days'] = normalize_validity_days(config.get('validity_days'), 7)
-        config.setdefault('validity_label', f"{config['validity_days']} iş günü")
+        config.setdefault('validity_label', f"{config['validity_days']} gün")
         currency_code = str(validated_data.get('currency') or (instance.currency if instance else 'TRY') or 'TRY').upper()
         try:
             exchange_rate = float(config.get('exchange_rate') or 1)
@@ -524,6 +560,7 @@ class QuoteSerializer(serializers.ModelSerializer):
             'validityDays': 'validity_days',
             'validityPreset': 'validity_preset',
             'priceListLabel': 'price_list_label',
+            'priceListKey': 'price_list_key',
             'deliveryType': 'delivery_type',
             'paymentOption': 'payment_option',
             'signatureCustomerLabel': 'signature_customer_label',
@@ -564,6 +601,7 @@ class QuoteSerializer(serializers.ModelSerializer):
         return config
 
     def _create_lines(self, quote, lines_data):
+        price_list_key = (quote.contract_config or {}).get('price_list_key') or ''
         for idx, line in enumerate(lines_data):
             product = line.get('product')
             details = dict(line.get('details') or {})
@@ -582,6 +620,8 @@ class QuoteSerializer(serializers.ModelSerializer):
                     details['secondary'] = defaults.get('secondary')
                 if product.attribute_values and 'attributes' not in details:
                     details['attributes'] = product.attribute_values
+                if line.get('unit_price') in [None, '']:
+                    line['unit_price'] = get_product_price_for_list(product, price_list_key)
 
             QuoteLine.objects.create(
                 quote=quote,

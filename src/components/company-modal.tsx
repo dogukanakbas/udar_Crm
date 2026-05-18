@@ -23,6 +23,8 @@ import {
   normalizeCountryLabel,
   resolveCompanyCurrency,
 } from '@/lib/location-data'
+import api from '@/lib/api'
+import { getDefaultPriceList, normalizePriceLists, type PriceListOption } from '@/lib/price-lists'
 import { normalizeSearchText } from '@/lib/utils'
 import type { Company } from '@/types'
 
@@ -32,6 +34,7 @@ export const companySchema = z.object({
   region: z.string().optional().default(''),
   country: z.string().optional().default(DEFAULT_COMPANY_COUNTRY_LABEL),
   currency: z.string().optional().default('TRY'),
+  priceListKey: z.string().optional().default(''),
   size: z.string().optional().default(''),
   owner: z.string().optional().default(''),
   annualRevenue: z.coerce.number().optional().default(0),
@@ -45,7 +48,7 @@ export const companySchema = z.object({
 
 export type CompanyFormValues = z.infer<typeof companySchema>
 
-const REGISTERED_SELECT_FIELDS: (keyof CompanyFormValues)[] = ['country', 'region', 'currency', 'size']
+const REGISTERED_SELECT_FIELDS: (keyof CompanyFormValues)[] = ['country', 'region', 'currency', 'priceListKey', 'size']
 
 const getDefaultValues = (company?: Company): CompanyFormValues => ({
   name: company?.name ?? '',
@@ -53,6 +56,7 @@ const getDefaultValues = (company?: Company): CompanyFormValues => ({
   region: company?.region ?? '',
   country: company ? normalizeCountryLabel(company.country) || company.country || '' : DEFAULT_COMPANY_COUNTRY_LABEL,
   currency: resolveCompanyCurrency(company?.currency, company?.country),
+  priceListKey: company?.priceListKey ?? '',
   size: normalizeCompanySize(company?.size),
   owner: company?.owner ?? '',
   annualRevenue: company?.annualRevenue ?? 0,
@@ -79,6 +83,7 @@ export function CompanyModal({ children, company, onSubmit, open, onOpenChange }
   })
   const [internalOpen, setInternalOpen] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [priceLists, setPriceLists] = useState<PriceListOption[]>(normalizePriceLists())
 
   const isControlled = open !== undefined
   const modalOpen = isControlled ? open : internalOpen
@@ -90,6 +95,7 @@ export function CompanyModal({ children, company, onSubmit, open, onOpenChange }
   const watchedCountry = form.watch('country')
   const watchedRegion = form.watch('region')
   const watchedCurrency = form.watch('currency')
+  const watchedPriceListKey = form.watch('priceListKey')
   const watchedSize = form.watch('size')
   const countryOptions = useMemo(() => getCountryOptions(), [])
   const selectedCountry = useMemo(() => findCountryOption(watchedCountry), [watchedCountry])
@@ -135,6 +141,24 @@ export function CompanyModal({ children, company, onSubmit, open, onOpenChange }
     form.reset(getDefaultValues(company))
     if (!modalOpen) setSubmitError(null)
   }, [company, form, modalOpen])
+
+  useEffect(() => {
+    if (!modalOpen) return
+    api
+      .get('/auth/organization-settings/')
+      .then((response) => {
+        const lists = normalizePriceLists(response.data?.price_lists)
+        setPriceLists(lists)
+        if (!form.getValues('priceListKey')) {
+          form.setValue('priceListKey', getDefaultPriceList(lists).key, { shouldDirty: false })
+        }
+      })
+      .catch(() => {
+        const lists = normalizePriceLists()
+        setPriceLists(lists)
+        if (!form.getValues('priceListKey')) form.setValue('priceListKey', getDefaultPriceList(lists).key, { shouldDirty: false })
+      })
+  }, [form, modalOpen])
 
   useEffect(() => {
     if (!modalOpen) return
@@ -259,6 +283,26 @@ export function CompanyModal({ children, company, onSubmit, open, onOpenChange }
                   {COMPANY_SIZE_OPTIONS.map((sizeOption) => (
                     <SelectItem key={sizeOption} value={sizeOption}>
                       {sizeOption}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label>Fiyat listesi</Label>
+              <Select
+                value={watchedPriceListKey || getDefaultPriceList(priceLists).key}
+                onValueChange={(value) =>
+                  form.setValue('priceListKey', value, { shouldDirty: true, shouldValidate: true })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Fiyat listesi seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  {priceLists.map((priceList) => (
+                    <SelectItem key={priceList.key} value={priceList.key}>
+                      {priceList.label}
                     </SelectItem>
                   ))}
                 </SelectContent>

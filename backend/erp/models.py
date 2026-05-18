@@ -21,6 +21,7 @@ class Product(models.Model):
     attribute_values = models.JSONField(default=dict, blank=True)
     attribute_schema_override = models.JSONField(default=list, blank=True)
     price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    price_lists = models.JSONField(default=dict, blank=True)
     stock = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     reserved = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     reorder_point = models.DecimalField(max_digits=12, decimal_places=2, default=0)

@@ -33,6 +33,7 @@ function categoryDefaults(sectionKey: string, unit: string, tax: number, family:
     discount: 0,
     discount_secondary: 0,
     template_family: family,
+    import_origin: 'excel_templates',
   }
 }
 
@@ -72,7 +73,7 @@ function pushProduct(
     reserved: 0,
     reorder_point: 0,
     template_defaults: categoryDefaults(sectionKey, unit, tax, family),
-    attribute_values: {},
+    attribute_values: { import_origin: 'excel_templates' },
     attribute_schema_override: [],
   })
 }

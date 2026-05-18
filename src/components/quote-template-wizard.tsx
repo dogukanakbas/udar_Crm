@@ -210,7 +210,7 @@ export function TemplateQuoteWizardTrigger({
       `Teklif no ön eki (Excel): ${template.numberPrefix}<zaman damgası>`,
       `KDV oranı (şablon): %${template.vatPercent}`,
       `Fiyat listesi: ${priceListRef}`,
-      `Geçerlilik: teklif tarihinden ${validityWorkDays} iş günü`,
+      `Geçerlilik: teklif tarihinden ${validityWorkDays} gün`,
       `---`,
     ]
 
@@ -434,15 +434,15 @@ export function TemplateQuoteWizardTrigger({
                 <Input value={priceListRef} onChange={(e) => setPriceListRef(e.target.value)} placeholder="2026/1. LİSTE : …" />
               </div>
               <div>
-                <Label>İş günü geçerliliği (Excel satır 32)</Label>
+                <Label>Gün geçerliliği (Excel satır 32)</Label>
                 <Select value={validityWorkDays} onValueChange={(v) => setValidityWorkDays(v as '3' | '7' | '10')}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="3">3 iş günü</SelectItem>
-                    <SelectItem value="7">7 iş günü</SelectItem>
-                    <SelectItem value="10">10 iş günü</SelectItem>
+                    <SelectItem value="3">3 gün</SelectItem>
+                    <SelectItem value="7">7 gün</SelectItem>
+                    <SelectItem value="10">10 gün</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

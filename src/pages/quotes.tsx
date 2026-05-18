@@ -29,6 +29,7 @@ import {
   getCompanyCurrencyOptions,
   resolveCompanyCurrency,
 } from '@/lib/location-data'
+import { getDefaultPriceList, getPriceListByKey, normalizePriceLists, resolveProductPrice, type PriceListOption } from '@/lib/price-lists'
 import { cn, formatCurrency, formatDate, formatDateTime, formatExchangeRate, getCurrencyLabel, getCurrencySymbol, normalizeCurrency } from '@/lib/utils'
 import { useAppStore } from '@/state/use-app-store'
 import type { Product, Quote, SalesDocumentType, SellerCompanyProfile } from '@/types'
@@ -51,11 +52,11 @@ const ADD_CUSTOMER_OPTION = '__add_company__'
 const DOCUMENT_CURRENCY_OPTIONS = getCompanyCurrencyOptions(DEFAULT_COMPANY_COUNTRY_LABEL)
 const CUSTOM_OPTION = '__custom__'
 const VALIDITY_PRESETS = [
-  { value: '3', label: '3 iş günü' },
-  { value: '5', label: '5 iş günü' },
-  { value: '7', label: '7 iş günü' },
-  { value: '10', label: '10 iş günü' },
-  { value: CUSTOM_OPTION, label: 'Manuel iş günü' },
+  { value: '3', label: '3 gün' },
+  { value: '5', label: '5 gün' },
+  { value: '7', label: '7 gün' },
+  { value: '10', label: '10 gün' },
+  { value: CUSTOM_OPTION, label: 'Manuel gün' },
 ]
 const DELIVERY_TYPE_OPTIONS = [
   'Fabrika teslim',
@@ -215,6 +216,7 @@ const documentSchema = z.object({
   validityPreset: z.string().optional(),
   validityCustomDays: z.coerce.number().min(1).max(365).optional(),
   validityLabel: z.string().optional(),
+  priceListKey: z.string().optional(),
   priceListLabel: z.string().optional(),
   payment: z.string().optional(),
   paymentOption: z.string().optional(),
@@ -321,7 +323,7 @@ const normalizeValidityDays = (value: unknown, fallback = 7) => {
   return Number.isFinite(parsed) && parsed >= 1 && parsed <= 365 ? Math.floor(parsed) : fallback
 }
 
-const buildLineFromProduct = (product?: Product, previousLine?: any) => {
+const buildLineFromProduct = (product?: Product, previousLine?: any, priceListKey?: string) => {
   const defaults = product?.templateDefaults || {}
   const categoryDefaults = product?.categoryTemplateDefaults || {}
   const specialGroup = resolveSpecialProductGroup(product)
@@ -335,7 +337,7 @@ const buildLineFromProduct = (product?: Product, previousLine?: any) => {
     sectionKey,
     unit: previousLine?.unit || defaults.unit || categoryDefaults.unit || 'Adet',
     qty: previousLine?.qty ?? 1,
-    unitPrice: previousLine?.unitPrice ?? product?.price ?? 0,
+    unitPrice: previousLine?.unitPrice ?? resolveProductPrice(product, priceListKey),
     discount: previousLine?.discount ?? Number(defaults.discount ?? categoryDefaults.discount ?? 0),
     discountSecondary: previousLine?.discountSecondary ?? Number(defaults.discount_secondary ?? categoryDefaults.discount_secondary ?? 0),
     tax: previousLine?.tax ?? Number(defaults.tax ?? categoryDefaults.tax ?? 20),
@@ -350,7 +352,7 @@ const buildLineFromProduct = (product?: Product, previousLine?: any) => {
 
 const createEmptyLine = () => buildLineFromProduct(undefined, { mode: 'manual', name: 'Yeni kalem', sectionKey: 'steel_door', unit: 'Adet', qty: 1, unitPrice: 0, discount: 0, discountSecondary: 0, tax: 20, details: { code: '', primary: '', secondary: '', attributes: {} } })
 
-const buildLineForSelectedProduct = (product?: Product, previousLine?: any) =>
+const buildLineForSelectedProduct = (product?: Product, previousLine?: any, priceListKey?: string) =>
   buildLineFromProduct(product, {
     ...previousLine,
     mode: 'product',
@@ -369,7 +371,7 @@ const buildLineForSelectedProduct = (product?: Product, previousLine?: any) =>
       secondary: undefined,
       attributes: undefined,
     },
-  })
+  }, priceListKey)
 
 const resolveErrorTab = (fieldPath?: string) => {
   if (!fieldPath) return 'document'
@@ -401,10 +403,14 @@ const getInitialValues = (
   products: Product[],
   sellerCompanies: SellerCompanyProfile[],
   quote?: Quote,
-  priceListLabel = ''
+  priceLists: PriceListOption[] = normalizePriceLists()
 ) => {
   const customerSnapshot = quote?.contractConfig?.customerSnapshot || quote?.contractConfig?.customer_snapshot || {}
   const company = companies.find((item) => item.id === quote?.customerId) || companies[0]
+  const selectedPriceList = getPriceListByKey(
+    priceLists,
+    quote?.contractConfig?.priceListKey || quote?.contractConfig?.price_list_key || company?.priceListKey
+  )
   const preferredCurrency = resolveCompanyCurrency(company?.currency, company?.country)
   const initialCurrency = getDocumentCurrency(quote?.currency || preferredCurrency)
   const storedValidityDays = normalizeValidityDays(quote?.contractConfig?.validityDays || quote?.contractConfig?.validity_days || 7, 7)
@@ -427,8 +433,9 @@ const getInitialValues = (
       validUntil: initialValidUntil,
     validityPreset: storedValidityPreset,
     validityCustomDays: storedValidityDays,
-    validityLabel: `${storedValidityDays} iş günü`,
-    priceListLabel: quote?.contractConfig?.priceListLabel || quote?.contractConfig?.price_list_label || '2026/1. LİSTE',
+    validityLabel: `${storedValidityDays} gün`,
+    priceListKey: selectedPriceList.key,
+    priceListLabel: quote?.contractConfig?.priceListLabel || quote?.contractConfig?.price_list_label || selectedPriceList.label,
     payment: quote?.terms?.payment || '',
     paymentOption: quote?.contractConfig?.paymentOption || quote?.contractConfig?.payment_option || '',
       delivery: normalizeDateInputValue(quote?.terms?.delivery),
@@ -465,7 +472,7 @@ const getInitialValues = (
               attributes: line.details?.attributes || {},
             },
           }))
-        : [products[0] ? buildLineFromProduct(products[0]) : createEmptyLine()],
+        : [products[0] ? buildLineFromProduct(products[0], undefined, selectedPriceList.key) : createEmptyLine()],
   }
 }
 
@@ -489,7 +496,8 @@ const buildDocumentPayload = (values: any, mode: SalesDocumentType, status = 'Dr
     contractDate: values.contractDate,
     validityPreset: values.validityPreset || '7',
     validityDays: resolveValidityDaysFromValues(values),
-    validityLabel: `${resolveValidityDaysFromValues(values)} iş günü`,
+    validityLabel: `${resolveValidityDaysFromValues(values)} gün`,
+    priceListKey: values.priceListKey,
     priceListLabel: values.priceListLabel,
     exchangeRate: getDocumentExchangeRate(values.currency, values.exchangeRate),
     deliveryType: values.deliveryType,
@@ -1180,7 +1188,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   const [customerModalOpen, setCustomerModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [activeTab, setActiveTab] = useState('customer')
-  const [orgPriceListLabel, setOrgPriceListLabel] = useState('2026/1. LİSTE')
+  const [priceLists, setPriceLists] = useState<PriceListOption[]>(normalizePriceLists())
   const companies = data.companies
   const sellerCompanies = data.sellerCompanies || []
   const products = data.products
@@ -1189,7 +1197,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   const sectionOptions = useMemo(() => getSectionOptionsFromCategories(data.categories || []), [data.categories])
   const documentMode = quote?.documentType ?? mode
   const isEditing = Boolean(quote)
-  const getFormDefaults = () => getInitialValues(documentMode, companies, preparers, products, sellerCompanies, quote, orgPriceListLabel)
+  const getFormDefaults = () => getInitialValues(documentMode, companies, preparers, products, sellerCompanies, quote, priceLists)
   const form = useForm({ resolver: zodResolver(documentSchema) as any, defaultValues: getFormDefaults() })
   const preparedById = form.watch('preparedById')
   const preparedByDisplayName = getPreparerDisplayName(preparers, preparedById, quote?.preparedByName || quote?.owner)
@@ -1197,13 +1205,16 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   useEffect(() => {
     api
       .get('/auth/organization-settings/')
-      .then((response) => setOrgPriceListLabel(response.data?.price_list_label || '2026/1. LİSTE'))
-      .catch(() => setOrgPriceListLabel('2026/1. LİSTE'))
+      .then((response) => setPriceLists(normalizePriceLists(response.data?.price_lists)))
+      .catch(() => setPriceLists(normalizePriceLists()))
   }, [])
 
   useEffect(() => {
-    form.setValue('priceListLabel', orgPriceListLabel, { shouldDirty: false })
-  }, [form, orgPriceListLabel, open])
+    const currentKey = form.getValues('priceListKey')
+    const selected = getPriceListByKey(priceLists, currentKey || selectedCustomer?.priceListKey)
+    form.setValue('priceListKey', selected.key, { shouldDirty: false })
+    form.setValue('priceListLabel', selected.label, { shouldDirty: false })
+  }, [form, priceLists, open])
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen)
@@ -1214,6 +1225,8 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   }
 
   const selectedCustomer = companies.find((company) => company.id === form.watch('customerId'))
+  const selectedPriceListKey = form.watch('priceListKey') || getDefaultPriceList(priceLists).key
+  const selectedPriceList = getPriceListByKey(priceLists, selectedPriceListKey)
   const selectedCustomerCurrencyOptions = useMemo(
     () => (selectedCustomer ? getCompanyCurrencyOptions(selectedCustomer.country) : DOCUMENT_CURRENCY_OPTIONS),
     [selectedCustomer?.country]
@@ -1223,6 +1236,22 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
     [selectedCustomer?.country]
   )
   const lines = form.watch('lines') || []
+
+  const applyPriceListToLines = (priceListKey: string) => {
+    const nextLines = lines.map((line) => {
+      if (line.mode !== 'product' || !line.productId) return line
+      const product = products.find((item) => item.id === line.productId)
+      return { ...line, unitPrice: resolveProductPrice(product, priceListKey) }
+    })
+    form.setValue('lines', nextLines, { shouldDirty: true, shouldValidate: true })
+  }
+
+  const setPriceListSelection = (priceListKey: string, options?: { refreshLines?: boolean }) => {
+    const priceList = getPriceListByKey(priceLists, priceListKey)
+    form.setValue('priceListKey', priceList.key, { shouldDirty: true, shouldValidate: true })
+    form.setValue('priceListLabel', priceList.label, { shouldDirty: true })
+    if (options?.refreshLines !== false) applyPriceListToLines(priceList.key)
+  }
 
   const setDocumentCurrency = (nextCurrency: string, options?: { forceExchangeRate?: boolean }) => {
     const normalizedCurrency = normalizeCurrency(nextCurrency)
@@ -1242,7 +1271,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   const applyValidityDays = (days: number) => {
     const normalizedDays = normalizeValidityDays(days, 7)
     form.setValue('validityCustomDays', normalizedDays, { shouldDirty: true, shouldValidate: true })
-    form.setValue('validityLabel', `${normalizedDays} iş günü`, { shouldDirty: true })
+    form.setValue('validityLabel', `${normalizedDays} gün`, { shouldDirty: true })
     form.setValue('validUntil', addBusinessDaysFromToday(normalizedDays), { shouldDirty: true, shouldValidate: true })
   }
 
@@ -1258,6 +1287,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
     options?: {
       includeCustomerId?: boolean
       forcePreferredCurrency?: boolean
+      forcePriceList?: boolean
     }
   ) => {
     if (!company) return
@@ -1270,6 +1300,9 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
     form.setValue('customerPhone', company.phone || '')
     form.setValue('customerEmail', company.email || '')
     form.setValue('signatureCustomerLabel', company.name || '')
+    if (options?.forcePriceList !== false) {
+      setPriceListSelection(company.priceListKey || getDefaultPriceList(priceLists).key)
+    }
 
     const preferredCurrency = resolveCompanyCurrency(company.currency, company.country)
     const currentCurrency = getDocumentCurrency(form.getValues('currency'))
@@ -1290,8 +1323,9 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
 
     applyCustomerToForm(selectedCustomer, {
       forcePreferredCurrency: hasQuoteCustomerChanged || needsCurrencyCorrection,
+      forcePriceList: hasQuoteCustomerChanged || !quote,
     })
-  }, [quote?.customerId, selectedCustomer?.country, selectedCustomer?.currency, selectedCustomer?.id, selectedCustomerAllowedCurrencies])
+  }, [quote?.customerId, selectedCustomer?.country, selectedCustomer?.currency, selectedCustomer?.id, selectedCustomer?.priceListKey, selectedCustomerAllowedCurrencies, priceLists])
 
   const subtotal = lines.reduce((sum, line) => sum + getLineBase(line), 0)
   const discountTotal = lines.reduce((sum, line) => sum + getLineDiscountTotal(line), 0)
@@ -1302,7 +1336,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   const removeLine = (index: number) => form.setValue('lines', lines.filter((_, currentIndex) => currentIndex !== index), { shouldDirty: true })
   const applyProduct = (index: number, productId: string) => {
     const product = products.find((item) => item.id === productId)
-    form.setValue(`lines.${index}`, buildLineForSelectedProduct(product, lines[index]), { shouldDirty: true, shouldValidate: true })
+    form.setValue(`lines.${index}`, buildLineForSelectedProduct(product, lines[index], selectedPriceListKey), { shouldDirty: true, shouldValidate: true })
   }
   const setManualMode = (index: number) => form.setValue(`lines.${index}`, { ...lines[index], mode: 'manual', productId: undefined }, { shouldDirty: true })
   const getDiscountValidationMessage = (nextLines: any[]) => {
@@ -1458,8 +1492,19 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
                   />
                 ) : null}
               </div>
-              <div><Label>Geçerlilik tarihi</Label><Input type="date" value={form.watch('validUntil') || ''} readOnly disabled /><p className="mt-1 text-xs text-muted-foreground">Seçilen iş gününe göre hafta sonları atlanarak otomatik hesaplanır.</p></div>
-              <div><Label>Fiyat listesi etiketi</Label><Input value={form.watch('priceListLabel') || ''} readOnly disabled /><p className="mt-1 text-xs text-muted-foreground">Bu alan şablon yönetiminde Admin tarafından belirlenir.</p></div>
+              <div><Label>Geçerlilik tarihi</Label><Input type="date" value={form.watch('validUntil') || ''} readOnly disabled /><p className="mt-1 text-xs text-muted-foreground">Seçilen güne göre otomatik hesaplanır.</p></div>
+              <div>
+                <Label>Fiyat listesi</Label>
+                <Select value={selectedPriceList.key} onValueChange={(value) => setPriceListSelection(value)}>
+                  <SelectTrigger><SelectValue placeholder="Fiyat listesi seçin" /></SelectTrigger>
+                  <SelectContent>
+                    {priceLists.map((priceList) => (
+                      <SelectItem key={priceList.key} value={priceList.key}>{priceList.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="mt-1 text-xs text-muted-foreground">Müşteri varsayılanı otomatik gelir; değişirse ürün satır fiyatları seçilen listeye göre güncellenir.</p>
+              </div>
               <div><Label>İmza etiketi</Label><Input value={form.watch('signatureCustomerLabel') || ''} onChange={(event) => form.setValue('signatureCustomerLabel', event.target.value)} /></div>
                 <div>
                   <Label>Teslim tipi</Label>
@@ -1546,7 +1591,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
           </TabsContent>
 
             <TabsContent value="review" className="space-y-3">
-              <Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Belge türü: {DOCUMENT_TYPE_TR[documentMode]}</p><p>Müşteri: {form.watch('customerName') || selectedCustomer?.name || '-'}</p><p>Hazırlayan: {preparedByDisplayName || '-'}</p><p>Satıcı firma: {getSellerCompanyLabel(sellerCompanies, form.watch('sellerCompanyKey'))}</p><p>Para birimi: {getCurrencySymbol(form.watch('currency'))} {getCurrencyLabel(form.watch('currency'))}</p><p>Kur: {formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p><p>Teslim tarihi: {form.watch('delivery') ? formatDate(form.watch('delivery')) : '-'}</p><p>Şablon: {templateLabel(documentMode, form.watch('templateKey'))}</p><p>Satır sayısı: {lines.length}</p><p>Ara toplam: {formatDocumentAmount(subtotal, form.watch('currency'))}</p><p>Toplam iskonto: {formatDocumentAmount(discountTotal, form.watch('currency'))}</p><p>KDV: {formatDocumentAmount(taxTotal, form.watch('currency'))}</p><p>Genel toplam: {formatDocumentAmount(total, form.watch('currency'))}</p></CardContent></Card>
+              <Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Belge türü: {DOCUMENT_TYPE_TR[documentMode]}</p><p>Müşteri: {form.watch('customerName') || selectedCustomer?.name || '-'}</p><p>Hazırlayan: {preparedByDisplayName || '-'}</p><p>Satıcı firma: {getSellerCompanyLabel(sellerCompanies, form.watch('sellerCompanyKey'))}</p><p>Fiyat listesi: {selectedPriceList.label}</p><p>Para birimi: {getCurrencySymbol(form.watch('currency'))} {getCurrencyLabel(form.watch('currency'))}</p><p>Kur: {formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p><p>Teslim tarihi: {form.watch('delivery') ? formatDate(form.watch('delivery')) : '-'}</p><p>Şablon: {templateLabel(documentMode, form.watch('templateKey'))}</p><p>Satır sayısı: {lines.length}</p><p>Ara toplam: {formatDocumentAmount(subtotal, form.watch('currency'))}</p><p>Toplam iskonto: {formatDocumentAmount(discountTotal, form.watch('currency'))}</p><p>KDV: {formatDocumentAmount(taxTotal, form.watch('currency'))}</p><p>Genel toplam: {formatDocumentAmount(total, form.watch('currency'))}</p></CardContent></Card>
           </TabsContent>
         </Tabs>
         <DialogFooter><Button type="button" onClick={handleSaveClick} disabled={saving}>{saving ? 'Kaydediliyor...' : isEditing ? 'Değişiklikleri kaydet' : 'Kaydet'}</Button></DialogFooter>

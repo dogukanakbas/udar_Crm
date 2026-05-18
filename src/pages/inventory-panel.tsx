@@ -15,11 +15,13 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
 import { RbacGuard } from '@/components/rbac'
 import { useAppStore } from '@/state/use-app-store'
+import api from '@/lib/api'
 import {
   downloadInventoryStateWorkbook,
   downloadInventoryTemplateWorkbook,
   parseInventoryWorkbook,
 } from '@/lib/inventory-bulk-xlsx'
+import { getDefaultPriceList, normalizePriceLists, type PriceListOption } from '@/lib/price-lists'
 import { formatCurrency } from '@/lib/utils'
 import type { Category, Product } from '@/types'
 
@@ -34,6 +36,7 @@ const EMPTY_PRODUCT = {
   name: '',
   categoryId: '',
   price: 0,
+  priceLists: {},
   stock: 0,
   reserved: 0,
   reorderPoint: 0,
@@ -62,6 +65,7 @@ export function InventoryPanel() {
   const [importingTemplateCatalog, setImportingTemplateCatalog] = useState(false)
   const [bulkImporting, setBulkImporting] = useState(false)
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null)
+  const [priceLists, setPriceLists] = useState<PriceListOption[]>(normalizePriceLists())
 
   const products = data.products || []
   const categories = data.categories || []
@@ -70,6 +74,13 @@ export function InventoryPanel() {
     () => products.filter((item) => item.attributeValues?.import_origin === 'excel_templates'),
     [products]
   )
+
+  useEffect(() => {
+    api
+      .get('/auth/organization-settings/')
+      .then((response) => setPriceLists(normalizePriceLists(response.data?.price_lists)))
+      .catch(() => setPriceLists(normalizePriceLists()))
+  }, [])
 
   const triggerBulkImportPicker = () => {
     bulkImportInputRef.current?.click()
@@ -359,7 +370,7 @@ export function InventoryPanel() {
       </Card>
 
       <AdjustStockDialog sku={adjustSku} onClose={() => setAdjustSku(null)} onAdjust={(sku, delta) => { adjustInventory(sku, delta); setAdjustSku(null); toast({ title: `${sku} stok güncellendi` }) }} />
-      <ProductEditorDialog open={openProduct} product={editingProduct} categories={categories} onClose={() => setOpenProduct(false)} onSave={async (payload) => { await upsertProduct(payload as any); setOpenProduct(false); setEditingProduct(null); toast({ title: 'Ürün kaydedildi' }) }} />
+      <ProductEditorDialog open={openProduct} product={editingProduct} categories={categories} priceLists={priceLists} onClose={() => setOpenProduct(false)} onSave={async (payload) => { await upsertProduct(payload as any); setOpenProduct(false); setEditingProduct(null); toast({ title: 'Ürün kaydedildi' }) }} />
       <CategoryTemplateDialog open={openCategory} category={editingCategory} onClose={() => setOpenCategory(false)} onSave={async (payload) => { await upsertCategory(payload as any); setOpenCategory(false); setEditingCategory(null); toast({ title: 'Kategori şablonu kaydedildi' }) }} />
     </div>
   )
@@ -387,7 +398,7 @@ function AdjustStockDialog({ sku, onClose, onAdjust }: { sku: string | null; onC
   )
 }
 
-function ProductEditorDialog({ open, product, categories, onClose, onSave }: { open: boolean; product?: Product | null; categories: Category[]; onClose: () => void; onSave: (payload: any) => void }) {
+function ProductEditorDialog({ open, product, categories, priceLists, onClose, onSave }: { open: boolean; product?: Product | null; categories: Category[]; priceLists: PriceListOption[]; onClose: () => void; onSave: (payload: any) => void }) {
   const [values, setValues] = useState<any>(EMPTY_PRODUCT)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const selectedCategory = categories.find((category) => category.id === values.categoryId)
@@ -403,6 +414,7 @@ function ProductEditorDialog({ open, product, categories, onClose, onSave }: { o
             name: product.name,
             categoryId: product.categoryId || '',
             price: product.price || 0,
+            priceLists: { ...(product.priceLists || {}), [getDefaultPriceList(priceLists).key]: product.price || 0 },
             stock: product.stock || 0,
             reserved: product.reserved || 0,
             reorderPoint: product.reorderPoint || 0,
@@ -417,13 +429,19 @@ function ProductEditorDialog({ open, product, categories, onClose, onSave }: { o
             attributeValues: product.attributeValues || {},
             attributeSchemaOverride: product.attributeSchemaOverride || [],
           }
-        : EMPTY_PRODUCT
+        : { ...EMPTY_PRODUCT, priceLists: Object.fromEntries(priceLists.map((item) => [item.key, 0])) }
     )
     setSubmitError(null)
-  }, [open, product])
+  }, [open, product, priceLists])
 
   const setBasic = (key: string, value: any) => setValues((current: any) => ({ ...current, [key]: value }))
   const setTemplate = (key: string, value: any) => setValues((current: any) => ({ ...current, templateDefaults: { ...current.templateDefaults, [key]: value } }))
+  const setPriceListValue = (key: string, value: any) =>
+    setValues((current: any) => {
+      const nextPriceLists = { ...(current.priceLists || {}), [key]: Number(value || 0) }
+      const defaultKey = getDefaultPriceList(priceLists).key
+      return { ...current, priceLists: nextPriceLists, price: key === defaultKey ? Number(value || 0) : current.price }
+    })
   const setAttr = (key: string, value: any) => setValues((current: any) => ({ ...current, attributeValues: { ...(current.attributeValues || {}), [key]: value } }))
   const addOverride = () => setValues((current: any) => ({ ...current, attributeSchemaOverride: [...(current.attributeSchemaOverride || []), createSchemaRow((current.attributeSchemaOverride || []).length)] }))
   const updateOverride = (index: number, key: string, value: any) => setValues((current: any) => ({ ...current, attributeSchemaOverride: (current.attributeSchemaOverride || []).map((row: any, rowIndex: number) => (rowIndex === index ? { ...row, [key]: value } : row)) }))
@@ -473,10 +491,27 @@ function ProductEditorDialog({ open, product, categories, onClose, onSave }: { o
             <Field label="Şablon ailesi"><Input value={values.templateDefaults?.template_family || ''} onChange={(event) => setTemplate('template_family', event.target.value)} /></Field>
           </div>
           <div className="grid grid-cols-4 gap-3">
-            <Field label="Fiyat"><Input type="number" value={values.price || 0} onChange={(event) => setBasic('price', Number(event.target.value))} /></Field>
+            <Field label="Fiyat"><Input type="number" value={values.price || 0} onChange={(event) => setPriceListValue(getDefaultPriceList(priceLists).key, event.target.value)} /></Field>
             <Field label="Stok"><Input type="number" value={values.stock || 0} onChange={(event) => setBasic('stock', Number(event.target.value))} /></Field>
             <Field label="Rezerve"><Input type="number" value={values.reserved || 0} onChange={(event) => setBasic('reserved', Number(event.target.value))} /></Field>
             <Field label="Emniyet st."><Input type="number" value={values.reorderPoint || 0} onChange={(event) => setBasic('reorderPoint', Number(event.target.value))} /></Field>
+          </div>
+          <div className="space-y-3 rounded-lg border border-border/70 p-4">
+            <div className="flex items-center justify-between">
+              <p className="font-medium">Fiyat listeleri</p>
+              <span className="text-xs text-muted-foreground">{priceLists.length} liste</span>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {priceLists.map((priceList) => (
+                <Field key={priceList.key} label={priceList.label}>
+                  <Input
+                    type="number"
+                    value={values.priceLists?.[priceList.key] ?? (priceList.is_default ? values.price || 0 : 0)}
+                    onChange={(event) => setPriceListValue(priceList.key, event.target.value)}
+                  />
+                </Field>
+              ))}
+            </div>
           </div>
           <div className="grid grid-cols-5 gap-3">
             <Field label="Belge grubu"><Input value={values.templateDefaults?.section_key || ''} onChange={(event) => setTemplate('section_key', event.target.value)} /></Field>
@@ -514,6 +549,8 @@ function ProductEditorDialog({ open, product, categories, onClose, onSave }: { o
                   name: values.name || values.sku || '',
                   categoryId: values.categoryId || undefined,
                   price: Number(values.price || 0),
+                  priceLists: values.priceLists || {},
+                  price_lists: values.priceLists || {},
                   stock: Number(values.stock || 0),
                   reserved: Number(values.reserved || 0),
                   reorderPoint: Number(values.reorderPoint || 0),

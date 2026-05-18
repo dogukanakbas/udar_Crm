@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from organizations.models import Organization
+from accounts.price_lists import normalize_product_price_lists
 
 from .models import Category, Invoice, InvoicePayment, Product, PurchaseOrder, SalesOrder, StockMovement, Vehicle
 
@@ -94,6 +95,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'sku': {'required': False, 'allow_blank': True},
             'name': {'required': False, 'allow_blank': True},
             'price': {'required': False},
+            'price_lists': {'required': False},
             'stock': {'required': False},
             'reserved': {'required': False},
             'reorder_point': {'required': False},
@@ -148,11 +150,20 @@ class ProductSerializer(serializers.ModelSerializer):
             if validated_data.get(field) in [None, '']:
                 validated_data[field] = 0
 
+        validated_data['price_lists'] = normalize_product_price_lists(
+            validated_data.get('price_lists'),
+            validated_data.get('price'),
+        )
         validated_data['attribute_schema_override'] = _normalize_schema(validated_data.get('attribute_schema_override'))
         validated_data['attribute_values'] = dict(validated_data.get('attribute_values') or {})
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
+        if 'price_lists' in validated_data or 'price' in validated_data:
+            validated_data['price_lists'] = normalize_product_price_lists(
+                validated_data.get('price_lists', instance.price_lists),
+                validated_data.get('price', instance.price),
+            )
         if 'attribute_schema_override' in validated_data:
             validated_data['attribute_schema_override'] = _normalize_schema(validated_data.get('attribute_schema_override'))
         if 'attribute_values' in validated_data:
@@ -177,6 +188,7 @@ class ProductSerializer(serializers.ModelSerializer):
         data['category_name'] = instance.category.name if instance.category else ''
         data['category_template_defaults'] = instance.category.template_defaults if instance.category else {}
         data['category_attribute_schema'] = instance.category.attribute_schema if instance.category else []
+        data['price_lists'] = normalize_product_price_lists(instance.price_lists, instance.price)
         data['resolved_attribute_schema'] = _merge_attribute_schema(
             instance.category.attribute_schema if instance.category else [],
             instance.attribute_schema_override,

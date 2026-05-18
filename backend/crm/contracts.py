@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import unicodedata
 from django.conf import settings
-from accounts.models import OrganizationSettings
+from accounts.price_lists import get_org_price_list_label
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -358,14 +358,12 @@ TEMPLATE_REGISTRY = [
 ALLOWED_TEMPLATE_EXTENSIONS = {'.xlsx', '.xltx', '.xlsm'}
 
 
-def get_org_price_list_label(organization):
-    if not organization:
-        return '2026/1. LİSTE'
-    try:
-        settings_row = OrganizationSettings.objects.get(organization=organization)
-    except OrganizationSettings.DoesNotExist:
-        return '2026/1. LİSTE'
-    return str(settings_row.price_list_label or '2026/1. LİSTE').strip() or '2026/1. LİSTE'
+def get_quote_price_list_label(quote):
+    config = quote.contract_config or {}
+    label = str(config.get('price_list_label') or config.get('priceListLabel') or '').strip()
+    if label:
+        return label
+    return get_org_price_list_label(quote.organization, config.get('price_list_key') or config.get('priceListKey'))
 
 
 def normalize_seller_company_key(value):
@@ -2050,7 +2048,7 @@ def _fill_shared_header(ws, quote):
     _set_cell_value(ws, 'D31', prepared_by)
     _ensure_header_value_row_layout(ws, 32, source_row=31)
     _set_cell_value(ws, 'D32', format_validity_text(quote.valid_until))
-    _set_cell_value(ws, 'D33', ' • '.join(part for part in [get_org_price_list_label(quote.organization), currency_note] if part))
+    _set_cell_value(ws, 'D33', ' • '.join(part for part in [get_quote_price_list_label(quote), currency_note] if part))
     _set_cell_value(ws, 'C16', _choice_text(_normalize_display_name(left_seller.get('display_name', '')), seller_key == left_seller.get('key')))
     _set_cell_value(ws, 'J16', _choice_text(_normalize_display_name(right_seller.get('display_name', '')), seller_key == right_seller.get('key')))
     _set_cell_value(ws, 'C17', f"VERGİ DAİRESİ: {left_seller.get('tax_office', '')}")
@@ -2365,7 +2363,7 @@ def _build_template_placeholder_context(quote, template):
         'odemeTipi': (config.get('payment_option') or '').strip(),
         'hazirlayan': _resolve_prepared_by_name(quote),
         'saticiLogo': '',
-        'fiyatListesiEtiketi': get_org_price_list_label(quote.organization),
+        'fiyatListesiEtiketi': get_quote_price_list_label(quote),
         'paraBirimi': _currency_symbol(currency_code),
         'paraBirimiKodu': currency_code,
         'kur': exchange_rate,
@@ -2774,7 +2772,7 @@ def _fill_shared_header(ws, quote):
     _set_cell_value(ws, 'D31', prepared_by)
     _ensure_header_value_row_layout(ws, 32, source_row=31)
     _set_cell_value(ws, 'D32', format_validity_text(quote.valid_until))
-    _set_cell_value(ws, 'D33', ' • '.join(part for part in [get_org_price_list_label(quote.organization), currency_note] if part))
+    _set_cell_value(ws, 'D33', ' • '.join(part for part in [get_quote_price_list_label(quote), currency_note] if part))
 
     for coordinate in ['C16', 'C17', 'C18', 'C19', 'J16', 'J17', 'J18', 'J19']:
         _set_cell_value(ws, coordinate, '')
@@ -2961,7 +2959,7 @@ def _fill_shared_header(ws, quote):
     _set_cell_value(ws, 'D31', prepared_by)
     _ensure_header_value_row_layout(ws, 32, source_row=31)
     _set_cell_value(ws, 'D32', format_validity_text(quote.valid_until))
-    _set_cell_value(ws, 'D33', ' • '.join(part for part in [get_org_price_list_label(quote.organization), currency_note] if part))
+    _set_cell_value(ws, 'D33', ' • '.join(part for part in [get_quote_price_list_label(quote), currency_note] if part))
 
     for coordinate in ['C16', 'C17', 'C18', 'C19', 'J16', 'J17', 'J18', 'J19']:
         _set_cell_value(ws, coordinate, '')
@@ -3160,7 +3158,7 @@ def _fill_shared_header(ws, quote):
     _set_cell_value(ws, 'D29', quote.number)
     _set_cell_value(ws, 'D30', prepared_by)
     _set_cell_value(ws, 'D31', format_validity_text(quote.valid_until))
-    _set_cell_value(ws, 'D32', ' • '.join(part for part in [get_org_price_list_label(quote.organization), currency_note] if part))
+    _set_cell_value(ws, 'D32', ' • '.join(part for part in [get_quote_price_list_label(quote), currency_note] if part))
 
     if _is_master_contract_template(quote):
         _normalize_master_contract_header(ws, seller)

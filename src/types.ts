@@ -61,6 +61,7 @@ export interface Company {
   owner: string
   rating: number
   currency: string
+  priceListKey?: string
   annualRevenue: number
   address?: string
   taxOffice?: string
@@ -133,6 +134,7 @@ export interface Product {
   reorderPoint: number
   warehouse: string
   price: number
+  priceLists?: Record<string, number | string>
   templateFamily?: string
   templateDefaults?: Record<string, any>
   categoryTemplateDefaults?: Record<string, any>
@@ -467,6 +469,8 @@ export interface Quote {
     validity_label?: string
     priceListLabel?: string
     price_list_label?: string
+    priceListKey?: string
+    price_list_key?: string
     deliveryType?: string
     delivery_type?: string
     paymentOption?: string
@@ -601,4 +605,3 @@ export interface MockDbSnapshot {
     }
   }
 }
-

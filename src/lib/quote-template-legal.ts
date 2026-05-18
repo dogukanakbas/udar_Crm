@@ -3,7 +3,7 @@ export const ERP_BOILERPLATE_TR = `Bu teklif, firmamızın Mikro ERP MRP II üre
 
 export const STANDARD_QUOTE_TERMS_KDV20_TR = [
   '1 — Belirtilen fiyatlara KDV hariçtir.',
-  '2 — İşbu teklif, düzenleme tarihinden itibaren seçilen iş günü geçerlilik süresi kadar geçerlidir.',
+  '2 — İşbu teklif, düzenleme tarihinden itibaren seçilen gün geçerlilik süresi kadar geçerlidir.',
   '3 — Ürün ölçü ve model onayı müşteri tarafından teyit edilmeden üretime başlanmaz.',
   '4 — Ödeme şartları teklif üzerinde belirtilen şekilde uygulanacaktır.',
   '5 — Montaj ve teslim süreleri (varsa) sipariş onayı ve ödeme planına göre planlanacaktır.',
@@ -17,7 +17,7 @@ export const STANDARD_QUOTE_NOTES_COLUMN_TR = [
 /** Mobilya teklif şablonu (KDV %10 bölümleri) için aynı yapıdaki metinler */
 export const STANDARD_QUOTE_TERMS_KDV10_TR = [
   '1 — Belirtilen fiyatlara KDV hariçtir.',
-  '2 — İşbu teklif, düzenleme tarihinden itibaren seçilen iş günü geçerlilik süresi kadar geçerlidir.',
+  '2 — İşbu teklif, düzenleme tarihinden itibaren seçilen gün geçerlilik süresi kadar geçerlidir.',
   '3 — Ürün ölçü ve model onayı müşteri tarafından teyit edilmeden üretime başlanmaz.',
   '4 — Ödeme şartları teklif üzerinde belirtilen şekilde uygulanacaktır.',
   '5 — Montaj ve teslim süreleri (varsa) sipariş onayı ve ödeme planına göre planlanacaktır.',

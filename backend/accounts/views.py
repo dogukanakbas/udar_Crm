@@ -24,6 +24,7 @@ from .user_import import allocate_username, full_name_to_username_base, split_fu
 from rest_framework import viewsets, permissions, filters
 from permissions import IsOrgMember, HasAPIPermission
 from .models import Team, TeamAssociate, OrganizationSettings
+from .price_lists import DEFAULT_PRICE_LIST_LABEL, get_default_price_list, normalize_price_lists
 from .serializers import TeamSerializer, TeamAssociateSerializer
 from .utils import ensure_permissions_seeded, get_effective_permissions, user_has_perm
 
@@ -619,21 +620,27 @@ class TeamAssociateViewSet(viewsets.ModelViewSet):
 class OrganizationSettingsView(APIView):
   permission_classes = [IsAuthenticated, IsOrgMember]
 
+  def _serialize(self, settings_row):
+    price_lists = normalize_price_lists(settings_row.price_lists, settings_row.price_list_label)
+    default_price_list = get_default_price_list(price_lists)
+    return {
+      "working_hours_start": settings_row.working_hours_start.strftime("%H:%M"),
+      "working_hours_end": settings_row.working_hours_end.strftime("%H:%M"),
+      "working_days": settings_row.working_days or [0, 1, 2, 3, 4],
+      "price_list_label": default_price_list.get("label") or DEFAULT_PRICE_LIST_LABEL,
+      "price_lists": price_lists,
+    }
+
   def get(self, request):
     # Mesai ayarları tüm org üyeleri tarafından okunabilir (görev zamanlaması için)
     org = request.user.organization
     if not org:
-      return Response({"working_hours_start": "08:00", "working_hours_end": "18:00", "working_days": [0, 1, 2, 3, 4]})
+      return Response({"working_hours_start": "08:00", "working_hours_end": "18:00", "working_days": [0, 1, 2, 3, 4], "price_list_label": DEFAULT_PRICE_LIST_LABEL, "price_lists": normalize_price_lists(None)})
     try:
       s = OrganizationSettings.objects.get(organization=org)
-      return Response({
-        "working_hours_start": s.working_hours_start.strftime("%H:%M"),
-        "working_hours_end": s.working_hours_end.strftime("%H:%M"),
-        "working_days": s.working_days or [0, 1, 2, 3, 4],
-        "price_list_label": s.price_list_label or "2026/1. LİSTE",
-      })
+      return Response(self._serialize(s))
     except OrganizationSettings.DoesNotExist:
-      return Response({"working_hours_start": "08:00", "working_hours_end": "18:00", "working_days": [0, 1, 2, 3, 4], "price_list_label": "2026/1. LİSTE"})
+      return Response({"working_hours_start": "08:00", "working_hours_end": "18:00", "working_days": [0, 1, 2, 3, 4], "price_list_label": DEFAULT_PRICE_LIST_LABEL, "price_lists": normalize_price_lists(None)})
 
   def patch(self, request):
     if getattr(request.user, "role", "") != "Admin":
@@ -646,6 +653,7 @@ class OrganizationSettingsView(APIView):
     end = request.data.get("working_hours_end")
     days = request.data.get("working_days")
     price_list_label = request.data.get("price_list_label")
+    price_lists = request.data.get("price_lists")
     if start:
       from datetime import datetime
       try:
@@ -662,11 +670,11 @@ class OrganizationSettingsView(APIView):
       s.working_days = [int(x) for x in days if str(x).isdigit()]
     if price_list_label is not None:
       value = str(price_list_label).strip()
-      s.price_list_label = value or "2026/1. LİSTE"
+      s.price_list_label = value or DEFAULT_PRICE_LIST_LABEL
+    if price_lists is not None:
+      s.price_lists = normalize_price_lists(price_lists, s.price_list_label)
+      s.price_list_label = get_default_price_list(s.price_lists).get("label") or DEFAULT_PRICE_LIST_LABEL
+    elif not s.price_lists:
+      s.price_lists = normalize_price_lists(None, s.price_list_label)
     s.save()
-    return Response({
-      "working_hours_start": s.working_hours_start.strftime("%H:%M"),
-      "working_hours_end": s.working_hours_end.strftime("%H:%M"),
-      "working_days": s.working_days,
-      "price_list_label": s.price_list_label or "2026/1. LİSTE",
-    })
+    return Response(self._serialize(s))
