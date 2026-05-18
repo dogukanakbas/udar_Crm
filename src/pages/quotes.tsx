@@ -29,6 +29,7 @@ import {
   getCompanyCurrencyOptions,
   resolveCompanyCurrency,
 } from '@/lib/location-data'
+import { normalizePaymentOptions } from '@/lib/payment-options'
 import { getDefaultPriceList, getPriceListByKey, normalizePriceLists, resolveProductPrice, type PriceListOption } from '@/lib/price-lists'
 import { cn, formatCurrency, formatDate, formatDateTime, formatExchangeRate, getCurrencyLabel, getCurrencySymbol, normalizeCurrency } from '@/lib/utils'
 import { useAppStore } from '@/state/use-app-store'
@@ -67,16 +68,6 @@ const DELIVERY_TYPE_OPTIONS = [
   'Malatya depo teslim',
   'Muş depo teslim',
   'Ağrı depo teslim',
-]
-const PAYMENT_OPTION_OPTIONS = [
-  '%100 Nakit',
-  '%50 peşin / %50 teslimde',
-  '%30 peşin / %70 sevkiyat öncesi',
-  '%20 nakit / %80 çek 90 gün',
-  'Kredi kartı tek çekim',
-  'Kredi kartı 3 taksit',
-  'Kredi kartı 6 taksit',
-  'Barter',
 ]
 const DEFAULT_SELLER_COMPANIES: SellerCompanyProfile[] = [
   { key: 'ORTKA', shortName: 'ORTKA', displayName: 'ORTKA', bankAccounts: [], isActive: true, sortOrder: 0 },
@@ -1189,6 +1180,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   const [saving, setSaving] = useState(false)
   const [activeTab, setActiveTab] = useState('customer')
   const [priceLists, setPriceLists] = useState<PriceListOption[]>(normalizePriceLists())
+  const [paymentOptions, setPaymentOptions] = useState<string[]>(normalizePaymentOptions())
   const companies = data.companies
   const sellerCompanies = data.sellerCompanies || []
   const products = data.products
@@ -1205,8 +1197,14 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   useEffect(() => {
     api
       .get('/auth/organization-settings/')
-      .then((response) => setPriceLists(normalizePriceLists(response.data?.price_lists)))
-      .catch(() => setPriceLists(normalizePriceLists()))
+      .then((response) => {
+        setPriceLists(normalizePriceLists(response.data?.price_lists))
+        setPaymentOptions(normalizePaymentOptions(response.data?.payment_options))
+      })
+      .catch(() => {
+        setPriceLists(normalizePriceLists())
+        setPaymentOptions(normalizePaymentOptions())
+      })
   }, [])
 
   useEffect(() => {
@@ -1525,7 +1523,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
                 <div>
                   <Label>Ödeme tipi</Label>
                   <Select
-                    value={PAYMENT_OPTION_OPTIONS.includes(form.watch('paymentOption') || '') ? form.watch('paymentOption') : CUSTOM_OPTION}
+                    value={paymentOptions.includes(form.watch('paymentOption') || '') ? form.watch('paymentOption') : CUSTOM_OPTION}
                     onValueChange={(value) => {
                       const nextValue = value === CUSTOM_OPTION ? '' : value
                       form.setValue('paymentOption', nextValue, { shouldDirty: true })
@@ -1534,12 +1532,20 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
                   >
                     <SelectTrigger><SelectValue placeholder="Ödeme tipi seçin" /></SelectTrigger>
                     <SelectContent>
-                      {PAYMENT_OPTION_OPTIONS.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
+                      {paymentOptions.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
                       <SelectItem value={CUSTOM_OPTION}>Manuel giriş</SelectItem>
                     </SelectContent>
                   </Select>
-                  {!PAYMENT_OPTION_OPTIONS.includes(form.watch('paymentOption') || '') ? (
-                    <Input className="mt-2" value={form.watch('paymentOption') || ''} onChange={(event) => form.setValue('paymentOption', event.target.value)} placeholder="Ödeme tipini yazın" />
+                  {!paymentOptions.includes(form.watch('paymentOption') || '') ? (
+                    <Input
+                      className="mt-2"
+                      value={form.watch('paymentOption') || ''}
+                      onChange={(event) => {
+                        form.setValue('paymentOption', event.target.value)
+                        form.setValue('payment', event.target.value, { shouldDirty: true })
+                      }}
+                      placeholder="Ödeme tipini yazın"
+                    />
                   ) : null}
                 </div>
                 <div><Label>Ödeme metni</Label><Input value={form.watch('payment') || ''} onChange={(event) => form.setValue('payment', event.target.value)} /></div>

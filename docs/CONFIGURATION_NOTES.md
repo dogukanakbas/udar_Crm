@@ -138,6 +138,32 @@ Davranış:
 
 Geriye uyumluluk için eski `price_list_label` alanı tutuldu. Bu alan varsayılan fiyat listesi etiketiyle senkron çalışır.
 
+## Dinamik ödeme tipleri
+
+Ödeme tipi seçenekleri artık sabit frontend listesi değildir. Organizasyon ayarından gelir ve belge/şablon yönetimi panelinden düzenlenebilir.
+
+Varsayılan ödeme tipleri:
+
+- `%100 Nakit`
+- `%50 peşin / %50 teslimde`
+- `%30 peşin / %70 sevkiyat öncesi`
+- `%20 nakit / %80 çek 90 gün`
+- `Kredi kartı tek çekim`
+- `Kredi kartı 3 taksit`
+- `Kredi kartı 6 taksit`
+- `Barter`
+
+Eklenen alan:
+
+- `OrganizationSettings.payment_options`
+
+Davranış:
+
+- Admin, belge/şablon yönetimi ekranından yeni ödeme tipi ekleyebilir veya mevcut tipleri silebilir.
+- Teklif oluşturma ekranındaki `Ödeme tipi` seçimi bu dinamik listeden beslenir.
+- `Manuel giriş` seçeneği korunur. Listede olmayan özel bir ödeme tipi teklif bazında yazılabilir.
+- Seçilen veya manuel yazılan ödeme tipi aynı zamanda ödeme metnine de aktarılır.
+
 ## Ürün katalog importu
 
 GitHub'da daha önce eklenmiş template/fiyat listesi kaynakları tekrar kullanıldı.

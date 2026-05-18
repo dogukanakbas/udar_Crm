@@ -96,6 +96,7 @@ class OrganizationSettings(models.Model):
     working_days = models.JSONField(default=list)  # [0,1,2,3,4] = Pzt-Cuma (0=Pzt, 6=Paz)
     price_list_label = models.CharField(max_length=120, default='2026/1. LİSTE')
     price_lists = models.JSONField(default=list, blank=True)
+    payment_options = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

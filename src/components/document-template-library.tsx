@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
 import { useAppStore } from '@/state/use-app-store'
+import { normalizePaymentOptions } from '@/lib/payment-options'
 import { getDefaultPriceList, normalizePriceListKey, normalizePriceLists, type PriceListOption } from '@/lib/price-lists'
 
 type DocumentTemplateLibraryItem = {
@@ -366,6 +367,7 @@ export function DocumentTemplateLibrary() {
   const [uploadingKey, setUploadingKey] = useState<string | null>(null)
   const [pendingTemplate, setPendingTemplate] = useState<{ templateKey: string; sellerCompanyKey: string } | null>(null)
   const [priceLists, setPriceLists] = useState<PriceListOption[]>(normalizePriceLists())
+  const [paymentOptions, setPaymentOptions] = useState<string[]>(normalizePaymentOptions())
   const [savingSettings, setSavingSettings] = useState(false)
   const [placeholderGroups, setPlaceholderGroups] = useState<TemplatePlaceholderGroup[]>([])
 
@@ -392,8 +394,14 @@ export function DocumentTemplateLibrary() {
   useEffect(() => {
     api
       .get('/auth/organization-settings/')
-      .then((response) => setPriceLists(normalizePriceLists(response.data?.price_lists)))
-      .catch(() => setPriceLists(normalizePriceLists()))
+      .then((response) => {
+        setPriceLists(normalizePriceLists(response.data?.price_lists))
+        setPaymentOptions(normalizePaymentOptions(response.data?.payment_options))
+      })
+      .catch(() => {
+        setPriceLists(normalizePriceLists())
+        setPaymentOptions(normalizePaymentOptions())
+      })
   }, [])
 
   useEffect(() => {
@@ -452,6 +460,18 @@ export function DocumentTemplateLibrary() {
     setPriceLists((current) => normalizePriceLists(current.filter((priceList) => priceList.key !== key)))
   }
 
+  const updatePaymentOption = (index: number, value: string) => {
+    setPaymentOptions((current) => current.map((option, optionIndex) => (optionIndex === index ? value : option)))
+  }
+
+  const addPaymentOption = () => {
+    setPaymentOptions((current) => [...current, 'Yeni ödeme tipi'])
+  }
+
+  const removePaymentOption = (index: number) => {
+    setPaymentOptions((current) => normalizePaymentOptions(current.filter((_, optionIndex) => optionIndex !== index)))
+  }
+
   const handleUploadChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     event.target.value = ''
@@ -501,6 +521,10 @@ export function DocumentTemplateLibrary() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="space-y-3">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold">Fiyat listeleri</p>
+                <p className="text-xs text-muted-foreground">Ürün ve müşteri kartlarında kullanılacak liste etiketleri.</p>
+              </div>
               {priceLists.map((priceList, index) => (
                 <div key={priceList.key} className="grid gap-2 md:grid-cols-[minmax(120px,0.8fr)_minmax(180px,1.4fr)_auto_auto] md:items-end">
                   <div className="space-y-2">
@@ -545,6 +569,38 @@ export function DocumentTemplateLibrary() {
                 Fiyat listesi ekle
               </Button>
             </div>
+            <div className="space-y-3 border-t pt-4">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold">Ödeme tipleri</p>
+                <p className="text-xs text-muted-foreground">Teklif oluşturma ekranında seçim olarak görünür; manuel giriş seçeneği ayrıca kalır.</p>
+              </div>
+              {paymentOptions.map((option, index) => (
+                <div key={`payment-option-${index}`} className="grid gap-2 md:grid-cols-[1fr_auto] md:items-end">
+                  <div className="space-y-2">
+                    <Label>{index + 1}. ödeme tipi</Label>
+                    <Input
+                      value={option}
+                      onChange={(event) => updatePaymentOption(index, event.target.value)}
+                      disabled={data.settings.role !== 'Admin' || savingSettings}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    disabled={data.settings.role !== 'Admin' || savingSettings || paymentOptions.length <= 1}
+                    onClick={() => removePaymentOption(index)}
+                    title="Ödeme tipini sil"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+              <Button type="button" variant="outline" onClick={addPaymentOption} disabled={data.settings.role !== 'Admin' || savingSettings}>
+                <Plus className="mr-2 h-4 w-4" />
+                Ödeme tipi ekle
+              </Button>
+            </div>
             <RbacGuard perm="quotes.edit">
               <Button
                 onClick={async () => {
@@ -552,11 +608,13 @@ export function DocumentTemplateLibrary() {
                   try {
                     const response = await api.patch('/auth/organization-settings/', {
                       price_lists: priceLists,
+                      payment_options: paymentOptions,
                     })
                     setPriceLists(normalizePriceLists(response.data?.price_lists))
+                    setPaymentOptions(normalizePaymentOptions(response.data?.payment_options))
                     toast({
                       title: 'Belge sabitleri güncellendi',
-                      description: `${getDefaultPriceList(response.data?.price_lists).label} yeni varsayılan fiyat listesi olarak kullanılacak.`,
+                      description: `${getDefaultPriceList(response.data?.price_lists).label} ve ödeme tipleri yeni belgelerde kullanılacak.`,
                     })
                   } catch (error: any) {
                     toast({
