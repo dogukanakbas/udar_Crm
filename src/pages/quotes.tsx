@@ -11,6 +11,7 @@ import { PageHeader } from '@/components/app-shell'
 import { CompanyModal } from '@/components/company-modal'
 import { DataTable } from '@/components/data-table'
 import { RbacGuard } from '@/components/rbac'
+import { SearchableCombobox } from '@/components/searchable-combobox'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -1181,12 +1182,32 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   const [activeTab, setActiveTab] = useState('customer')
   const [priceLists, setPriceLists] = useState<PriceListOption[]>(normalizePriceLists())
   const [paymentOptions, setPaymentOptions] = useState<string[]>(normalizePaymentOptions())
+  const [showProductCodesInPicker, setShowProductCodesInPicker] = useState(false)
   const companies = data.companies
   const sellerCompanies = data.sellerCompanies || []
   const products = data.products
   const preparers = useMemo(() => data.users, [data.users])
   const sellerOptions = useMemo(() => getSellerCompanyOptions(sellerCompanies), [sellerCompanies])
   const sectionOptions = useMemo(() => getSectionOptionsFromCategories(data.categories || []), [data.categories])
+  const productPickerOptions = useMemo(
+    () => [
+      { value: '__manual__', label: 'Manuel giriş', searchText: 'manuel giriş özel satır' },
+      ...products.map((product) => ({
+        value: product.id,
+        label: showProductCodesInPicker ? product.sku || product.name || 'Ürün' : product.name || product.sku || 'Ürün',
+        searchText: [
+          product.name,
+          product.sku,
+          product.categoryName,
+          product.category,
+          product.templateFamily,
+        ]
+          .filter(Boolean)
+          .join(' '),
+      })),
+    ],
+    [products, showProductCodesInPicker]
+  )
   const documentMode = quote?.documentType ?? mode
   const isEditing = Boolean(quote)
   const getFormDefaults = () => getInitialValues(documentMode, companies, preparers, products, sellerCompanies, quote, priceLists)
@@ -1557,8 +1578,17 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
           </TabsContent>
 
           <TabsContent value="lines" className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Label>Kalemler</Label>
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="space-y-1">
+                <Label>Kalemler</Label>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Checkbox
+                    checked={showProductCodesInPicker}
+                    onCheckedChange={(value) => setShowProductCodesInPicker(Boolean(value))}
+                  />
+                  <span>Ürün seçiminde yalnızca ürün kodunu göster</span>
+                </div>
+              </div>
               <Button type="button" size="sm" variant="outline" onClick={addLine}><Plus className="mr-2 h-4 w-4" />Kalem ekle</Button>
             </div>
             <div className="max-h-[58vh] space-y-3 overflow-y-auto pr-2">
@@ -1575,7 +1605,17 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
                     </CardHeader>
                     <CardContent className="grid gap-3 md:grid-cols-3">
                       <div><Label>Ürün modu</Label><Select value={line.mode || 'manual'} onValueChange={(value) => value === 'manual' ? setManualMode(index) : undefined}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="manual">Manuel giriş</SelectItem><SelectItem value="product">Listeden seç</SelectItem></SelectContent></Select></div>
-                      <div className="md:col-span-2"><Label>Ürün</Label><Select value={line.productId || '__manual__'} onValueChange={(value) => value === '__manual__' ? setManualMode(index) : applyProduct(index, value)}><SelectTrigger><SelectValue placeholder="Ürün seçin" /></SelectTrigger><SelectContent className="max-h-[22rem] overflow-y-auto"><SelectItem value="__manual__">Manuel giriş</SelectItem>{products.map((product) => <SelectItem key={product.id} value={product.id}>{product.sku} - {product.name}</SelectItem>)}</SelectContent></Select></div>
+                      <div className="md:col-span-2">
+                        <Label>Ürün</Label>
+                        <SearchableCombobox
+                          value={line.productId || '__manual__'}
+                          options={productPickerOptions}
+                          placeholder="Ürün adıyla ara"
+                          searchPlaceholder="Ürün adı, kategori veya kod ara..."
+                          emptyMessage="Ürün bulunamadı."
+                          onValueChange={(value) => (value === '__manual__' ? setManualMode(index) : applyProduct(index, value))}
+                        />
+                      </div>
                       <div><Label>Grup</Label><Select value={line.sectionKey} onValueChange={(value) => form.setValue(`lines.${index}.sectionKey`, value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{sectionOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
                       <div><Label>Ürün kodu</Label><Input value={line.details?.code || line.sku || ''} onChange={(event) => form.setValue(`lines.${index}.details.code`, event.target.value)} /></div>
                       <div><Label>Birim</Label><Input value={line.unit || ''} onChange={(event) => form.setValue(`lines.${index}.unit`, event.target.value)} /></div>

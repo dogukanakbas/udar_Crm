@@ -112,6 +112,20 @@ Teklif ekranındaki geçerlilik metinleri `iş günü` yerine `gün` olarak gün
 
 Backend serializer fallback metni de aynı davranışa çekildi. Böylece frontend ve belge çıktıları aynı metni kullanır.
 
+## Teklif ve sözleşme ürün seçimi
+
+Teklif veya sözleşme oluştururken kalemlerdeki ürün seçimi arama destekli hale getirildi.
+
+Davranış:
+
+- Ürün seçimi varsayılan olarak ürün adını gösterir.
+- Ürün kodu seçim listesinin varsayılan etiketinde görünmez.
+- Arama alanı ürün adı, kategori ve ürün kodu üzerinden filtreleme yapar.
+- Sözleşmeyi veya teklifi hazırlayan kişi ürün adını yazarak ürünü bulabilir.
+- `Ürün seçiminde yalnızca ürün kodunu göster` seçeneği açılırsa seçim listesinde ürün adı yerine ürün kodu gösterilir.
+- Bu seçenek açıkken de arama metni ürün adını yakalamaya devam eder; yani kullanıcı adı yazarak ürünü bulup listede kodunu görebilir.
+- Manuel giriş seçeneği korunur.
+
 ## Çoklu fiyat listesi yapısı
 
 Fiyat listesi tek bir etiket olmaktan çıkarıldı. Artık organizasyon bazında birden fazla fiyat listesi tanımlanabilir.
