@@ -5,6 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from pathlib import Path
+import math
 import os
 import re
 import shutil
@@ -17,7 +18,9 @@ from openpyxl.drawing.image import Image as XLImage
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter, range_boundaries
+from openpyxl.worksheet.pagebreak import Break
 from openpyxl.worksheet.properties import PageSetupProperties
+from PIL import Image as PILImage
 
 XLSX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 PDF_CONTENT_TYPE = 'application/pdf'
@@ -1099,8 +1102,8 @@ def _build_seller_master_document_export(quote):
         'seller_master_layout': True,
     }
     quote._current_export_template = template
-    _apply_logo_placeholders(worksheet, quote)
     _apply_template_placeholders(worksheet, quote, template)
+    _apply_seller_master_header_branding(worksheet, quote)
     tail_row = _render_dynamic_product_group_tables(worksheet, quote)
     _render_seller_master_tail(worksheet, quote, tail_row, banner_images=banner_images)
     _apply_times_new_roman_font(worksheet)
@@ -1413,6 +1416,71 @@ def _apply_logo_placeholders(ws, quote):
                 continue
             image = _fit_excel_image(image, 260, 86)
             ws.add_image(image, cell.coordinate)
+
+
+def _fixed_ayka_seller_profile(organization):
+    profiles = [profile for profile in get_seller_profiles(organization) if profile.get('is_active', True)] or get_default_seller_profiles()
+    ayka_key = normalize_seller_company_key('AYKA')
+    for profile in profiles:
+        if normalize_seller_company_key(profile.get('key')) == ayka_key:
+            return profile
+    return next((profile for profile in get_default_seller_profiles() if profile.get('key') == ayka_key), profiles[0] if profiles else {})
+
+
+def _set_header_text(ws, coordinate, value, *, bold=False, size=10):
+    cell = _resolve_cell(ws, coordinate)
+    cell.value = value
+    cell.font = _seller_master_font(color='000066', bold=bold, size=size)
+    cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True, shrink_to_fit=True)
+
+
+def _add_header_logo(ws, profile, anchor, max_width, max_height):
+    logo_path = _seller_logo_media_path(profile)
+    if not logo_path:
+        return
+    try:
+        image = XLImage(str(logo_path))
+    except Exception:
+        return
+    image = _crop_excel_image_content(image, padding=6)
+    image = _fit_excel_image(image, max_width, max_height)
+    ws.add_image(image, anchor)
+
+
+def _merge_header_range(ws, cell_range):
+    _safe_unmerge(ws, cell_range)
+    ws.merge_cells(cell_range)
+
+
+def _prepare_seller_master_header_layout(ws):
+    for cell_range in ['B2:E5', 'F2:I5', 'J2:M3', 'J2:M2', 'J3:M3', 'J4:M4', 'J5:M5']:
+        _safe_unmerge(ws, cell_range)
+    _merge_header_range(ws, 'B2:E5')
+    _merge_header_range(ws, 'F2:I5')
+    for cell_range in ['J2:M2', 'J3:M3', 'J4:M4', 'J5:M5']:
+        _merge_header_range(ws, cell_range)
+    for row in range(2, 6):
+        ws.row_dimensions[row].height = 22
+
+
+def _apply_seller_master_header_branding(ws, quote):
+    fixed_left = _fixed_ayka_seller_profile(quote.organization)
+    selected_seller = _selected_seller_profile(quote)
+    _strip_header_logos(ws)
+    _prepare_seller_master_header_layout(ws)
+
+    for coordinate in ['B2', 'F2', 'J2', 'J3', 'J4', 'J5']:
+        _set_cell_value(ws, coordinate, '')
+
+    _clear_logo_frame(ws, ws['B2'])
+    _clear_logo_frame(ws, ws['F2'])
+    _add_header_logo(ws, fixed_left, 'B2', 260, 86)
+    _add_header_logo(ws, selected_seller, 'G2', 260, 86)
+
+    _set_header_text(ws, 'J2', _normalize_display_name(selected_seller.get('display_name', '')), bold=True, size=9)
+    _set_header_text(ws, 'J3', _join_tax(selected_seller.get('tax_office', ''), selected_seller.get('tax_number', '')), size=8)
+    _set_header_text(ws, 'J4', selected_seller.get('address', ''), size=8)
+    _set_header_text(ws, 'J5', _join_contact(selected_seller.get('phone', ''), selected_seller.get('email', '')), size=8)
 
 
 def _image_anchor_row(image):
@@ -1859,11 +1927,23 @@ def _render_seller_master_tail(ws, quote, start_row, banner_images=None):
 
     row = start_row
     row = _write_yekun_summary_tail(ws, quote, row)
-    row = _write_payment_delivery_tail(ws, quote, row + 1)
-    row = _write_terms_tail(ws, quote, row + 1)
-    row = _write_bank_tail(ws, quote, row + 1)
-    row = _write_signature_tail(ws, quote, row + 2)
-    _write_bottom_banner_tail(ws, row + 1, banner_images or [])
+    payment_start = row + 1
+    row = _write_payment_delivery_tail(ws, quote, payment_start)
+
+    terms_start = row + 1
+    row = _write_terms_tail(ws, quote, terms_start)
+
+    bank_start = row + 1
+    row = _write_bank_tail(ws, quote, bank_start)
+
+    signature_start = row + 2
+    row = _write_signature_tail(ws, quote, signature_start)
+
+    banner_start = row + 1
+    _write_bottom_banner_tail(ws, banner_start, banner_images or [])
+
+    _add_manual_page_break_before(ws, terms_start)
+    _add_manual_page_break_before(ws, bank_start)
 
 
 def _reset_seller_master_columns(ws):
@@ -2066,12 +2146,25 @@ def _write_bottom_banner_tail(ws, row, banner_images):
     if not banner_images:
         return row
     banner = banner_images[0]
-    banner = _fit_excel_image(banner, 980, 150)
-    for offset in range(0, 7):
-        ws.row_dimensions[row + offset].height = 22
-    ws.cell(row + 6, 13).value = ' '
-    ws.add_image(banner, f'B{row}')
-    return row + 7
+    banner = _crop_excel_image_vertical_content(banner)
+    target_width = _worksheet_printable_width_pixels(ws)
+    banner = _scale_excel_image_to_width(banner, target_width)
+    row_height = 22
+    row_count = max(4, math.ceil((float(getattr(banner, 'height', 0) or 0) * 0.75) / row_height))
+    for offset in range(row_count):
+        ws.row_dimensions[row + offset].height = row_height
+    ws.cell(row + row_count - 1, 13).value = ' '
+    ws.add_image(banner, f'A{row}')
+    return row + row_count
+
+
+def _add_manual_page_break_before(ws, row):
+    if row <= 1:
+        return
+    break_id = row - 1
+    existing = {getattr(item, 'id', None) for item in getattr(ws.row_breaks, 'brk', []) or []}
+    if break_id not in existing:
+        ws.row_breaks.append(Break(id=break_id))
 
 
 def _apply_times_new_roman_font(ws):
@@ -2930,6 +3023,75 @@ def _fit_excel_image(image, max_width, max_height):
     image.width = int(width * scale)
     image.height = int(height * scale)
     return image
+
+
+def _scale_excel_image_to_width(image, target_width):
+    width = float(getattr(image, 'width', target_width) or target_width)
+    height = float(getattr(image, 'height', 0) or 0)
+    if width <= 0 or height <= 0:
+        image.width = int(target_width)
+        return image
+    scale = target_width / width
+    image.width = int(target_width)
+    image.height = int(height * scale)
+    return image
+
+
+def _crop_excel_image_content(image, padding=0):
+    try:
+        source = PILImage.open(BytesIO(image._data())).convert('RGBA')
+    except Exception:
+        return image
+
+    bbox = source.getchannel('A').getbbox()
+    if not bbox:
+        return image
+
+    left = max(0, bbox[0] - padding)
+    top = max(0, bbox[1] - padding)
+    right = min(source.width, bbox[2] + padding)
+    bottom = min(source.height, bbox[3] + padding)
+    if left <= 0 and top <= 0 and right >= source.width and bottom >= source.height:
+        return image
+
+    output = BytesIO()
+    source.crop((left, top, right, bottom)).save(output, format='PNG')
+    output.seek(0)
+    return XLImage(output)
+
+
+def _crop_excel_image_vertical_content(image):
+    try:
+        source = PILImage.open(BytesIO(image._data())).convert('RGBA')
+    except Exception:
+        return image
+
+    bbox = source.getchannel('A').getbbox()
+    if not bbox:
+        return image
+
+    padding = 12
+    top = max(0, bbox[1] - padding)
+    bottom = min(source.height, bbox[3] + padding)
+    if top <= 0 and bottom >= source.height:
+        return image
+
+    output = BytesIO()
+    source.crop((0, top, source.width, bottom)).save(output, format='PNG')
+    output.seek(0)
+    return XLImage(output)
+
+
+def _worksheet_printable_width_pixels(ws):
+    orientation = str(getattr(ws.page_setup, 'orientation', '') or '').lower()
+    paper_size = str(getattr(ws.page_setup, 'paperSize', '') or '')
+    if paper_size == str(ws.PAPERSIZE_A4):
+        page_width = 11.69 if orientation == 'landscape' else 8.27
+    else:
+        page_width = 11.69 if orientation == 'landscape' else 8.5
+    margins = ws.page_margins
+    printable_width = max(1, page_width - float(margins.left or 0) - float(margins.right or 0))
+    return int(printable_width * 144)
 
 
 def _clear_logo_frame(ws, cell):
