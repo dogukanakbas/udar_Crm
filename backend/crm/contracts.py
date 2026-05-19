@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import copy, deepcopy
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from pathlib import Path
 import os
@@ -52,6 +52,37 @@ SECTION_FAMILY_MAP = {
     'bathroom': 'furniture',
     'accessory': 'furniture',
     'laminate': 'furniture',
+    'service': 'service',
+}
+SECTION_KEY_ALIASES = {
+    'celik kapi': 'steel_door',
+    'celik kapi grubu': 'steel_door',
+    'steel door': 'steel_door',
+    'ic oda kapi': 'interior_door',
+    'ic oda kapisi': 'interior_door',
+    'ic oda kapi grubu': 'interior_door',
+    'interior door': 'interior_door',
+    'mutfak': 'kitchen',
+    'mutfak grubu': 'kitchen',
+    'kitchen': 'kitchen',
+    'portmanto': 'wardrobe',
+    'portmanto grubu': 'wardrobe',
+    'vestiyer': 'wardrobe',
+    'wardrobe': 'wardrobe',
+    'banyo': 'bathroom',
+    'banyo dolaplari': 'bathroom',
+    'bathroom': 'bathroom',
+    'aksesuar': 'accessory',
+    'aksesuarlar': 'accessory',
+    'accessory': 'accessory',
+    'parke': 'laminate',
+    'laminat': 'laminate',
+    'laminate': 'laminate',
+    'hizmet': 'service',
+    'hizmetler': 'service',
+    'montaj': 'service',
+    'hizmetler montaj': 'service',
+    'hizmetler montaj grubu': 'service',
     'service': 'service',
 }
 
@@ -134,6 +165,9 @@ YEKUN_SUMMARY_GROUPS = [
     ('laminate', 'PARKE'),
     ('service', 'HİZMETLER & MONTAJ'),
 ]
+SELLER_MASTER_BODY_FONT_SIZE = 12
+SELLER_MASTER_TABLE_FONT_SIZE = 11
+SELLER_MASTER_HEADER_FONT_SIZE = 14
 DEFAULT_DYNAMIC_DOCUMENT_COLUMNS = ['Kod', 'Satış Birimi', 'Ölçü / Gövde', 'Renk / Kapak', 'Miktar', 'Liste Fiyatı', '1-İskonto %', '2-İskonto %', 'Birim', 'Birim Net Fiyatı', 'Tutar']
 SPECIAL_PRODUCT_DOCUMENT_GROUPS = [
     {
@@ -402,6 +436,15 @@ def _normalize_document_group_text(value):
     return re.sub(r'[^a-z0-9]+', ' ', raw.lower()).strip()
 
 
+def _canonical_section_key(value):
+    raw = str(value or '').strip()
+    if not raw:
+        return ''
+    if raw in SECTION_FAMILY_MAP:
+        return raw
+    return SECTION_KEY_ALIASES.get(_normalize_document_group_text(raw), raw)
+
+
 def _turkish_upper(value):
     return str(value or '').replace('i', 'İ').replace('ı', 'I').upper()
 
@@ -426,11 +469,12 @@ def resolve_product_document_defaults(product=None, fallback_section_key='', lin
     source_defaults = special_group or product_defaults or category_defaults
     section_key = (
         (special_group or {}).get('section_key')
+        or fallback_section_key
         or product_defaults.get('section_key')
         or category_defaults.get('section_key')
-        or fallback_section_key
         or 'service'
     )
+    section_key = _canonical_section_key(section_key) or 'service'
     label = (
         (special_group or {}).get('label')
         or str(getattr(category, 'name', '') or '').strip()
@@ -1227,14 +1271,15 @@ def _build_reportlab_document_pdf_export(quote):
         colWidths=[85 * mm, 170 * mm],
     ))
     story.append(Spacer(1, 4))
-    title_table = Table([[p('Sözleşme' if quote.document_type == 'Contract' else 'Teklif', title_style)]], colWidths=[255 * mm])
+    document_title = 'SÖZLEŞME' if quote.document_type == 'Contract' else 'TEKLİF'
+    title_table = Table([[p(document_title, title_style)]], colWidths=[255 * mm])
     title_table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#203864'))]))
     story.append(title_table)
     story.append(Spacer(1, 6))
 
     doc_date = _timezone_fallback(quote.created_at).strftime('%d.%m.%Y')
     story.append(basic_table([
-        [p('TARİH', heading), p(doc_date), p(f'{quote.document_type == "Contract" and "Sözleşme" or "Teklif"} NUMARASI', heading), p(quote.number)],
+        [p('TARİH', heading), p(doc_date), p(f'{document_title} NUMARASI', heading), p(quote.number)],
         [p('HAZIRLAYAN', heading), p(_resolve_prepared_by_name(quote)), p('GEÇERLİLİK TARİHİ', heading), p(format_validity_text(quote.valid_until))],
     ], widths=[35 * mm, 92 * mm, 42 * mm, 86 * mm]))
     story.append(Spacer(1, 6))
@@ -1398,7 +1443,7 @@ def _render_dynamic_product_group_tables(ws, quote):
     anchor = _find_product_group_anchor(ws)
     start_row, start_column = anchor or (ws.max_row + 2, 1)
     groups = _build_dynamic_line_groups(quote)
-    required_rows = _dynamic_tables_row_count(groups)
+    required_rows = _dynamic_tables_row_count(quote, groups)
     table_width = _dynamic_table_physical_width(groups)
     end_column = start_column + table_width - 1
     if anchor and required_rows > 1:
@@ -1429,17 +1474,19 @@ def _render_dynamic_product_group_tables(ws, quote):
     return current_row + 1
 
 
-def _dynamic_tables_row_count(groups):
+def _dynamic_tables_row_count(quote, groups):
     if not groups:
         return 1
     total = 0
     for group in groups:
         total += 2 + len(group['lines']) + 1 + 3 + len(group.get('technical_items') or []) + 1
-    return total + _service_summary_row_count(groups)
+    return total + _service_summary_row_count(quote, groups)
 
 
-def _service_summary_row_count(groups):
-    return 0 if not groups else sum(len(group['lines']) for group in groups) + 3
+def _service_summary_row_count(quote, groups):
+    if not groups:
+        return 0
+    return len(_service_expense_rows(quote, groups)) + 3
 
 
 def _dynamic_table_physical_width(groups):
@@ -1486,6 +1533,10 @@ def _dynamic_text_row_height(value, width_units, base=18, line_height=13, max_he
     for raw_line in text.split('\n'):
         visual_lines += max(1, (len(raw_line) + usable_chars - 1) // usable_chars)
     return min(max_height, max(base, base + (visual_lines - 1) * line_height))
+
+
+def _seller_master_font(color='000000', bold=False, italic=False, size=SELLER_MASTER_BODY_FONT_SIZE):
+    return Font(name='Times New Roman', color=color, bold=bold, italic=italic, size=size)
 
 
 def _dynamic_set_row_height(ws, row, height):
@@ -1564,10 +1615,11 @@ def _write_dynamic_product_group(ws, quote, group, row, column, physical_width=N
     title = ws.cell(row, column)
     title.value = _turkish_upper(group['label'])
     title.fill = dark_fill
-    title.font = Font(color='FFFFFF', bold=True)
+    title.font = _seller_master_font(color='FFFFFF', bold=True, size=SELLER_MASTER_HEADER_FONT_SIZE)
     title.alignment = Alignment(horizontal='center', vertical='center')
     for col in range(column, last_column + 1):
         ws.cell(row, col).border = border
+    _dynamic_set_row_height(ws, row, 26)
     row += 1
 
     current_column = column
@@ -1577,15 +1629,15 @@ def _write_dynamic_product_group(ws, quote, group, row, column, physical_width=N
             _unmerge_overlapping_range(ws, row, row, current_column, current_column + span - 1)
             ws.merge_cells(start_row=row, start_column=current_column, end_row=row, end_column=current_column + span - 1)
         cell = ws.cell(row, current_column)
-        cell.value = header
+        cell.value = _turkish_upper(header)
         cell.fill = header_fill
-        cell.font = Font(color='203864', bold=True)
+        cell.font = _seller_master_font(color='203864', bold=True, size=SELLER_MASTER_BODY_FONT_SIZE)
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         for physical_column in range(current_column, current_column + span):
             ws.cell(row, physical_column).fill = header_fill
             ws.cell(row, physical_column).border = border
         current_column += span
-    _dynamic_set_row_height(ws, row, 22)
+    _dynamic_set_row_height(ws, row, 26)
     row += 1
 
     for line in group['lines']:
@@ -1603,6 +1655,7 @@ def _write_dynamic_product_group(ws, quote, group, row, column, physical_width=N
                 cell.number_format = _currency_number_format(currency_code)
             else:
                 cell.value = value
+            cell.font = _seller_master_font(size=SELLER_MASTER_TABLE_FONT_SIZE)
             for physical_column in range(current_column, current_column + span):
                 ws.cell(row, physical_column).border = border
             cell.alignment = Alignment(
@@ -1612,7 +1665,7 @@ def _write_dynamic_product_group(ws, quote, group, row, column, physical_width=N
                 shrink_to_fit=_dynamic_is_numeric_column(header),
             )
             if not _dynamic_is_numeric_column(header):
-                required_height = max(required_height, _dynamic_text_row_height(value, _dynamic_span_width(ws, current_column, span)))
+                required_height = max(required_height, _dynamic_text_row_height(value, _dynamic_span_width(ws, current_column, span), base=20, line_height=14))
             current_column += span
         _dynamic_set_row_height(ws, row, required_height)
         row += 1
@@ -1640,14 +1693,14 @@ def _write_dynamic_product_group(ws, quote, group, row, column, physical_width=N
         left_cell.border = EMPTY_BORDER
         left_cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         label_cell = ws.cell(row, label_column)
-        label_cell.value = label
-        label_cell.font = Font(bold=True, color='203864')
+        label_cell.value = _turkish_upper(label)
+        label_cell.font = _seller_master_font(color='203864', bold=True, size=SELLER_MASTER_TABLE_FONT_SIZE)
         label_cell.border = border
         label_cell.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
         amount_cell = ws.cell(row, last_column)
         amount_cell.value = float(amount) if is_currency else str(amount)
         amount_cell.number_format = _currency_number_format(currency_code) if is_currency else '@'
-        amount_cell.font = Font(bold=True)
+        amount_cell.font = _seller_master_font(bold=True, size=SELLER_MASTER_TABLE_FONT_SIZE)
         amount_cell.border = border
         amount_cell.alignment = Alignment(horizontal='right', vertical='center', shrink_to_fit=True)
         _dynamic_set_row_height(ws, row, _dynamic_text_row_height(label, _dynamic_span_width(ws, max(column, last_column - 1), 1), base=18, max_height=48))
@@ -1658,12 +1711,43 @@ def _write_dynamic_product_group(ws, quote, group, row, column, physical_width=N
         ws.merge_cells(start_row=row, start_column=column, end_row=row, end_column=last_column)
         cell = ws.cell(row, column)
         cell.value = f'* {item}'
-        cell.font = Font(italic=True, color='203864')
+        cell.font = _seller_master_font(color='203864', italic=True, size=SELLER_MASTER_TABLE_FONT_SIZE)
         cell.alignment = Alignment(wrap_text=True)
         _dynamic_set_row_height(ws, row, _dynamic_text_row_height(cell.value, _dynamic_span_width(ws, column, last_column - column + 1), base=18, max_height=72))
         row += 1
 
     return row
+
+
+def _service_expense_rows(quote, groups=None):
+    configured = []
+    for item in (quote.contract_config or {}).get('service_expenses') or []:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get('category_label') or item.get('categoryLabel') or '').strip()
+        if not label:
+            continue
+        try:
+            amount = Decimal(str(item.get('amount') or 0))
+        except (InvalidOperation, TypeError, ValueError):
+            amount = Decimal('0')
+        try:
+            tax_rate = Decimal(str(item.get('tax') or item.get('tax_rate') or item.get('taxRate') or 0))
+        except (InvalidOperation, TypeError, ValueError):
+            tax_rate = Decimal('0')
+        configured.append({'label': label, 'amount': max(amount, Decimal('0')), 'tax': max(amount, Decimal('0')) * (max(tax_rate, Decimal('0')) / Decimal('100'))})
+    if configured:
+        return configured
+
+    rows = []
+    seen = set()
+    for group in groups or []:
+        key = str(group.get('key') or '').strip()
+        if not key or key == 'service' or key in seen:
+            continue
+        seen.add(key)
+        rows.append({'label': group.get('label') or _section_label(key), 'amount': Decimal('0'), 'tax': Decimal('0')})
+    return rows
 
 
 def _write_service_summary_group(ws, quote, groups, row, column, physical_width):
@@ -1674,7 +1758,7 @@ def _write_service_summary_group(ws, quote, groups, row, column, physical_width)
     header_fill = PatternFill('solid', fgColor='EAF2F8')
     thin = Side(style='thin', color='9FB2C8')
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    headers = ['Kod', 'Ürün / Hizmet', 'Miktar', 'Ara Toplam', 'K.D.V.', 'Yekün']
+    headers = ['Ürün Kategori', 'Miktar', 'Ara Toplam', 'K.D.V.', 'Yekün']
     spans = _dynamic_column_spans(headers, column_count)
 
     _unmerge_overlapping_range(ws, row, row, column, last_column)
@@ -1682,10 +1766,11 @@ def _write_service_summary_group(ws, quote, groups, row, column, physical_width)
     title = ws.cell(row, column)
     title.value = 'HİZMETLER & MONTAJ'
     title.fill = dark_fill
-    title.font = Font(color='FFFFFF', bold=True)
+    title.font = _seller_master_font(color='FFFFFF', bold=True, size=SELLER_MASTER_HEADER_FONT_SIZE)
     title.alignment = Alignment(horizontal='center', vertical='center')
     for col in range(column, last_column + 1):
         ws.cell(row, col).border = border
+    _dynamic_set_row_height(ws, row, 26)
     row += 1
 
     current_column = column
@@ -1695,45 +1780,39 @@ def _write_service_summary_group(ws, quote, groups, row, column, physical_width)
             _unmerge_overlapping_range(ws, row, row, current_column, current_column + span - 1)
             ws.merge_cells(start_row=row, start_column=current_column, end_row=row, end_column=current_column + span - 1)
         cell = ws.cell(row, current_column)
-        cell.value = header
+        cell.value = _turkish_upper(header)
         cell.fill = header_fill
-        cell.font = Font(color='203864', bold=True)
+        cell.font = _seller_master_font(color='203864', bold=True, size=SELLER_MASTER_BODY_FONT_SIZE)
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         for physical_column in range(current_column, current_column + span):
             ws.cell(row, physical_column).fill = header_fill
             ws.cell(row, physical_column).border = border
         current_column += span
-    _dynamic_set_row_height(ws, row, 22)
+    _dynamic_set_row_height(ws, row, 26)
     row += 1
 
     subtotal_total = Decimal('0')
     tax_total = Decimal('0')
     grand_total = Decimal('0')
     quantity_total = Decimal('0')
-    for group in groups:
-        for line in group['lines']:
-            subtotal = _line_subtotal(line)
-            tax = _line_tax(line)
-            grand = subtotal + tax
-            quantity = Decimal(line.qty or 0)
-            subtotal_total += subtotal
-            tax_total += tax
-            grand_total += grand
-            quantity_total += quantity
-            details = dict(line.details or {})
-            product = getattr(line, 'product', None)
-            row = _write_service_summary_row(ws, row, column, spans, [
-                details.get('code') or getattr(product, 'sku', '') or '',
-                line.name or '',
-                quantity,
-                subtotal,
-                tax,
-                grand,
-            ], currency_code, border)
+    for item in _service_expense_rows(quote, groups):
+        subtotal = item['amount']
+        tax = item['tax']
+        grand = subtotal + tax
+        subtotal_total += subtotal
+        tax_total += tax
+        grand_total += grand
+        quantity_total += Decimal('1')
+        row = _write_service_summary_row(ws, row, column, spans, [
+            item['label'],
+            Decimal('1'),
+            subtotal,
+            tax,
+            grand,
+        ], currency_code, border)
 
     row = _write_service_summary_row(ws, row, column, spans, [
         'TOPLAM',
-        '',
         quantity_total,
         subtotal_total,
         tax_total,
@@ -1754,9 +1833,9 @@ def _write_service_summary_row(ws, row, column, spans, values, currency_code, bo
         cell.value = float(value) if isinstance(value, Decimal) else value
         if isinstance(value, Decimal):
             cell.number_format = _currency_number_format(currency_code)
-            if index < 3:
+            if index == 1:
                 cell.number_format = '#,##0.##'
-        cell.font = Font(bold=bold, color='203864' if bold else '000000')
+        cell.font = _seller_master_font(color='203864' if bold else '000000', bold=bold, size=SELLER_MASTER_TABLE_FONT_SIZE)
         is_amount_column = index >= 2
         cell.alignment = Alignment(
             horizontal='right' if is_amount_column else 'left',
@@ -1767,7 +1846,7 @@ def _write_service_summary_row(ws, row, column, spans, values, currency_code, bo
         for physical_column in range(current_column, current_column + span):
             ws.cell(row, physical_column).border = border
         if not is_amount_column:
-            required_height = max(required_height, _dynamic_text_row_height(value, _dynamic_span_width(ws, current_column, span), max_height=84))
+            required_height = max(required_height, _dynamic_text_row_height(value, _dynamic_span_width(ws, current_column, span), base=20, line_height=14, max_height=84))
         current_column += span
     _dynamic_set_row_height(ws, row, required_height)
     return row + 1
@@ -1804,9 +1883,9 @@ def _tail_styles():
     return {
         'title_fill': title_fill,
         'soft_fill': soft_fill,
-        'white_font': Font(color='FFFFFF', bold=True),
-        'label_font': Font(color='203864', bold=True),
-        'text_font': Font(color='000000'),
+        'white_font': _seller_master_font(color='FFFFFF', bold=True, size=SELLER_MASTER_HEADER_FONT_SIZE),
+        'label_font': _seller_master_font(color='203864', bold=True, size=SELLER_MASTER_BODY_FONT_SIZE),
+        'text_font': _seller_master_font(size=SELLER_MASTER_BODY_FONT_SIZE),
         'thin_border': Border(left=thin, right=thin, top=thin, bottom=thin),
         'section_border': Border(left=medium, right=medium, top=medium, bottom=medium),
         'center': Alignment(horizontal='center', vertical='center', wrap_text=True),
@@ -1834,50 +1913,73 @@ def _tail_merge(ws, row, start_col, end_col, value='', fill=None, font=None, ali
 
 def _tail_section_header(ws, row, title):
     styles = _tail_styles()
-    _tail_merge(ws, row, 2, 13, title, styles['title_fill'], styles['white_font'], styles['center'], styles['section_border'])
-    ws.row_dimensions[row].height = 22
+    _tail_merge(ws, row, 2, 13, _turkish_upper(title), styles['title_fill'], styles['white_font'], styles['center'], styles['section_border'])
+    ws.row_dimensions[row].height = 28
 
 
 def _tail_label_value(ws, row, label, value):
     styles = _tail_styles()
-    _tail_merge(ws, row, 2, 4, label, styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
+    _tail_merge(ws, row, 2, 4, _turkish_upper(label), styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
     _tail_merge(ws, row, 5, 13, value, None, styles['text_font'], styles['left'], styles['section_border'])
-    ws.row_dimensions[row].height = 24
+    ws.row_dimensions[row].height = 28
 
 
-def _build_yekun_summary_totals(quote):
-    totals = {key: Decimal('0') for key, _label in YEKUN_SUMMARY_GROUPS}
-    for line in quote.lines.select_related('product__category').order_by('sort_order', 'id'):
-        if not _line_is_meaningful(line):
-            continue
-        group_key = _line_dynamic_group(line)['key']
-        if group_key not in totals:
-            group_key = 'service'
-        totals[group_key] += _line_subtotal(line) + _line_tax(line)
-    return totals
+def _yekun_summary_label(group):
+    key = str(group.get('key') or '').strip()
+    label = str(group.get('label') or '').strip() or _section_label(key)
+    if key == 'service':
+        return 'HİZMETLER & MONTAJ'
+    normalized_label = _normalize_document_group_text(label)
+    if normalized_label.endswith('grubu'):
+        return _turkish_upper(label)
+    return _turkish_upper(f'{label} Grubu')
+
+
+def _add_yekun_summary_row(rows_by_key, key, label, amount):
+    amount = Decimal(amount or 0)
+    if amount == 0:
+        return
+    normalized_key = str(key or '').strip() or _normalize_document_group_text(label)
+    if normalized_key in rows_by_key:
+        rows_by_key[normalized_key]['amount'] += amount
+        return
+    rows_by_key[normalized_key] = {'label': label, 'amount': amount}
+
+
+def _build_yekun_summary_rows(quote):
+    rows_by_key = {}
+    for group in _build_dynamic_line_groups(quote):
+        amount = sum((_line_subtotal(line) + _line_tax(line) for line in group['lines']), Decimal('0'))
+        _add_yekun_summary_row(rows_by_key, group.get('key'), _yekun_summary_label(group), amount)
+
+    service_expense_total = sum((item['amount'] + item['tax'] for item in _service_expense_rows(quote)), Decimal('0'))
+    _add_yekun_summary_row(rows_by_key, 'service', 'HİZMETLER & MONTAJ', service_expense_total)
+    return list(rows_by_key.values())
 
 
 def _write_yekun_summary_tail(ws, quote, row):
     styles = _tail_styles()
     currency_code = _quote_currency(quote)
-    totals = _build_yekun_summary_totals(quote)
+    summary_rows = _build_yekun_summary_rows(quote)
 
     _tail_section_header(ws, row, 'YEKÜN İCMAALLERİ')
     current_row = row + 1
-    for key, label in YEKUN_SUMMARY_GROUPS:
+    for summary in summary_rows:
+        label = summary['label']
+        amount = summary['amount']
         _tail_merge(ws, current_row, 2, 4, label, styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
-        amount_cell = _tail_merge(ws, current_row, 5, 13, float(totals.get(key, Decimal('0'))), None, styles['text_font'], styles['left'], styles['section_border'])
+        amount_cell = _tail_merge(ws, current_row, 5, 13, float(amount), None, styles['text_font'], styles['left'], styles['section_border'])
         amount_cell.number_format = _currency_number_format(currency_code)
         amount_cell.alignment = Alignment(horizontal='right', vertical='center', shrink_to_fit=True)
-        ws.row_dimensions[current_row].height = 22
+        ws.row_dimensions[current_row].height = 26
         current_row += 1
 
-    grand_total = sum(totals.values(), Decimal('0'))
+    grand_total = sum((summary['amount'] for summary in summary_rows), Decimal('0'))
     _tail_merge(ws, current_row, 2, 4, 'TOPLAM YEKÜN', styles['title_fill'], styles['white_font'], styles['center'], styles['section_border'])
-    total_cell = _tail_merge(ws, current_row, 5, 13, float(grand_total), None, Font(color='203864', bold=True), styles['left'], styles['section_border'])
+    total_cell = _tail_merge(ws, current_row, 5, 13, float(grand_total), None, _seller_master_font(color='203864', bold=True, size=SELLER_MASTER_BODY_FONT_SIZE), styles['left'], styles['section_border'])
     total_cell.number_format = _currency_number_format(currency_code)
     total_cell.alignment = Alignment(horizontal='right', vertical='center', shrink_to_fit=True)
-    ws.row_dimensions[current_row].height = 24
+    ws.row_dimensions[current_row].height = 28
     return current_row + 1
 
 
@@ -1920,12 +2022,13 @@ def _write_terms_tail(ws, quote, row):
     current_row = row + 1
     for term in terms:
         _tail_merge(ws, current_row, 2, 13, term, None, styles['text_font'], styles['left'], styles['thin_border'])
-        ws.row_dimensions[current_row].height = max(22, min(60, 18 + (len(str(term)) // 90) * 14))
+        ws.row_dimensions[current_row].height = max(26, min(72, 22 + (len(str(term)) // 90) * 15))
         current_row += 1
     if quote.document_type == 'Contract':
         contract_date = _parse_date(config.get('contract_date')) or _timezone_fallback(quote.created_at)
         closing = f'İşbu sözleşme {contract_date.strftime("%d/%m/%Y")} tarihinde iki nüsha olarak imzalanmış ve yürürlüğe girmiştir.'
         _tail_merge(ws, current_row, 2, 13, closing, None, styles['text_font'], styles['left'], styles['thin_border'])
+        ws.row_dimensions[current_row].height = max(26, min(72, 22 + (len(closing) // 90) * 15))
         current_row += 1
     return current_row
 
@@ -1943,7 +2046,7 @@ def _write_bank_tail(ws, quote, row):
             continue
         _tail_merge(ws, current_row, 2, 4, _normalize_bank_name(account.get('bank', '')), None, styles['text_font'], styles['left'], styles['thin_border'])
         _tail_merge(ws, current_row, 5, 13, account.get('iban', ''), None, styles['text_font'], styles['left'], styles['thin_border'])
-        ws.row_dimensions[current_row].height = 22
+        ws.row_dimensions[current_row].height = 26
         current_row += 1
     return current_row
 
@@ -1955,7 +2058,7 @@ def _write_signature_tail(ws, quote, row):
     _tail_section_header(ws, row, 'TARAFLARIN KAŞE İMZASI')
     _tail_merge(ws, row + 1, 2, 7, f"SATICI\n{_normalize_display_name(seller.get('display_name', ''))}", None, styles['text_font'], styles['center'], styles['section_border'])
     _tail_merge(ws, row + 1, 8, 13, f"ALICI\n{customer.get('name') or getattr(quote.customer, 'name', '') or ''}", None, styles['text_font'], styles['center'], styles['section_border'])
-    ws.row_dimensions[row + 1].height = 110
+    ws.row_dimensions[row + 1].height = 120
     return row + 2
 
 
@@ -1974,8 +2077,12 @@ def _write_bottom_banner_tail(ws, row, banner_images):
 def _apply_times_new_roman_font(ws):
     for row in ws.iter_rows():
         for cell in row:
+            if cell.value in (None, ''):
+                continue
             font = copy(cell.font)
             font.name = 'Times New Roman'
+            if not font.sz or float(font.sz) < SELLER_MASTER_TABLE_FONT_SIZE:
+                font.sz = SELLER_MASTER_TABLE_FONT_SIZE
             cell.font = font
 
 
@@ -2078,7 +2185,7 @@ def _select_templates(quote, template_key: str | None = None):
 def _quote_families(quote):
     families = set()
     for line in quote.lines.select_related('product__category').all():
-        section_key = (line.section_key or _category_section_key(line)).strip()
+        section_key = _canonical_section_key(line.section_key or _category_section_key(line))
         family = SECTION_FAMILY_MAP.get(section_key) or _category_template_family(line)
         if family:
             families.add(family)
@@ -2092,7 +2199,17 @@ def _category_template_family(line):
     family = str(defaults.get('template_family') or '').strip()
     if family in {'steel', 'interior', 'furniture', 'service'}:
         return family
-    return 'service' if (line.section_key or defaults.get('section_key')) else ''
+    normalized_family = _normalize_document_group_text(family)
+    if normalized_family in {'celik kapi', 'steel door', 'celik'}:
+        return 'steel'
+    if normalized_family in {'ic oda', 'ic oda kapi', 'interior door'}:
+        return 'interior'
+    if normalized_family in {'mobilya', 'furniture', 'mutfak', 'portmanto', 'banyo'}:
+        return 'furniture'
+    if normalized_family in {'montaj', 'hizmet', 'service'}:
+        return 'service'
+    section_key = _canonical_section_key(line.section_key or defaults.get('section_key'))
+    return SECTION_FAMILY_MAP.get(section_key, 'service' if section_key else '')
 
 
 def _seller_profiles_for_template(quote):
@@ -2284,7 +2401,7 @@ def _select_lines_for_block(ordered_lines, block):
         for line in ordered_lines
         if _line_is_meaningful(line)
         and (
-            (line.section_key or _category_section_key(line)).strip() in allowed_keys
+            _canonical_section_key(line.section_key or _category_section_key(line)) in allowed_keys
             or ('service' in allowed_keys and _category_template_family(line) == 'service')
         )
     ]
@@ -2448,10 +2565,11 @@ def _build_template_placeholder_context(quote, template):
         line for line in quote.lines.select_related('product__category').order_by('sort_order', 'id')
         if _line_is_meaningful(line)
     ]
+    document_title = 'TEKLİF' if quote.document_type == 'Quote' else 'SÖZLEŞME'
 
     context = {
         'belgeNo': quote.number,
-        'belgeTuru': 'Teklif' if quote.document_type == 'Quote' else 'Sözleşme',
+        'belgeTuru': document_title,
         'olusturmaTarihi': created_at,
         'guncellenmeTarihi': updated_at,
         'gecerlilikTarihi': valid_until,
@@ -2949,7 +3067,7 @@ def _category_section_key(line):
     product = getattr(line, 'product', None)
     category = getattr(product, 'category', None) if product else None
     defaults = getattr(category, 'template_defaults', {}) or {}
-    return defaults.get('section_key', '')
+    return _canonical_section_key(defaults.get('section_key', ''))
 
 
 def _parse_date(value):

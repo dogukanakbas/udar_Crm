@@ -9,6 +9,7 @@ from accounts.price_lists import (
     get_org_price_list_label,
     get_org_price_lists,
     get_product_price_for_list,
+    get_price_list_by_key,
     normalize_product_price_lists,
 )
 from audit.utils import log_entity_action
@@ -77,7 +78,11 @@ class BusinessPartnerSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'organization': {'required': False},
             'name': {'required': False, 'allow_blank': True},
-            'group': {'required': False, 'allow_blank': True},
+            'group': {
+                'required': False,
+                'allow_blank': True,
+                'error_messages': {'max_length': 'Sektör / grup en fazla 50 karakter olabilir.'},
+            },
             'city': {'required': False, 'allow_blank': True},
             'country': {'required': False, 'allow_blank': True},
             'currency': {'required': False, 'allow_blank': True},
@@ -92,6 +97,7 @@ class BusinessPartnerSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         org = attrs.get('organization') or (self.context.get('request').user.organization if self.context.get('request') else None)
         email = (attrs.get('email') or '').strip().lower()
+        attrs['email'] = email
         country = attrs.get('country', getattr(self.instance, 'country', ''))
         requested_currency = attrs.get('currency', getattr(self.instance, 'currency', ''))
         normalized_currency = normalize_currency_code(requested_currency, default_partner_currency(country))
@@ -101,17 +107,12 @@ class BusinessPartnerSerializer(serializers.ModelSerializer):
 
         attrs['currency'] = normalized_currency
         price_list_key = str(attrs.get('price_list_key', getattr(self.instance, 'price_list_key', '')) or '').strip()
-        if org and price_list_key:
-            valid_keys = {item.get('key') for item in get_org_price_lists(org)}
-            if price_list_key not in valid_keys:
-                raise serializers.ValidationError({'price_list_key': 'Fiyat listesi bulunamadi.'})
+        if org:
+            price_lists = get_org_price_lists(org)
+            valid_keys = {item.get('key') for item in price_lists}
+            if price_list_key and price_list_key not in valid_keys:
+                price_list_key = get_price_list_by_key(price_lists, price_list_key).get('key') or ''
         attrs['price_list_key'] = price_list_key
-        if email and org:
-            qs = BusinessPartner.objects.filter(organization=org, email__iexact=email)
-            if self.instance:
-                qs = qs.exclude(pk=self.instance.pk)
-            if qs.exists():
-                raise serializers.ValidationError({'email': 'Bu e-posta ile başka bir firma zaten kayıtlı'})
         return super().validate(attrs)
 
 
@@ -570,6 +571,7 @@ class QuoteSerializer(serializers.ModelSerializer):
             'termsText': 'terms_text',
             'contractNotes': 'contract_notes',
             'contractNotesText': 'contract_notes_text',
+            'serviceExpenses': 'service_expenses',
             'templateMode': 'template_mode',
             'templateKey': 'template_key',
             'exchangeRate': 'exchange_rate',
@@ -598,7 +600,39 @@ class QuoteSerializer(serializers.ModelSerializer):
             config['exchange_rate'] = float(config.get('exchange_rate') or 1)
         except (TypeError, ValueError):
             config['exchange_rate'] = 1
+        config['service_expenses'] = self._normalize_service_expenses(config.get('service_expenses'))
         return config
+
+    def _normalize_service_expenses(self, value):
+        if not isinstance(value, list):
+            return []
+        normalized = []
+        seen = set()
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            category_key = str(item.get('category_key') or item.get('categoryKey') or '').strip()
+            category_label = str(item.get('category_label') or item.get('categoryLabel') or '').strip()
+            if not category_key or not category_label or category_key in seen:
+                continue
+            try:
+                amount = Decimal(str(item.get('amount') or 0))
+            except (InvalidOperation, TypeError, ValueError):
+                amount = Decimal('0')
+            try:
+                tax = Decimal(str(item.get('tax') if item.get('tax') not in [None, ''] else item.get('tax_rate', item.get('taxRate', 20))))
+            except (InvalidOperation, TypeError, ValueError):
+                tax = Decimal('20')
+            seen.add(category_key)
+            normalized.append(
+                {
+                    'category_key': category_key[:80],
+                    'category_label': category_label[:160],
+                    'amount': str(max(amount, Decimal('0')).quantize(Decimal('0.01'))),
+                    'tax': str(max(tax, Decimal('0')).quantize(Decimal('0.01'))),
+                }
+            )
+        return normalized
 
     def _create_lines(self, quote, lines_data):
         price_list_key = (quote.contract_config or {}).get('price_list_key') or ''
@@ -667,12 +701,26 @@ class QuoteSerializer(serializers.ModelSerializer):
             if subtotal >= threshold:
                 discount += subtotal * (r.value / hundred)
 
+        service_subtotal = Decimal('0')
+        service_tax = Decimal('0')
+        for item in (quote.contract_config or {}).get('service_expenses') or []:
+            try:
+                amount = Decimal(str(item.get('amount') or 0))
+            except (InvalidOperation, TypeError, ValueError):
+                amount = Decimal('0')
+            try:
+                tax_rate = Decimal(str(item.get('tax') or 0))
+            except (InvalidOperation, TypeError, ValueError):
+                tax_rate = Decimal('0')
+            service_subtotal += amount
+            service_tax += amount * (tax_rate / hundred)
+
         rate = (quote.vat_rate if quote.vat_rate is not None else Decimal('20')) / hundred
         tax = (subtotal - discount) * rate
-        quote.subtotal = subtotal
+        quote.subtotal = subtotal + service_subtotal
         quote.discount_total = discount
-        quote.tax_total = tax
-        quote.total = subtotal - discount + tax
+        quote.tax_total = tax + service_tax
+        quote.total = subtotal - discount + tax + service_subtotal + service_tax
         quote.save(update_fields=['subtotal', 'discount_total', 'tax_total', 'total'])
 
 

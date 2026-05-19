@@ -189,11 +189,18 @@ const lineSchema = z.object({
     code: z.string().optional(),
     primary: z.string().optional(),
     secondary: z.string().optional(),
-    attributes: z.record(z.any()).optional().default({}),
+    attributes: z.record(z.string(), z.any()).optional().default({}),
   }),
 }).superRefine((value, ctx) => {
   const effectiveDiscount = 100 - ((100 - Number(value.discount || 0)) * (100 - Number(value.discountSecondary || 0))) / 100
   if (effectiveDiscount > 50) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'İki iskonto birlikte en fazla %50 etkin iskonto oluşturabilir.', path: ['discountSecondary'] })
+})
+
+const serviceExpenseSchema = z.object({
+  categoryKey: z.string().min(1),
+  categoryLabel: z.string().min(1),
+  amount: z.coerce.number().min(0).default(0),
+  tax: z.coerce.number().min(0).default(20),
 })
 
 const documentSchema = z.object({
@@ -226,6 +233,7 @@ const documentSchema = z.object({
   termsText: z.string().optional(),
   contractNotesText: z.string().optional(),
   lines: z.array(lineSchema).min(1),
+  serviceExpenses: z.array(serviceExpenseSchema).optional().default([]),
 })
 
 const quoteStatusTr = (status: string) => QUOTE_STATUS_TR[status] ?? status
@@ -368,6 +376,7 @@ const buildLineForSelectedProduct = (product?: Product, previousLine?: any, pric
 const resolveErrorTab = (fieldPath?: string) => {
   if (!fieldPath) return 'document'
   if (fieldPath.startsWith('lines')) return 'lines'
+  if (fieldPath.startsWith('serviceExpenses')) return 'expenses'
   if (fieldPath.startsWith('customer') || fieldPath === 'customerId') return 'customer'
   return 'document'
 }
@@ -410,6 +419,29 @@ const getInitialValues = (
     ? String(storedValidityDays)
     : CUSTOM_OPTION
   const initialValidUntil = normalizeDateInputValue(quote?.validUntil) || addBusinessDaysFromToday(storedValidityDays)
+  const initialLines =
+    quote?.lines?.length
+      ? quote.lines.map((line) => ({
+          mode: line.productId ? 'product' : 'manual',
+          productId: line.productId,
+          sku: line.sku || line.details?.code || '',
+          name: line.name || 'Yeni kalem',
+          sectionKey: line.sectionKey || 'steel_door',
+          unit: line.unit || 'Adet',
+          qty: Number(line.qty ?? 0),
+          unitPrice: Number(line.unitPrice ?? 0),
+          discount: Number(line.discount ?? 0),
+          discountSecondary: Number(line.discountSecondary ?? 0),
+          tax: Number(line.tax ?? 0),
+          details: {
+            code: line.details?.code || line.sku || '',
+            primary: line.details?.primary || '',
+            secondary: line.details?.secondary || '',
+            attributes: line.details?.attributes || {},
+          },
+        }))
+      : [products[0] ? buildLineFromProduct(products[0], undefined, selectedPriceList.key) : createEmptyLine()]
+  const storedServiceExpenses = quote?.contractConfig?.serviceExpenses || quote?.contractConfig?.service_expenses || []
 
   return {
     customerId: quote?.customerId || company?.id || '',
@@ -443,28 +475,8 @@ const getInitialValues = (
     signatureCustomerLabel: quote?.contractConfig?.signatureCustomerLabel || quote?.contractConfig?.signature_customer_label || customerSnapshot.name || company?.name || '',
     termsText: getTermsText(quote?.contractConfig) || DEFAULT_TERMS_TEXT,
     contractNotesText: getContractNotesText(quote?.contractConfig) || DEFAULT_CONTRACT_NOTES_TEXT,
-    lines:
-      quote?.lines?.length
-        ? quote.lines.map((line) => ({
-            mode: line.productId ? 'product' : 'manual',
-            productId: line.productId,
-            sku: line.sku || line.details?.code || '',
-            name: line.name || 'Yeni kalem',
-            sectionKey: line.sectionKey || 'steel_door',
-            unit: line.unit || 'Adet',
-            qty: Number(line.qty ?? 0),
-            unitPrice: Number(line.unitPrice ?? 0),
-            discount: Number(line.discount ?? 0),
-            discountSecondary: Number(line.discountSecondary ?? 0),
-            tax: Number(line.tax ?? 0),
-            details: {
-              code: line.details?.code || line.sku || '',
-              primary: line.details?.primary || '',
-              secondary: line.details?.secondary || '',
-              attributes: line.details?.attributes || {},
-            },
-          }))
-        : [products[0] ? buildLineFromProduct(products[0], undefined, selectedPriceList.key) : createEmptyLine()],
+    lines: initialLines,
+    serviceExpenses: buildServiceExpenseRows(initialLines, products, getSectionOptionsFromCategories([]), storedServiceExpenses),
   }
 }
 
@@ -506,6 +518,12 @@ const buildDocumentPayload = (values: any, mode: SalesDocumentType, status = 'Dr
     },
     termsText: values.termsText || '',
     contractNotesText: values.contractNotesText || '',
+    serviceExpenses: (values.serviceExpenses || []).map((item: any) => ({
+      categoryKey: item.categoryKey,
+      categoryLabel: item.categoryLabel,
+      amount: Number(item.amount || 0),
+      tax: Number(item.tax || 0),
+    })),
   },
   lines: values.lines.map((line: any, index: number) => ({
     productId: line.mode === 'product' ? line.productId : undefined,
@@ -833,6 +851,35 @@ const getLineDiscountedBase = (line: any) => {
 }
 const getLineDiscountTotal = (line: any) => getLineBase(line) - getLineDiscountedBase(line)
 const getEffectiveDiscountRate = (line: any) => 100 - ((100 - Number(line.discount || 0)) * (100 - Number(line.discountSecondary || 0))) / 100
+const getServiceExpenseSubtotal = (expenses: any[] = []) => expenses.reduce((sum, item) => sum + Number(item.amount || 0), 0)
+const getServiceExpenseTaxTotal = (expenses: any[] = []) =>
+  expenses.reduce((sum, item) => sum + Number(item.amount || 0) * (Number(item.tax || 0) / 100), 0)
+const getServiceExpenseGrandTotal = (expenses: any[] = []) => getServiceExpenseSubtotal(expenses) + getServiceExpenseTaxTotal(expenses)
+
+const getLineCategoryLabel = (line: any, products: Product[], sectionOptions = SECTION_OPTIONS) => {
+  const product = products.find((item) => item.id === line.productId)
+  return sectionOptions.find((item) => item.value === line.sectionKey)?.label || product?.categoryName || sectionLabel(line.sectionKey)
+}
+
+const buildServiceExpenseRows = (lines: any[], products: Product[], sectionOptions = SECTION_OPTIONS, previousRows: any[] = []) => {
+  const previousByKey = new Map(previousRows.map((row) => [String(row.categoryKey || ''), row]))
+  const rows = new Map<string, { categoryKey: string; categoryLabel: string; amount: number; tax: number }>()
+
+  lines.forEach((line) => {
+    if (line.sectionKey === 'service') return
+    const key = String(line.sectionKey || '').trim()
+    if (!key || rows.has(key)) return
+    const previous = previousByKey.get(key)
+    rows.set(key, {
+      categoryKey: key,
+      categoryLabel: getLineCategoryLabel(line, products, sectionOptions),
+      amount: Number(previous?.amount || 0),
+      tax: Number(previous?.tax ?? line.tax ?? 20),
+    })
+  })
+
+  return Array.from(rows.values())
+}
 
 const buildCsv = (quotes: Quote[]) =>
   quotes
@@ -1255,6 +1302,11 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
     [selectedCustomer?.country]
   )
   const lines = form.watch('lines') || []
+  const serviceExpenses = form.watch('serviceExpenses') || []
+  const selectedExpenseGroupKey = useMemo(
+    () => lines.map((line) => `${line.sectionKey || ''}:${line.productId || ''}:${line.tax || 0}`).filter(Boolean).join('|'),
+    [lines]
+  )
 
   const applyPriceListToLines = (priceListKey: string) => {
     const nextLines = lines.map((line) => {
@@ -1263,6 +1315,11 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
       return { ...line, unitPrice: resolveProductPrice(product, priceListKey) }
     })
     form.setValue('lines', nextLines, { shouldDirty: true, shouldValidate: true })
+  }
+
+  const syncServiceExpensesFromLines = () => {
+    const nextExpenses = buildServiceExpenseRows(form.getValues('lines') || [], products, sectionOptions, form.getValues('serviceExpenses') || [])
+    form.setValue('serviceExpenses', nextExpenses, { shouldDirty: true, shouldValidate: false })
   }
 
   const setPriceListSelection = (priceListKey: string, options?: { refreshLines?: boolean }) => {
@@ -1346,10 +1403,17 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
     })
   }, [quote?.customerId, selectedCustomer?.country, selectedCustomer?.currency, selectedCustomer?.id, selectedCustomer?.priceListKey, selectedCustomerAllowedCurrencies, priceLists])
 
+  useEffect(() => {
+    syncServiceExpensesFromLines()
+  }, [selectedExpenseGroupKey, products, sectionOptions])
+
   const subtotal = lines.reduce((sum, line) => sum + getLineBase(line), 0)
   const discountTotal = lines.reduce((sum, line) => sum + getLineDiscountTotal(line), 0)
   const taxTotal = lines.reduce((sum, line) => sum + getLineDiscountedBase(line) * (Number(line.tax || 0) / 100), 0)
-  const total = subtotal - discountTotal + taxTotal
+  const serviceExpenseSubtotal = getServiceExpenseSubtotal(serviceExpenses)
+  const serviceExpenseTaxTotal = getServiceExpenseTaxTotal(serviceExpenses)
+  const serviceExpenseGrandTotal = getServiceExpenseGrandTotal(serviceExpenses)
+  const total = subtotal - discountTotal + taxTotal + serviceExpenseGrandTotal
 
   const addLine = () => form.setValue('lines', [...lines, createEmptyLine()], { shouldDirty: true })
   const removeLine = (index: number) => form.setValue('lines', lines.filter((_, currentIndex) => currentIndex !== index), { shouldDirty: true })
@@ -1433,11 +1497,18 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
       </DialogTrigger>
       <DialogContent className={cn('max-h-[92vh] max-w-[82rem] overflow-y-auto', customerModalOpen && 'pointer-events-none opacity-0')}>
         <DialogHeader><DialogTitle>{isEditing ? `${DOCUMENT_TYPE_TR[documentMode]} düzenle` : documentMode === 'Contract' ? 'Sözleşme oluştur' : 'Teklif oluştur'}</DialogTitle></DialogHeader>
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="mb-3 grid grid-cols-4">
+        <Tabs
+          value={activeTab}
+          onValueChange={(nextTab) => {
+            if (nextTab === 'expenses') syncServiceExpensesFromLines()
+            setActiveTab(nextTab)
+          }}
+        >
+          <TabsList className="mb-3 grid grid-cols-5">
             <TabsTrigger value="customer">Cariler</TabsTrigger>
             <TabsTrigger value="document">Belge</TabsTrigger>
             <TabsTrigger value="lines">Kalemler</TabsTrigger>
+            <TabsTrigger value="expenses">Masraflar</TabsTrigger>
             <TabsTrigger value="review">Özet</TabsTrigger>
           </TabsList>
           <TabsContent value="customer" className="space-y-4">
@@ -1616,7 +1687,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
                           onValueChange={(value) => (value === '__manual__' ? setManualMode(index) : applyProduct(index, value))}
                         />
                       </div>
-                      <div><Label>Grup</Label><Select value={line.sectionKey} onValueChange={(value) => form.setValue(`lines.${index}.sectionKey`, value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{sectionOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
+                      <div><Label>Grup</Label><Select value={line.sectionKey} onValueChange={(value) => form.setValue(`lines.${index}.sectionKey`, value, { shouldDirty: true, shouldValidate: true })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{sectionOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
                       <div><Label>Ürün kodu</Label><Input value={line.details?.code || line.sku || ''} onChange={(event) => form.setValue(`lines.${index}.details.code`, event.target.value)} /></div>
                       <div><Label>Birim</Label><Input value={line.unit || ''} onChange={(event) => form.setValue(`lines.${index}.unit`, event.target.value)} /></div>
                       <div className="md:col-span-3"><Label>Açıklama / satış birimi</Label><Input value={line.name} onChange={(event) => form.setValue(`lines.${index}.name`, event.target.value)} /></div>
@@ -1636,8 +1707,56 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
             </div>
           </TabsContent>
 
+          <TabsContent value="expenses" className="space-y-3">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Hizmetler & montaj masrafları</CardTitle>
+                <CardDescription>Kalemlerde seçilen ürün gruplarına göre Excel&apos;deki HİZMETLER & MONTAJ bölümüne yazılacak kategori bazlı masrafları girin.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {serviceExpenses.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Masraf yazılacak ürün grubu yok. Önce kalemler sayfasında ürün grubu seçin.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {serviceExpenses.map((expense, index) => (
+                      <div key={expense.categoryKey || index} className="grid gap-3 rounded-md border border-border/70 p-3 md:grid-cols-[minmax(180px,1fr)_160px_120px_minmax(150px,auto)] md:items-end">
+                        <div>
+                          <Label>Ürün kategori</Label>
+                          <Input value={expense.categoryLabel || ''} readOnly />
+                        </div>
+                        <div>
+                          <Label>{`Masraf (${getCurrencySymbol(form.watch('currency'))})`}</Label>
+                          <NumericEditor
+                            value={Number(expense.amount || 0)}
+                            onValueChange={(value) => form.setValue(`serviceExpenses.${index}.amount`, value, { shouldDirty: true, shouldValidate: true })}
+                          />
+                        </div>
+                        <div>
+                          <Label>KDV %</Label>
+                          <NumericEditor
+                            value={Number(expense.tax ?? 20)}
+                            onValueChange={(value) => form.setValue(`serviceExpenses.${index}.tax`, value, { shouldDirty: true, shouldValidate: true })}
+                          />
+                        </div>
+                        <div className="text-sm">
+                          <p className="text-muted-foreground">Yekün</p>
+                          <p className="font-semibold">{formatDocumentAmount(Number(expense.amount || 0) * (1 + Number(expense.tax || 0) / 100), form.watch('currency'))}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="grid gap-2 rounded-md bg-muted/30 p-3 text-sm md:grid-cols-3">
+                  <span>Masraf ara toplam: {formatDocumentAmount(serviceExpenseSubtotal, form.watch('currency'))}</span>
+                  <span>KDV: {formatDocumentAmount(serviceExpenseTaxTotal, form.watch('currency'))}</span>
+                  <span>Yekün: {formatDocumentAmount(serviceExpenseGrandTotal, form.watch('currency'))}</span>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
             <TabsContent value="review" className="space-y-3">
-              <Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Belge türü: {DOCUMENT_TYPE_TR[documentMode]}</p><p>Müşteri: {form.watch('customerName') || selectedCustomer?.name || '-'}</p><p>Hazırlayan: {preparedByDisplayName || '-'}</p><p>Satıcı firma: {getSellerCompanyLabel(sellerCompanies, form.watch('sellerCompanyKey'))}</p><p>Fiyat listesi: {selectedPriceList.label}</p><p>Para birimi: {getCurrencySymbol(form.watch('currency'))} {getCurrencyLabel(form.watch('currency'))}</p><p>Kur: {formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p><p>Teslim tarihi: {form.watch('delivery') ? formatDate(form.watch('delivery')) : '-'}</p><p>Şablon: {templateLabel(documentMode, form.watch('templateKey'))}</p><p>Satır sayısı: {lines.length}</p><p>Ara toplam: {formatDocumentAmount(subtotal, form.watch('currency'))}</p><p>Toplam iskonto: {formatDocumentAmount(discountTotal, form.watch('currency'))}</p><p>KDV: {formatDocumentAmount(taxTotal, form.watch('currency'))}</p><p>Genel toplam: {formatDocumentAmount(total, form.watch('currency'))}</p></CardContent></Card>
+              <Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Belge türü: {DOCUMENT_TYPE_TR[documentMode]}</p><p>Müşteri: {form.watch('customerName') || selectedCustomer?.name || '-'}</p><p>Hazırlayan: {preparedByDisplayName || '-'}</p><p>Satıcı firma: {getSellerCompanyLabel(sellerCompanies, form.watch('sellerCompanyKey'))}</p><p>Fiyat listesi: {selectedPriceList.label}</p><p>Para birimi: {getCurrencySymbol(form.watch('currency'))} {getCurrencyLabel(form.watch('currency'))}</p><p>Kur: {formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p><p>Teslim tarihi: {form.watch('delivery') ? formatDate(form.watch('delivery')) : '-'}</p><p>Şablon: {templateLabel(documentMode, form.watch('templateKey'))}</p><p>Satır sayısı: {lines.length}</p><p>Ara toplam: {formatDocumentAmount(subtotal, form.watch('currency'))}</p><p>Toplam iskonto: {formatDocumentAmount(discountTotal, form.watch('currency'))}</p><p>Ürün KDV: {formatDocumentAmount(taxTotal, form.watch('currency'))}</p><p>Hizmetler & montaj yekün: {formatDocumentAmount(serviceExpenseGrandTotal, form.watch('currency'))}</p><p>Genel toplam: {formatDocumentAmount(total, form.watch('currency'))}</p></CardContent></Card>
           </TabsContent>
         </Tabs>
         <DialogFooter><Button type="button" onClick={handleSaveClick} disabled={saving}>{saving ? 'Kaydediliyor...' : isEditing ? 'Değişiklikleri kaydet' : 'Kaydet'}</Button></DialogFooter>

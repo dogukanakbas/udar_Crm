@@ -30,7 +30,7 @@ import type { Company } from '@/types'
 
 export const companySchema = z.object({
   name: z.string().min(2),
-  industry: z.string().optional().default(''),
+  industry: z.string().max(50, 'Sektör / grup en fazla 50 karakter olabilir').optional().default(''),
   region: z.string().optional().default(''),
   country: z.string().optional().default(DEFAULT_COMPANY_COUNTRY_LABEL),
   currency: z.string().optional().default('TRY'),
@@ -67,6 +67,33 @@ const getDefaultValues = (company?: Company): CompanyFormValues => ({
   phone: company?.phone ?? '',
   email: company?.email ?? '',
 })
+
+const API_FIELD_LABELS: Record<string, string> = {
+  name: 'Ad',
+  group: 'Sektör / grup',
+  email: 'E-posta',
+  phone: 'Telefon',
+  currency: 'Para birimi',
+  price_list_key: 'Fiyat listesi',
+  country: 'Ülke',
+}
+
+const getApiErrorMessage = (err: any) => {
+  const detail = err?.response?.data
+  if (!detail) return 'Kaydedilemedi'
+  if (typeof detail === 'string') return detail
+  if (typeof detail.detail === 'string') return detail.detail
+  if (typeof detail !== 'object') return 'Kaydedilemedi'
+
+  const firstEntry = Object.entries(detail)[0]
+  if (!firstEntry) return 'Kaydedilemedi'
+
+  const [field, value] = firstEntry
+  const message = Array.isArray(value) ? value[0] : value
+  const renderedMessage = typeof message === 'string' ? message : 'Geçersiz değer'
+  const label = API_FIELD_LABELS[field] || field
+  return `${label}: ${renderedMessage}`
+}
 
 type CompanyModalProps = {
   children?: ReactNode
@@ -207,7 +234,7 @@ export function CompanyModal({ children, company, onSubmit, open, onOpenChange }
             </div>
             <div className="flex flex-col gap-2">
               <Label>Sektör / grup</Label>
-              <Input {...form.register('industry')} />
+              <Input maxLength={50} {...form.register('industry')} />
             </div>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
@@ -354,13 +381,7 @@ export function CompanyModal({ children, company, onSubmit, open, onOpenChange }
                 form.reset(getDefaultValues(company))
                 setModalOpen(false)
               } catch (err: any) {
-                const detail = err?.response?.data
-                if (detail && typeof detail === 'object') {
-                  const msg = detail.email?.[0] || detail.name?.[0] || detail.detail || 'Kaydedilemedi'
-                  setSubmitError(msg)
-                } else {
-                  setSubmitError('Kaydedilemedi')
-                }
+                setSubmitError(getApiErrorMessage(err))
               }
             })}
           >
