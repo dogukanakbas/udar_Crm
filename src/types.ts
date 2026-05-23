@@ -518,6 +518,8 @@ export interface SellerBankAccount {
   bank: string
   iban: string
   currency?: string
+  iban2?: string
+  currency2?: string
   branch?: string
   accountHolder?: string
 }
@@ -542,6 +544,8 @@ export interface SellerCompanyProfile {
   signatureName?: string
   signatureTitle?: string
   signatureLabel?: string
+  bankIbanLabel?: string
+  bankIban2Label?: string
   notes?: string
   isActive?: boolean
   sortOrder?: number

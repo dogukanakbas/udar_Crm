@@ -169,19 +169,13 @@ function SortableProductGroupCard({
             <p className="text-xs text-muted-foreground">Excel tablo başlıkları soldan sağa bu sırayla yorumlanır.</p>
           </div>
           <div className="space-y-1">
-            <Label>Teknik alt maddeler</Label>
-            <Textarea
-              rows={5}
-              value={(defaults.technical_items || []).join('\n')}
-              onChange={(event) =>
-                setTemplate(
-                  'technical_items',
-                  event.target.value.split('\n').map((value) => value.trim()).filter(Boolean)
-                )
-              }
-              placeholder="Kasa 1,2 mm&#10;TSE 12655 belgeli"
+            <Label>Varsayılan teknik madde</Label>
+            <Input
+              value={(defaults.technical_items || [])[0] || ''}
+              onChange={(event) => setTemplate('technical_items', event.target.value.trim() ? [event.target.value] : [])}
+              placeholder="Bu ürün grubu için tek satırlık varsayılan madde"
             />
-            <p className="text-xs text-muted-foreground">Her satır yalnızca bu ürün grubunun teknik maddesi olarak saklanır.</p>
+            <p className="text-xs text-muted-foreground">Ürüne özel teknik maddeler ürün kartından yönetilir; burada yalnızca tek satırlık grup varsayılanı tutulur.</p>
           </div>
         </div>
       </details>

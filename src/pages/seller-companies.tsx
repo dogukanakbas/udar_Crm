@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
@@ -36,6 +37,8 @@ type SellerCompanyFormState = {
   signature_name: string
   signature_title: string
   signature_label: string
+  bank_iban_label: string
+  bank_iban_2_label: string
   notes: string
   is_active: boolean
   sort_order: number
@@ -43,6 +46,8 @@ type SellerCompanyFormState = {
     bank: string
     iban: string
     currency: string
+    iban_2: string
+    currency_2: string
     branch: string
     account_holder: string
   }>
@@ -52,9 +57,27 @@ const createBlankBankAccount = () => ({
   bank: '',
   iban: '',
   currency: 'TRY',
+  iban_2: '',
+  currency_2: 'USD',
   branch: '',
   account_holder: '',
 })
+
+const BANK_ACCOUNT_CURRENCIES = [
+  { value: 'TRY', label: '₺ TL hesabı' },
+  { value: 'USD', label: '$ Dolar hesabı' },
+]
+
+const bankAccountCurrencySummary = (accounts: SellerBankAccount[] = []) => {
+  const visibleAccounts = accounts.filter((account) => account.bank || account.iban || account.iban2)
+  const slots = visibleAccounts.flatMap((account) => [
+    { iban: account.iban, currency: account.currency || 'TRY' },
+    { iban: account.iban2, currency: account.currency2 || 'USD' },
+  ]).filter((slot) => slot.iban)
+  const tryCount = slots.filter((slot) => slot.currency.toUpperCase() === 'TRY').length
+  const usdCount = slots.filter((slot) => slot.currency.toUpperCase() === 'USD').length
+  return `${tryCount} TL / ${usdCount} USD`
+}
 
 const createBlankSellerCompany = (): SellerCompanyFormState => ({
   key: '',
@@ -76,6 +99,8 @@ const createBlankSellerCompany = (): SellerCompanyFormState => ({
   signature_name: '',
   signature_title: '',
   signature_label: '',
+  bank_iban_label: 'Türk Lirası Hesapları',
+  bank_iban_2_label: 'Dolar Hesapları',
   notes: '',
   is_active: true,
   sort_order: 0,
@@ -102,6 +127,8 @@ const mapSellerCompanyToForm = (company: SellerCompanyProfile): SellerCompanyFor
   signature_name: company.signatureName || '',
   signature_title: company.signatureTitle || '',
   signature_label: company.signatureLabel || '',
+  bank_iban_label: company.bankIbanLabel || '1. IBAN',
+  bank_iban_2_label: company.bankIban2Label || '2. IBAN',
   notes: company.notes || '',
   is_active: company.isActive !== false,
   sort_order: Number(company.sortOrder ?? 0),
@@ -110,6 +137,8 @@ const mapSellerCompanyToForm = (company: SellerCompanyProfile): SellerCompanyFor
         bank: account.bank || '',
         iban: account.iban || '',
         currency: account.currency || 'TRY',
+        iban_2: account.iban2 || '',
+        currency_2: account.currency2 || 'USD',
         branch: account.branch || '',
         account_holder: account.accountHolder || '',
       }))
@@ -309,7 +338,7 @@ export function SellerCompaniesPage() {
                         <p>Vergi: {[company.taxOffice, company.taxNumber].filter(Boolean).join(' / ') || '-'}</p>
                         <p>İletişim: {[company.phone, company.email].filter(Boolean).join(' / ') || '-'}</p>
                         <p>Adres: {[company.city, company.country].filter(Boolean).join(', ') || '-'}</p>
-                        <p>Banka hesabı: {company.bankAccounts?.length || 0}</p>
+                        <p>Banka hesabı: {company.bankAccounts?.length || 0} ({bankAccountCurrencySummary(company.bankAccounts)})</p>
                       </div>
                     </div>
                     <RbacGuard perm="quotes.edit">
@@ -527,34 +556,74 @@ export function SellerCompaniesPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <Label>Banka hesapları</Label>
-                  <p className="text-xs text-muted-foreground">Şablondaki IBAN blokları bu listedeki sıraya göre doldurulur.</p>
+                  <p className="text-xs text-muted-foreground">Belgedeki iki IBAN kolonunun başlığını ve her bankanın iki IBAN bilgisini buradan yönetin.</p>
                 </div>
                 <Button type="button" variant="outline" size="sm" onClick={() => updateField('bank_accounts', [...form.bank_accounts, createBlankBankAccount()])}>
                   <Plus className="mr-2 h-4 w-4" />
                   Hesap ekle
                 </Button>
               </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>1. IBAN kolon başlığı</Label>
+                  <Input value={form.bank_iban_label} onChange={(event) => updateField('bank_iban_label', event.target.value)} placeholder="Türk Lirası Hesapları" />
+                </div>
+                <div className="space-y-2">
+                  <Label>2. IBAN kolon başlığı</Label>
+                  <Input value={form.bank_iban_2_label} onChange={(event) => updateField('bank_iban_2_label', event.target.value)} placeholder="Dolar Hesapları" />
+                </div>
+              </div>
               <div className="space-y-3">
                 {form.bank_accounts.map((account, index) => (
                   <div key={`bank-${index}`} className="rounded-lg border border-border/70 p-3">
-                    <div className="grid gap-3 md:grid-cols-5">
+                    <div className="grid gap-3 md:grid-cols-6">
                       <div className="space-y-2 md:col-span-2">
                         <Label>Banka adı</Label>
                         <Input value={account.bank} onChange={(event) => updateBankAccount(index, { bank: event.target.value })} />
                       </div>
-                      <div className="space-y-2 md:col-span-2">
-                        <Label>IBAN</Label>
+                      <div className="space-y-2 md:col-span-3">
+                        <Label>1. IBAN</Label>
                         <Input value={account.iban} onChange={(event) => updateBankAccount(index, { iban: event.target.value })} />
                       </div>
                       <div className="space-y-2">
-                        <Label>Para birimi</Label>
-                        <Input value={account.currency} onChange={(event) => updateBankAccount(index, { currency: event.target.value.toUpperCase() })} />
+                        <Label>1. para birimi</Label>
+                        <Select value={account.currency || 'TRY'} onValueChange={(value) => updateBankAccount(index, { currency: value })}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {BANK_ACCOUNT_CURRENCIES.map((currency) => (
+                              <SelectItem key={currency.value} value={currency.value}>
+                                {currency.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2 md:col-span-3">
+                        <Label>2. IBAN (opsiyonel)</Label>
+                        <Input value={account.iban_2} onChange={(event) => updateBankAccount(index, { iban_2: event.target.value })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>2. para birimi</Label>
+                        <Select value={account.currency_2 || 'USD'} onValueChange={(value) => updateBankAccount(index, { currency_2: value })}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {BANK_ACCOUNT_CURRENCIES.map((currency) => (
+                              <SelectItem key={currency.value} value={currency.value}>
+                                {currency.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                       <div className="space-y-2">
                         <Label>Şube</Label>
                         <Input value={account.branch} onChange={(event) => updateBankAccount(index, { branch: event.target.value })} />
                       </div>
-                      <div className="space-y-2 md:col-span-3">
+                      <div className="space-y-2 md:col-span-4">
                         <Label>Hesap sahibi</Label>
                         <Input value={account.account_holder} onChange={(event) => updateBankAccount(index, { account_holder: event.target.value })} />
                       </div>

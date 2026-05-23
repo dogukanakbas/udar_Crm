@@ -109,13 +109,15 @@ DEFAULT_SELLER_PROFILES = [
         'signature_title': '',
         'signature_label': '',
         'notes': '',
+        'bank_iban_label': 'Türk Lirası Hesapları',
+        'bank_iban_2_label': 'Dolar Hesapları',
         'is_active': True,
         'sort_order': 0,
         'bank_accounts': [
-            {'bank': 'Türkiye İş Bankası', 'iban': 'TR24 0006 4000 0018 6003 9367 45'},
-            {'bank': 'Ziraat Bankası', 'iban': 'TR07 0001 0021 6935 0399 4450 09'},
-            {'bank': 'Albaraka Türk K.Bank.', 'iban': 'TR66 0020 3000 0056 3735 0000 02'},
-            {'bank': 'Vakıflar Bankası', 'iban': 'TR57 0001 5001 5800 7284 2692 06'},
+            {'bank': 'Türkiye İş Bankası', 'iban': 'TR24 0006 4000 0018 6003 9367 45', 'currency': 'TRY'},
+            {'bank': 'Ziraat Bankası', 'iban': 'TR07 0001 0021 6935 0399 4450 09', 'currency': 'TRY'},
+            {'bank': 'Albaraka Türk K.Bank.', 'iban': 'TR66 0020 3000 0056 3735 0000 02', 'currency': 'TRY'},
+            {'bank': 'Vakıflar Bankası', 'iban': 'TR57 0001 5001 5800 7284 2692 06', 'currency': 'TRY'},
         ],
     },
     {
@@ -137,13 +139,15 @@ DEFAULT_SELLER_PROFILES = [
         'signature_title': '',
         'signature_label': '',
         'notes': '',
+        'bank_iban_label': 'Türk Lirası Hesapları',
+        'bank_iban_2_label': 'Dolar Hesapları',
         'is_active': True,
         'sort_order': 1,
         'bank_accounts': [
-            {'bank': 'Garanti BBVA Bankası', 'iban': 'TR14 0006 2000 1120 0006 2913 29'},
-            {'bank': 'Ziraat Bankası', 'iban': 'TR72 0001 0021 6994 2088 8850 01'},
-            {'bank': 'Albaraka Türk K.Bank.', 'iban': 'TR25 0020 3000 0770 5276 0000 01'},
-            {'bank': 'Vakıflar Bankası', 'iban': ''},
+            {'bank': 'Garanti BBVA Bankası', 'iban': 'TR14 0006 2000 1120 0006 2913 29', 'currency': 'TRY'},
+            {'bank': 'Ziraat Bankası', 'iban': 'TR72 0001 0021 6994 2088 8850 01', 'currency': 'TRY'},
+            {'bank': 'Albaraka Türk K.Bank.', 'iban': 'TR25 0020 3000 0770 5276 0000 01', 'currency': 'TRY'},
+            {'bank': 'Vakıflar Bankası', 'iban': '', 'currency': 'TRY'},
         ],
     },
 ]
@@ -166,7 +170,7 @@ YEKUN_SUMMARY_GROUPS = [
     ('bathroom', 'BANYO DOLAPLARI'),
     ('accessory', 'AKSESUARLAR'),
     ('laminate', 'PARKE'),
-    ('service', 'HİZMETLER & MONTAJ'),
+    ('service', 'MASRAFLAR'),
 ]
 SELLER_MASTER_BODY_FONT_SIZE = 12
 SELLER_MASTER_TABLE_FONT_SIZE = 11
@@ -506,12 +510,23 @@ def resolve_product_document_defaults(product=None, fallback_section_key='', lin
     }
 
 
+def _line_technical_items(line):
+    details = dict(getattr(line, 'details', {}) or {})
+    items = details.get('technicalItems') or details.get('technical_items')
+    if not isinstance(items, list):
+        product = getattr(line, 'product', None)
+        items = resolve_product_document_defaults(product, fallback_section_key=line.section_key, line_name=line.name).get('technical_items') if product else []
+    return [str(item or '').strip() for item in items if str(item or '').strip()]
+
+
 def _normalize_seller_bank_account(account):
     item = dict(account or {})
     return {
         'bank': str(item.get('bank') or '').strip(),
         'iban': str(item.get('iban') or '').strip(),
         'currency': _normalize_currency_code(item.get('currency') or 'TRY'),
+        'iban_2': str(item.get('iban_2') or item.get('iban2') or '').strip(),
+        'currency_2': _normalize_currency_code(item.get('currency_2') or item.get('currency2') or 'USD'),
         'branch': str(item.get('branch') or '').strip(),
         'account_holder': str(item.get('account_holder') or item.get('accountHolder') or '').strip(),
     }
@@ -542,14 +557,44 @@ def _normalize_seller_profile(profile, fallback=None, sort_order=0):
         'signature_title': str(source.get('signature_title') or '').strip(),
         'signature_label': str(source.get('signature_label') or '').strip(),
         'notes': str(source.get('notes') or '').strip(),
+        'bank_iban_label': str(source.get('bank_iban_label') or source.get('bankIbanLabel') or '1. IBAN').strip() or '1. IBAN',
+        'bank_iban_2_label': str(source.get('bank_iban_2_label') or source.get('bankIban2Label') or '2. IBAN').strip() or '2. IBAN',
         'is_active': bool(source.get('is_active', True)),
         'sort_order': int(source.get('sort_order', sort_order) or sort_order),
         'bank_accounts': [
             normalized
             for normalized in (_normalize_seller_bank_account(item) for item in (source.get('bank_accounts') or []))
-            if normalized['bank'] or normalized['iban'] or normalized['branch'] or normalized['account_holder']
+            if normalized['bank'] or normalized['iban'] or normalized['iban_2'] or normalized['branch'] or normalized['account_holder']
         ],
     }
+
+
+def _seller_bank_accounts_with_ibans(seller):
+    return [
+        account
+        for account in seller.get('bank_accounts') or []
+        if account.get('bank') or account.get('iban') or account.get('iban_2')
+    ]
+
+
+def _seller_has_second_iban(bank_accounts):
+    return any(str((account or {}).get('iban_2') or '').strip() for account in bank_accounts or [])
+
+
+def _bank_iban_display(account, slot=1, show_currency=True):
+    iban = str(account.get('iban_2' if slot == 2 else 'iban') or '').strip()
+    if not iban:
+        return ''
+    if not show_currency:
+        return iban
+    currency = account.get('currency_2' if slot == 2 else 'currency') or ('USD' if slot == 2 else 'TRY')
+    return f'{_currency_symbol(currency)} {iban}'
+
+
+def _seller_bank_iban_label(seller, slot=1):
+    key = 'bank_iban_2_label' if slot == 2 else 'bank_iban_label'
+    fallback = '2. IBAN' if slot == 2 else '1. IBAN'
+    return str((seller or {}).get(key) or fallback).strip() or fallback
 
 
 def get_default_seller_profiles():
@@ -1008,13 +1053,19 @@ def list_template_placeholders():
                 {'token': '{saticiFirma1.unvan}', 'label': '1. satıcı firma ünvanı'},
                 {'token': '{saticiFirma1.banka1.ad}', 'label': '1. satıcı firmanın 1. banka adı'},
                 {'token': '{saticiFirma1.banka1.iban}', 'label': '1. satıcı firmanın 1. IBAN bilgisi'},
+                {'token': '{saticiFirma1.banka1.paraBirimi}', 'label': '1. satıcı firmanın 1. IBAN para birimi'},
+                {'token': '{saticiFirma1.banka1.iban2}', 'label': '1. satıcı firmanın aynı bankadaki 2. IBAN bilgisi'},
+                {'token': '{saticiFirma1.banka1.paraBirimi2}', 'label': '1. satıcı firmanın aynı bankadaki 2. IBAN para birimi'},
                 {'token': '{saticiFirma2.unvan}', 'label': '2. satıcı firma ünvanı'},
                 {'token': '{saticiFirma2.banka1.ad}', 'label': '2. satıcı firmanın 1. banka adı'},
                 {'token': '{saticiFirma2.banka1.iban}', 'label': '2. satıcı firmanın 1. IBAN bilgisi'},
+                {'token': '{saticiFirma2.banka1.paraBirimi}', 'label': '2. satıcı firmanın 1. IBAN para birimi'},
+                {'token': '{saticiFirma2.banka1.iban2}', 'label': '2. satıcı firmanın aynı bankadaki 2. IBAN bilgisi'},
+                {'token': '{saticiFirma2.banka1.paraBirimi2}', 'label': '2. satıcı firmanın aynı bankadaki 2. IBAN para birimi'},
             ],
         },
         {
-            'group': 'Kalemler',
+            'group': 'Ürün Grupları',
             'description': 'Kalem bazlı alanlar sıra numarasıyla kullanılır. Örnek: kalem1, kalem2.',
             'items': [
                 {'token': '{kalem1.kod}', 'label': '1. kalem ürün kodu'},
@@ -1347,7 +1398,7 @@ def _build_reportlab_document_pdf_export(quote):
             qty_total += qty
             service_rows.append([p(details.get('code') or getattr(product, 'sku', '') or '', small), p(line.name or '', small), p(f'{qty:,.2f}', small), p(money(subtotal), small), p(money(tax), small), p(money(subtotal + tax), small)])
     service_rows.append([p('TOPLAM', small), '', p(f'{qty_total:,.2f}', small), p(money(subtotal_total), small), p(money(tax_total), small), p(money(grand_total), small)])
-    story.append(p('HİZMETLER & MONTAJ', heading))
+    story.append(p('MASRAFLAR', heading))
     story.append(basic_table(service_rows, widths=[28 * mm, 94 * mm, 24 * mm, 34 * mm, 32 * mm, 35 * mm], header_rows=1))
     story.append(Spacer(1, 8))
 
@@ -1356,7 +1407,7 @@ def _build_reportlab_document_pdf_export(quote):
     story.append(basic_table([
         [p('ÖDEME KOŞULU', heading), p(quote.payment_terms or config.get('paymentOption') or config.get('payment_option') or '')],
         [p('TESLİM TİPİ', heading), p(config.get('deliveryType') or config.get('delivery_type') or '')],
-        [p('TESLİM TARİHİ', heading), p(quote.delivery_terms or '')],
+        [p('TESLİM TARİHİ', heading), p(_format_date_text(quote.delivery_terms))],
     ], widths=[45 * mm, 210 * mm]))
     story.append(Spacer(1, 6))
 
@@ -1368,12 +1419,24 @@ def _build_reportlab_document_pdf_export(quote):
         story.append(basic_table([[p(term, small)] for term in terms], widths=[255 * mm]))
         story.append(Spacer(1, 6))
 
-    bank_rows = [[p('Banka', heading), p('IBAN', heading)]]
-    for account in seller.get('bank_accounts') or []:
-        if account.get('bank') and account.get('iban'):
-            bank_rows.append([p(_normalize_bank_name(account.get('bank', '')), small), p(account.get('iban', ''), small)])
+    bank_accounts = _seller_bank_accounts_with_ibans(seller)
+    has_second_iban = _seller_has_second_iban(bank_accounts)
+    if has_second_iban:
+        bank_rows = [[p('Banka', heading), p(_seller_bank_iban_label(seller, 1), heading), p(_seller_bank_iban_label(seller, 2), heading)]]
+        bank_widths = [55 * mm, 100 * mm, 100 * mm]
+    else:
+        bank_rows = [[p('Banka', heading), p('IBAN', heading)]]
+        bank_widths = [55 * mm, 200 * mm]
+    for account in bank_accounts or [{}]:
+        row = [
+            p(_normalize_bank_name(account.get('bank', '')), small),
+            p(_bank_iban_display(account, 1, show_currency=has_second_iban), small),
+        ]
+        if has_second_iban:
+            row.append(p(_bank_iban_display(account, 2), small))
+        bank_rows.append(row)
     story.append(p('FİRMA ÜNVANI & IBANLAR', heading))
-    story.append(basic_table(bank_rows, widths=[70 * mm, 185 * mm], header_rows=1))
+    story.append(basic_table(bank_rows, widths=bank_widths, header_rows=1))
     story.append(Spacer(1, 8))
 
     story.append(basic_table([[p(f"SATICI\n{_normalize_display_name(seller.get('display_name', ''))}", normal), p(f"ALICI\n{customer.get('name') or getattr(quote.customer, 'name', '') or ''}", normal)]], widths=[127 * mm, 128 * mm]))
@@ -1442,7 +1505,7 @@ def _add_header_logo(ws, profile, anchor, max_width, max_height):
         image = XLImage(str(logo_path))
     except Exception:
         return
-    image = _crop_excel_image_content(image, padding=6)
+    image = _crop_excel_image_content(image, padding=0)
     image = _fit_excel_image(image, max_width, max_height)
     ws.add_image(image, anchor)
 
@@ -1474,8 +1537,7 @@ def _apply_seller_master_header_branding(ws, quote):
 
     _clear_logo_frame(ws, ws['B2'])
     _clear_logo_frame(ws, ws['F2'])
-    _add_header_logo(ws, fixed_left, 'B2', 260, 86)
-    _add_header_logo(ws, selected_seller, 'G2', 260, 86)
+    _add_header_logo(ws, fixed_left, 'B2', 330, 112)
 
     _set_header_text(ws, 'J2', _normalize_display_name(selected_seller.get('display_name', '')), bold=True, size=9)
     _set_header_text(ws, 'J3', _join_tax(selected_seller.get('tax_office', ''), selected_seller.get('tax_number', '')), size=8)
@@ -1547,7 +1609,8 @@ def _dynamic_tables_row_count(quote, groups):
         return 1
     total = 0
     for group in groups:
-        total += 2 + len(group['lines']) + 1 + 3 + len(group.get('technical_items') or []) + 1
+        technical_count = sum((len(_line_technical_items(line)) for line in group['lines']), 0)
+        total += 2 + len(group['lines']) + 1 + 3 + technical_count + 1
     return total + _service_summary_row_count(quote, groups)
 
 
@@ -1617,6 +1680,30 @@ def _dynamic_is_numeric_column(header):
     return any(term in key for term in ('miktar', 'adet', 'fiyat', 'tutar', 'iskonto', 'kdv', 'toplam', 'yekun'))
 
 
+def _dynamic_product_group_column_alignment(columns, index):
+    normalized = [_normalize_column_key(column) for column in columns]
+    try:
+        sales_unit_index = next(
+            idx
+            for idx, key in enumerate(normalized)
+            if 'satisbirimi' in key or 'satbirimi' in key
+        )
+        net_unit_index = next(
+            idx
+            for idx, key in enumerate(normalized)
+            if 'net' in key and ('birim' in key or 'fiyat' in key)
+        )
+    except StopIteration:
+        header = columns[index] if 0 <= index < len(columns) else ''
+        return 'right' if _dynamic_is_numeric_column(header) else 'left'
+
+    if sales_unit_index < index <= net_unit_index:
+        return 'center'
+
+    header = columns[index] if 0 <= index < len(columns) else ''
+    return 'right' if _dynamic_is_numeric_column(header) else 'left'
+
+
 def _format_quantity(value):
     amount = Decimal(value or 0)
     if amount == amount.to_integral_value():
@@ -1648,7 +1735,6 @@ def _line_dynamic_group(line):
         'label': resolved['label'],
         'order': resolved['order'],
         'columns': resolved['columns'],
-        'technical_items': resolved['technical_items'],
         'lines': [],
     }
 
@@ -1726,11 +1812,12 @@ def _write_dynamic_product_group(ws, quote, group, row, column, physical_width=N
             cell.font = _seller_master_font(size=SELLER_MASTER_TABLE_FONT_SIZE)
             for physical_column in range(current_column, current_column + span):
                 ws.cell(row, physical_column).border = border
+            horizontal_alignment = _dynamic_product_group_column_alignment(columns, offset)
             cell.alignment = Alignment(
-                horizontal='right' if _dynamic_is_numeric_column(header) else 'left',
+                horizontal=horizontal_alignment,
                 vertical='center',
                 wrap_text=True,
-                shrink_to_fit=_dynamic_is_numeric_column(header),
+                shrink_to_fit=_dynamic_is_numeric_column(header) or horizontal_alignment == 'center',
             )
             if not _dynamic_is_numeric_column(header):
                 required_height = max(required_height, _dynamic_text_row_height(value, _dynamic_span_width(ws, current_column, span), base=20, line_height=14))
@@ -1774,15 +1861,16 @@ def _write_dynamic_product_group(ws, quote, group, row, column, physical_width=N
         _dynamic_set_row_height(ws, row, _dynamic_text_row_height(label, _dynamic_span_width(ws, max(column, last_column - 1), 1), base=18, max_height=48))
         row += 1
 
-    for item in group.get('technical_items') or []:
-        _unmerge_overlapping_range(ws, row, row, column, last_column)
-        ws.merge_cells(start_row=row, start_column=column, end_row=row, end_column=last_column)
-        cell = ws.cell(row, column)
-        cell.value = f'* {item}'
-        cell.font = _seller_master_font(color='203864', italic=True, size=SELLER_MASTER_TABLE_FONT_SIZE)
-        cell.alignment = Alignment(wrap_text=True)
-        _dynamic_set_row_height(ws, row, _dynamic_text_row_height(cell.value, _dynamic_span_width(ws, column, last_column - column + 1), base=18, max_height=72))
-        row += 1
+    for line in group['lines']:
+        for item in _line_technical_items(line):
+            _unmerge_overlapping_range(ws, row, row, column, last_column)
+            ws.merge_cells(start_row=row, start_column=column, end_row=row, end_column=last_column)
+            cell = ws.cell(row, column)
+            cell.value = f'* {line.name}: {item}'
+            cell.font = _seller_master_font(color='203864', italic=True, size=SELLER_MASTER_TABLE_FONT_SIZE)
+            cell.alignment = Alignment(horizontal='left', vertical='center', wrap_text=False, shrink_to_fit=True)
+            ws.row_dimensions[row].height = 18
+            row += 1
 
     return row
 
@@ -1832,7 +1920,7 @@ def _write_service_summary_group(ws, quote, groups, row, column, physical_width)
     _unmerge_overlapping_range(ws, row, row, column, last_column)
     ws.merge_cells(start_row=row, start_column=column, end_row=row, end_column=last_column)
     title = ws.cell(row, column)
-    title.value = 'HİZMETLER & MONTAJ'
+    title.value = 'MASRAFLAR'
     title.fill = dark_fill
     title.font = _seller_master_font(color='FFFFFF', bold=True, size=SELLER_MASTER_HEADER_FONT_SIZE)
     title.alignment = Alignment(horizontal='center', vertical='center')
@@ -1925,12 +2013,10 @@ def _render_seller_master_tail(ws, quote, start_row, banner_images=None):
         ws.delete_rows(start_row, ws.max_row - start_row + 1)
     _reset_seller_master_columns(ws)
 
-    row = start_row
-    row = _write_yekun_summary_tail(ws, quote, row)
-    payment_start = row + 1
-    row = _write_payment_delivery_tail(ws, quote, payment_start)
+    yekun_end = _write_yekun_summary_tail(ws, quote, start_row, start_col=2, end_col=7)
+    payment_end = _write_payment_delivery_tail(ws, quote, start_row, start_col=8, end_col=13)
 
-    terms_start = row + 1
+    terms_start = max(yekun_end, payment_end) + 1
     row = _write_terms_tail(ws, quote, terms_start)
 
     bank_start = row + 1
@@ -1939,10 +2025,10 @@ def _render_seller_master_tail(ws, quote, start_row, banner_images=None):
     signature_start = row + 2
     row = _write_signature_tail(ws, quote, signature_start)
 
-    banner_start = row + 1
-    _write_bottom_banner_tail(ws, banner_start, banner_images or [])
+    prepared_banner = _prepare_bottom_banner_tail(ws, banner_images or [])
+    banner_start = _bottom_banner_footer_start_row(ws, bank_start, row + 1, prepared_banner)
+    _write_bottom_banner_tail(ws, banner_start, prepared_banner)
 
-    _add_manual_page_break_before(ws, terms_start)
     _add_manual_page_break_before(ws, bank_start)
 
 
@@ -1991,16 +2077,20 @@ def _tail_merge(ws, row, start_col, end_col, value='', fill=None, font=None, ali
     return cell
 
 
-def _tail_section_header(ws, row, title):
+def _tail_section_header(ws, row, title, start_col=2, end_col=13):
     styles = _tail_styles()
-    _tail_merge(ws, row, 2, 13, _turkish_upper(title), styles['title_fill'], styles['white_font'], styles['center'], styles['section_border'])
+    _tail_merge(ws, row, start_col, end_col, _turkish_upper(title), styles['title_fill'], styles['white_font'], styles['center'], styles['section_border'])
     ws.row_dimensions[row].height = 28
 
 
-def _tail_label_value(ws, row, label, value):
+def _tail_label_value(ws, row, label, value, start_col=2, end_col=13):
     styles = _tail_styles()
-    _tail_merge(ws, row, 2, 4, _turkish_upper(label), styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
-    _tail_merge(ws, row, 5, 13, value, None, styles['text_font'], styles['left'], styles['section_border'])
+    width = max(2, end_col - start_col + 1)
+    label_width = 3 if width >= 6 else max(1, width // 2)
+    label_end_col = min(end_col - 1, start_col + label_width - 1)
+    value_start_col = min(end_col, label_end_col + 1)
+    _tail_merge(ws, row, start_col, label_end_col, _turkish_upper(label), styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
+    _tail_merge(ws, row, value_start_col, end_col, value, None, styles['text_font'], styles['left'], styles['section_border'])
     ws.row_dimensions[row].height = 28
 
 
@@ -2008,7 +2098,7 @@ def _yekun_summary_label(group):
     key = str(group.get('key') or '').strip()
     label = str(group.get('label') or '').strip() or _section_label(key)
     if key == 'service':
-        return 'HİZMETLER & MONTAJ'
+        return 'MASRAFLAR'
     normalized_label = _normalize_document_group_text(label)
     if normalized_label.endswith('grubu'):
         return _turkish_upper(label)
@@ -2033,30 +2123,32 @@ def _build_yekun_summary_rows(quote):
         _add_yekun_summary_row(rows_by_key, group.get('key'), _yekun_summary_label(group), amount)
 
     service_expense_total = sum((item['amount'] + item['tax'] for item in _service_expense_rows(quote)), Decimal('0'))
-    _add_yekun_summary_row(rows_by_key, 'service', 'HİZMETLER & MONTAJ', service_expense_total)
+    _add_yekun_summary_row(rows_by_key, 'service', 'MASRAFLAR', service_expense_total)
     return list(rows_by_key.values())
 
 
-def _write_yekun_summary_tail(ws, quote, row):
+def _write_yekun_summary_tail(ws, quote, row, start_col=2, end_col=13):
     styles = _tail_styles()
     currency_code = _quote_currency(quote)
     summary_rows = _build_yekun_summary_rows(quote)
+    label_end_col = min(end_col - 1, start_col + 2)
+    amount_start_col = min(end_col, label_end_col + 1)
 
-    _tail_section_header(ws, row, 'YEKÜN İCMAALLERİ')
+    _tail_section_header(ws, row, 'YEKÜN İCMAALLERİ', start_col, end_col)
     current_row = row + 1
     for summary in summary_rows:
         label = summary['label']
         amount = summary['amount']
-        _tail_merge(ws, current_row, 2, 4, label, styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
-        amount_cell = _tail_merge(ws, current_row, 5, 13, float(amount), None, styles['text_font'], styles['left'], styles['section_border'])
+        _tail_merge(ws, current_row, start_col, label_end_col, label, styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
+        amount_cell = _tail_merge(ws, current_row, amount_start_col, end_col, float(amount), None, styles['text_font'], styles['left'], styles['section_border'])
         amount_cell.number_format = _currency_number_format(currency_code)
         amount_cell.alignment = Alignment(horizontal='right', vertical='center', shrink_to_fit=True)
         ws.row_dimensions[current_row].height = 26
         current_row += 1
 
     grand_total = sum((summary['amount'] for summary in summary_rows), Decimal('0'))
-    _tail_merge(ws, current_row, 2, 4, 'TOPLAM YEKÜN', styles['title_fill'], styles['white_font'], styles['center'], styles['section_border'])
-    total_cell = _tail_merge(ws, current_row, 5, 13, float(grand_total), None, _seller_master_font(color='203864', bold=True, size=SELLER_MASTER_BODY_FONT_SIZE), styles['left'], styles['section_border'])
+    _tail_merge(ws, current_row, start_col, label_end_col, 'TOPLAM YEKÜN', styles['title_fill'], styles['white_font'], styles['center'], styles['section_border'])
+    total_cell = _tail_merge(ws, current_row, amount_start_col, end_col, float(grand_total), None, _seller_master_font(color='203864', bold=True, size=SELLER_MASTER_BODY_FONT_SIZE), styles['left'], styles['section_border'])
     total_cell.number_format = _currency_number_format(currency_code)
     total_cell.alignment = Alignment(horizontal='right', vertical='center', shrink_to_fit=True)
     ws.row_dimensions[current_row].height = 28
@@ -2071,19 +2163,19 @@ def _config_text(config, *keys):
     return ''
 
 
-def _write_payment_delivery_tail(ws, quote, row):
+def _write_payment_delivery_tail(ws, quote, row, start_col=2, end_col=13):
     config = quote.contract_config or {}
     payment_value = quote.payment_terms or _config_text(config, 'paymentOption', 'payment_option')
     delivery_type = _config_text(config, 'deliveryType', 'delivery_type')
-    delivery_date = quote.delivery_terms or _config_text(config, 'deliveryDate', 'delivery_date')
+    delivery_date = _format_date_text(quote.delivery_terms or _config_text(config, 'deliveryDate', 'delivery_date'))
     notes = quote.notes or _config_text(config, 'notes')
 
-    _tail_section_header(ws, row, 'ÖDEME VE TESLİM')
-    _tail_label_value(ws, row + 1, 'ÖDEME KOŞULU', payment_value)
-    _tail_label_value(ws, row + 2, 'TESLİM TİPİ', delivery_type)
-    _tail_label_value(ws, row + 3, 'TESLİM TARİHİ', delivery_date)
+    _tail_section_header(ws, row, 'ÖDEME VE TESLİM', start_col, end_col)
+    _tail_label_value(ws, row + 1, 'ÖDEME KOŞULU', payment_value, start_col, end_col)
+    _tail_label_value(ws, row + 2, 'TESLİM TİPİ', delivery_type, start_col, end_col)
+    _tail_label_value(ws, row + 3, 'TESLİM TARİHİ', delivery_date, start_col, end_col)
     if notes:
-        _tail_label_value(ws, row + 4, 'NOTLAR', notes)
+        _tail_label_value(ws, row + 4, 'NOTLAR', notes, start_col, end_col)
         return row + 5
     return row + 4
 
@@ -2106,7 +2198,7 @@ def _write_terms_tail(ws, quote, row):
         current_row += 1
     if quote.document_type == 'Contract':
         contract_date = _parse_date(config.get('contract_date')) or _timezone_fallback(quote.created_at)
-        closing = f'İşbu sözleşme {contract_date.strftime("%d/%m/%Y")} tarihinde iki nüsha olarak imzalanmış ve yürürlüğe girmiştir.'
+        closing = f'İşbu sözleşme {contract_date.strftime("%d.%m.%Y")} tarihinde iki nüsha olarak imzalanmış ve yürürlüğe girmiştir.'
         _tail_merge(ws, current_row, 2, 13, closing, None, styles['text_font'], styles['left'], styles['thin_border'])
         ws.row_dimensions[current_row].height = max(26, min(72, 22 + (len(closing) // 90) * 15))
         current_row += 1
@@ -2115,17 +2207,30 @@ def _write_terms_tail(ws, quote, row):
 
 def _write_bank_tail(ws, quote, row):
     seller = _selected_seller_profile(quote)
-    currency_symbol = _currency_symbol(_quote_currency(quote))
     styles = _tail_styles()
+    text_alignment = Alignment(horizontal='left', vertical='center', wrap_text=True, shrink_to_fit=True)
+    bank_accounts = _seller_bank_accounts_with_ibans(seller)
+    has_second_iban = _seller_has_second_iban(bank_accounts)
 
     _tail_section_header(ws, row, 'FİRMA ÜNVANI & IBANLAR')
-    _tail_merge(ws, row + 1, 2, 13, f"{_normalize_display_name(seller.get('display_name', ''))} {currency_symbol}", None, styles['label_font'], styles['center'], styles['section_border'])
-    current_row = row + 2
-    for account in seller.get('bank_accounts') or []:
-        if not account.get('bank') or not account.get('iban'):
-            continue
-        _tail_merge(ws, current_row, 2, 4, _normalize_bank_name(account.get('bank', '')), None, styles['text_font'], styles['left'], styles['thin_border'])
-        _tail_merge(ws, current_row, 5, 13, account.get('iban', ''), None, styles['text_font'], styles['left'], styles['thin_border'])
+    _tail_merge(ws, row + 1, 2, 13, _normalize_display_name(seller.get('display_name', '')), None, styles['label_font'], styles['center'], styles['section_border'])
+    _tail_merge(ws, row + 2, 2, 4, 'BANKA', styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
+    if has_second_iban:
+        _tail_merge(ws, row + 2, 5, 8, _seller_bank_iban_label(seller, 1), styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
+        _tail_merge(ws, row + 2, 9, 13, _seller_bank_iban_label(seller, 2), styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
+    else:
+        _tail_merge(ws, row + 2, 5, 13, 'IBAN', styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
+    ws.row_dimensions[row + 1].height = 28
+    ws.row_dimensions[row + 2].height = 24
+
+    current_row = row + 3
+    for account in bank_accounts or [{}]:
+        _tail_merge(ws, current_row, 2, 4, _normalize_bank_name(account.get('bank', '')), None, styles['text_font'], text_alignment, styles['thin_border'])
+        if has_second_iban:
+            _tail_merge(ws, current_row, 5, 8, _bank_iban_display(account, 1), None, styles['text_font'], text_alignment, styles['thin_border'])
+            _tail_merge(ws, current_row, 9, 13, _bank_iban_display(account, 2), None, styles['text_font'], text_alignment, styles['thin_border'])
+        else:
+            _tail_merge(ws, current_row, 5, 13, _bank_iban_display(account, 1, show_currency=False), None, styles['text_font'], text_alignment, styles['thin_border'])
         ws.row_dimensions[current_row].height = 26
         current_row += 1
     return current_row
@@ -2136,21 +2241,68 @@ def _write_signature_tail(ws, quote, row):
     seller = _selected_seller_profile(quote)
     styles = _tail_styles()
     _tail_section_header(ws, row, 'TARAFLARIN KAŞE İMZASI')
-    _tail_merge(ws, row + 1, 2, 7, f"SATICI\n{_normalize_display_name(seller.get('display_name', ''))}", None, styles['text_font'], styles['center'], styles['section_border'])
-    _tail_merge(ws, row + 1, 8, 13, f"ALICI\n{customer.get('name') or getattr(quote.customer, 'name', '') or ''}", None, styles['text_font'], styles['center'], styles['section_border'])
-    ws.row_dimensions[row + 1].height = 120
+    signature_alignment = Alignment(horizontal='center', vertical='top', wrap_text=True)
+    _tail_merge(ws, row + 1, 2, 7, f"SATICI\n{_normalize_display_name(seller.get('display_name', ''))}", None, styles['text_font'], signature_alignment, styles['section_border'])
+    _tail_merge(ws, row + 1, 8, 13, f"ALICI\n{customer.get('name') or getattr(quote.customer, 'name', '') or ''}", None, styles['text_font'], signature_alignment, styles['section_border'])
+    ws.row_dimensions[row + 1].height = 170
     return row + 2
 
 
-def _write_bottom_banner_tail(ws, row, banner_images):
+def _prepare_bottom_banner_tail(ws, banner_images):
     if not banner_images:
-        return row
+        return None
     banner = banner_images[0]
     banner = _crop_excel_image_vertical_content(banner)
     target_width = _worksheet_printable_width_pixels(ws)
     banner = _scale_excel_image_to_width(banner, target_width)
     row_height = 22
-    row_count = max(4, math.ceil((float(getattr(banner, 'height', 0) or 0) * 0.75) / row_height))
+    banner_height = float(getattr(banner, 'height', 0) or 0) * 0.75
+    row_count = max(4, math.ceil(banner_height / row_height))
+    return banner, row_height, row_count, banner_height
+
+
+def _bottom_banner_footer_start_row(ws, page_start_row, min_row, prepared_banner):
+    if not prepared_banner:
+        return min_row
+
+    _, row_height, _, banner_height = prepared_banner
+    printable_height = _worksheet_printable_height_points(ws)
+    used_height = _row_height_points(ws, page_start_row, min_row - 1)
+    spacer_height = max(0, printable_height - used_height - banner_height)
+    spacer_rows = max(0, math.floor(spacer_height / row_height))
+
+    for row in range(min_row, min_row + spacer_rows):
+        ws.row_dimensions[row].height = row_height
+    partial_spacer_height = spacer_height - (spacer_rows * row_height)
+    if partial_spacer_height >= 1:
+        ws.row_dimensions[min_row + spacer_rows].height = partial_spacer_height
+        spacer_rows += 1
+    return min_row + spacer_rows
+
+
+def _row_height_points(ws, start_row, end_row):
+    if end_row < start_row:
+        return 0
+    total = 0
+    for row in range(start_row, end_row + 1):
+        total += float(ws.row_dimensions[row].height or ws.sheet_format.defaultRowHeight or 15)
+    return total
+
+
+def _worksheet_printable_height_points(ws):
+    orientation = str(getattr(ws.page_setup, 'orientation', '') or 'landscape').lower()
+    paper_size = str(getattr(ws.page_setup, 'paperSize', '') or str(ws.PAPERSIZE_A4))
+    if paper_size == str(ws.PAPERSIZE_A4):
+        page_height = 8.27 if orientation == 'landscape' else 11.69
+    else:
+        page_height = 8.5 if orientation == 'landscape' else 11.0
+    return max(1, (page_height - 0.4) * 72)
+
+
+def _write_bottom_banner_tail(ws, row, prepared_banner):
+    if not prepared_banner:
+        return row
+    banner, row_height, row_count, _ = prepared_banner
     for offset in range(row_count):
         ws.row_dimensions[row + offset].height = row_height
     ws.cell(row + row_count - 1, 13).value = ' '
@@ -2508,7 +2660,7 @@ def _fill_commercial_rows(ws, quote, template):
         quote.number,
         prepared_by,
         quote.payment_terms or '',
-        quote.delivery_terms or '',
+        _format_date_text(quote.delivery_terms),
         format_validity_text(quote.valid_until),
         (config.get('delivery_type') or '').strip(),
         (config.get('payment_option') or '').strip(),
@@ -2544,7 +2696,7 @@ def _fill_contract_notes(ws, quote, template):
     _set_cell_value(
         ws,
         f'I{closing_row}',
-        f'İşbu sözleşme {contract_date.strftime("%d/%m/%Y")} tarihinde iki nüsha olarak imzalanmış ve yürürlüğe girmiştir.',
+        f'İşbu sözleşme {contract_date.strftime("%d.%m.%Y")} tarihinde iki nüsha olarak imzalanmış ve yürürlüğe girmiştir.',
     )
 
 
@@ -2666,7 +2818,7 @@ def _build_template_placeholder_context(quote, template):
         'olusturmaTarihi': created_at,
         'guncellenmeTarihi': updated_at,
         'gecerlilikTarihi': valid_until,
-        'teslimTarihi': quote.delivery_terms or '',
+        'teslimTarihi': _parse_date(quote.delivery_terms) or quote.delivery_terms or '',
         'teslimTipi': (config.get('delivery_type') or '').strip(),
         'odemeKosulu': quote.payment_terms or '',
         'odemeTipi': (config.get('payment_option') or '').strip(),
@@ -2729,19 +2881,25 @@ def _build_seller_placeholder_context(profile, prefix):
         f'{prefix}.imzaUnvani': normalized.get('signature_title', ''),
         f'{prefix}.imzaEtiketi': normalized.get('signature_label', ''),
         f'{prefix}.notlar': normalized.get('notes', ''),
+        f'{prefix}.ibanBaslik1': _seller_bank_iban_label(normalized, 1),
+        f'{prefix}.ibanBaslik2': _seller_bank_iban_label(normalized, 2),
     }
     for bank_index, bank_account in enumerate(normalized.get('bank_accounts') or [], start=1):
         context[f'{prefix}.banka{bank_index}.ad'] = _normalize_bank_name(bank_account.get('bank', ''))
         context[f'{prefix}.banka{bank_index}.iban'] = bank_account.get('iban', '')
+        context[f'{prefix}.banka{bank_index}.iban2'] = bank_account.get('iban_2', '')
         context[f'{prefix}.banka{bank_index}.sube'] = bank_account.get('branch', '')
         context[f'{prefix}.banka{bank_index}.hesapSahibi'] = bank_account.get('account_holder', '')
         context[f'{prefix}.banka{bank_index}.paraBirimi'] = bank_account.get('currency', '')
+        context[f'{prefix}.banka{bank_index}.paraBirimi2'] = bank_account.get('currency_2', '')
     for bank_index in range(1, 11):
         context.setdefault(f'{prefix}.banka{bank_index}.ad', '')
         context.setdefault(f'{prefix}.banka{bank_index}.iban', '')
+        context.setdefault(f'{prefix}.banka{bank_index}.iban2', '')
         context.setdefault(f'{prefix}.banka{bank_index}.sube', '')
         context.setdefault(f'{prefix}.banka{bank_index}.hesapSahibi', '')
         context.setdefault(f'{prefix}.banka{bank_index}.paraBirimi', '')
+        context.setdefault(f'{prefix}.banka{bank_index}.paraBirimi2', '')
     return context
 
 
@@ -3043,7 +3201,7 @@ def _crop_excel_image_content(image, padding=0):
     except Exception:
         return image
 
-    bbox = source.getchannel('A').getbbox()
+    bbox = _excel_image_content_bbox(source)
     if not bbox:
         return image
 
@@ -3058,6 +3216,35 @@ def _crop_excel_image_content(image, padding=0):
     source.crop((left, top, right, bottom)).save(output, format='PNG')
     output.seek(0)
     return XLImage(output)
+
+
+def _excel_image_content_bbox(source):
+    alpha_bbox = source.getchannel('A').getbbox()
+    if not alpha_bbox:
+        return None
+
+    pixels = source.load()
+    bg_r, bg_g, bg_b, bg_a = pixels[0, 0]
+    left, top, right, bottom = source.width, source.height, 0, 0
+    found = False
+    tolerance = 18
+
+    for y in range(source.height):
+        for x in range(source.width):
+            r, g, b, a = pixels[x, y]
+            if a <= 10:
+                continue
+            alpha_delta = abs(a - bg_a)
+            color_delta = max(abs(r - bg_r), abs(g - bg_g), abs(b - bg_b))
+            if alpha_delta <= tolerance and color_delta <= tolerance:
+                continue
+            left = min(left, x)
+            top = min(top, y)
+            right = max(right, x + 1)
+            bottom = max(bottom, y + 1)
+            found = True
+
+    return (left, top, right, bottom) if found else alpha_bbox
 
 
 def _crop_excel_image_vertical_content(image):
@@ -3272,6 +3459,11 @@ def format_validity_text(valid_until):
     return parsed.strftime('%d.%m.%Y') if parsed else ''
 
 
+def _format_date_text(value):
+    parsed = _parse_date(value)
+    return parsed.strftime('%d.%m.%Y') if parsed else str(value or '')
+
+
 def _seller_logo_media_path(profile):
     raw = str((profile or {}).get('logo_url') or '').strip()
     if not raw:
@@ -3469,7 +3661,7 @@ def _normalize_master_contract_bank_block(ws):
 
 def _fill_master_contract_commercial_rows(ws, quote):
     config = quote.contract_config or {}
-    delivery_value = (config.get('delivery_type') or quote.delivery_terms or '').strip()
+    delivery_value = (config.get('delivery_type') or _format_date_text(quote.delivery_terms) or '').strip()
     payment_value = (config.get('payment_option') or quote.payment_terms or '').strip()
     for row in [146, 147, 150, 151, 152]:
         for column in ['F', 'H', 'I', 'J', 'K', 'L']:
@@ -3490,7 +3682,7 @@ def _fill_master_contract_terms(ws, quote, template):
     for row, term in zip(body_rows, terms, strict=False):
         _set_cell_value(ws, f'C{row}', term)
     contract_date = _parse_date((quote.contract_config or {}).get('contract_date')) or _timezone_fallback(quote.created_at)
-    _set_cell_value(ws, f'C{closing_row}', f'İşbu sözleşme {contract_date.strftime("%d/%m/%Y")} tarihinde iki nüsha olarak imzalanmış ve yürürlüğe girmiştir.')
+    _set_cell_value(ws, f'C{closing_row}', f'İşbu sözleşme {contract_date.strftime("%d.%m.%Y")} tarihinde iki nüsha olarak imzalanmış ve yürürlüğe girmiştir.')
 
 
 def _fill_master_contract_bank_accounts(ws, quote, template):
@@ -3566,7 +3758,7 @@ def _fill_commercial_rows(ws, quote, template):
         quote.number,
         prepared_by,
         quote.payment_terms or '',
-        quote.delivery_terms or '',
+        _format_date_text(quote.delivery_terms),
         format_validity_text(quote.valid_until),
         (config.get('delivery_type') or '').strip(),
         (config.get('payment_option') or '').strip(),

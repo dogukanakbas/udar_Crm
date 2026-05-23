@@ -2583,7 +2583,7 @@ export function TaskDetailPage() {
                             <ul className="text-[11px] space-y-0.5 max-h-28 overflow-y-auto text-muted-foreground">
                               {lineEntries.slice(0, 30).map((pe) => (
                                 <li key={pe.id}>
-                                  {pe.entryDate} • bildirilen {pe.quantity} {unit} • {pe.userName || pe.user || '—'}
+                                  {formatDate(pe.entryDate)} • bildirilen {pe.quantity} {unit} • {pe.userName || pe.user || '—'}
                                   {pe.teamName ? ` • ${pe.teamName}` : ''}
                                 </li>
                               ))}
@@ -3338,7 +3338,7 @@ export function TaskDetailPage() {
                       <ul className="text-xs space-y-1 max-h-36 overflow-y-auto text-muted-foreground">
                         {(task.productionEntries || []).slice(0, 40).map((pe) => (
                           <li key={pe.id}>
-                            {pe.entryDate} • bildirilen {pe.quantity} {defaultLineUnit} • {pe.userName || pe.user || '—'}
+                            {formatDate(pe.entryDate)} • bildirilen {pe.quantity} {defaultLineUnit} • {pe.userName || pe.user || '—'}
                             {pe.teamName ? ` • ${pe.teamName}` : ''}
                           </li>
                         ))}
@@ -4052,4 +4052,3 @@ function TaskModal({
     </Dialog>
   )
 }
-

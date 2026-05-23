@@ -221,7 +221,7 @@ class MdfSkuViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             sku = m.sku
             pdf_rows.append(
                 (
-                    m.movement_date.isoformat(),
+                    m.movement_date.strftime('%d.%m.%Y'),
                     f'{sku.thickness_mm} mm',
                     f'{sku.width_cm} × {sku.height_cm}',
                     str(m.quantity),

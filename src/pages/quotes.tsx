@@ -33,7 +33,7 @@ import {
 import { normalizePaymentOptions } from '@/lib/payment-options'
 import { getDefaultPriceList, getPriceListByKey, normalizePriceLists, resolveProductPrice, type PriceListOption } from '@/lib/price-lists'
 import { cn, formatCurrency, formatDate, formatDateTime, formatExchangeRate, getCurrencyLabel, getCurrencySymbol, normalizeCurrency } from '@/lib/utils'
-import { useAppStore } from '@/state/use-app-store'
+import { mapQuote, useAppStore } from '@/state/use-app-store'
 import type { Product, Quote, SalesDocumentType, SellerCompanyProfile } from '@/types'
 
 const QUOTE_STATUS_TR = {
@@ -190,6 +190,7 @@ const lineSchema = z.object({
     primary: z.string().optional(),
     secondary: z.string().optional(),
     attributes: z.record(z.string(), z.any()).optional().default({}),
+    technicalItems: z.array(z.string()).optional().default([]),
   }),
 }).superRefine((value, ctx) => {
   const effectiveDiscount = 100 - ((100 - Number(value.discount || 0)) * (100 - Number(value.discountSecondary || 0))) / 100
@@ -323,11 +324,21 @@ const normalizeValidityDays = (value: unknown, fallback = 7) => {
   return Number.isFinite(parsed) && parsed >= 1 && parsed <= 365 ? Math.floor(parsed) : fallback
 }
 
+const normalizeTechnicalItems = (items: any) =>
+  Array.isArray(items) ? items.map((item) => String(item || '').trim()).filter(Boolean) : []
+
 const buildLineFromProduct = (product?: Product, previousLine?: any, priceListKey?: string) => {
   const defaults = product?.templateDefaults || {}
   const categoryDefaults = product?.categoryTemplateDefaults || {}
   const specialGroup = resolveSpecialProductGroup(product)
   const sectionKey = specialGroup?.sectionKey || defaults.section_key || categoryDefaults.section_key || previousLine?.sectionKey || 'steel_door'
+  const productTechnicalItems = normalizeTechnicalItems(defaults.technical_items)
+  const categoryTechnicalItems = normalizeTechnicalItems(categoryDefaults.technical_items)
+  const technicalItems = productTechnicalItems.length
+    ? productTechnicalItems
+    : categoryTechnicalItems.length
+      ? categoryTechnicalItems
+      : []
 
   return {
     mode: product ? 'product' : 'manual',
@@ -346,11 +357,14 @@ const buildLineFromProduct = (product?: Product, previousLine?: any, priceListKe
       primary: previousLine?.details?.primary || defaults.primary || '',
       secondary: previousLine?.details?.secondary || defaults.secondary || '',
       attributes: previousLine?.details?.attributes || product?.attributeValues || {},
+      technicalItems: normalizeTechnicalItems(previousLine?.details?.technicalItems || previousLine?.details?.technical_items).length
+        ? normalizeTechnicalItems(previousLine?.details?.technicalItems || previousLine?.details?.technical_items)
+        : technicalItems,
     },
   }
 }
 
-const createEmptyLine = () => buildLineFromProduct(undefined, { mode: 'manual', name: 'Yeni kalem', sectionKey: 'steel_door', unit: 'Adet', qty: 1, unitPrice: 0, discount: 0, discountSecondary: 0, tax: 20, details: { code: '', primary: '', secondary: '', attributes: {} } })
+const createEmptyLine = () => buildLineFromProduct(undefined, { mode: 'manual', name: 'Yeni kalem', sectionKey: 'steel_door', unit: 'Adet', qty: 1, unitPrice: 0, discount: 0, discountSecondary: 0, tax: 20, details: { code: '', primary: '', secondary: '', attributes: {}, technicalItems: [] } })
 
 const buildLineForSelectedProduct = (product?: Product, previousLine?: any, priceListKey?: string) =>
   buildLineFromProduct(product, {
@@ -438,6 +452,7 @@ const getInitialValues = (
             primary: line.details?.primary || '',
             secondary: line.details?.secondary || '',
             attributes: line.details?.attributes || {},
+            technicalItems: line.details?.technicalItems || line.details?.technical_items || [],
           },
         }))
       : [products[0] ? buildLineFromProduct(products[0], undefined, selectedPriceList.key) : createEmptyLine()]
@@ -537,7 +552,10 @@ const buildDocumentPayload = (values: any, mode: SalesDocumentType, status = 'Dr
     discountSecondary: Number(line.discountSecondary || 0),
     tax: Number(line.tax || 0),
     sortOrder: index,
-    details: line.details,
+    details: {
+      ...(line.details || {}),
+      technicalItems: normalizeTechnicalItems(line.details?.technicalItems || line.details?.technical_items),
+    },
   })),
 })
 
@@ -592,7 +610,7 @@ const AUDIT_FIELD_LABELS: Record<string, string> = {
   email: 'E-posta',
   exchange_rate: 'Kur',
   general_terms: 'Maddeler',
-  lines: 'Kalemler',
+  lines: 'Ürün grupları',
   name: 'Ad',
   notes: 'Notlar',
   payment_option: 'Ödeme tipi',
@@ -988,9 +1006,15 @@ export function QuotesPage() {
   const [minAmount, setMinAmount] = useState('')
   const [maxAmount, setMaxAmount] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [editingQuote, setEditingQuote] = useState<Quote | null>(null)
+  const [loadingQuoteId, setLoadingQuoteId] = useState<string | null>(null)
 
   const quotes = data.quotes ?? []
   const companies = data.companies
+  const companyNameById = useMemo(
+    () => new Map(companies.map((company) => [company.id, company.name])),
+    [companies]
+  )
 
   const filtered = useMemo(
     () =>
@@ -1039,62 +1063,85 @@ export function QuotesPage() {
     }
   }
 
-  const columns: ColumnDef<Quote>[] = [
-    { accessorKey: 'documentType', header: 'Tür', cell: ({ row }) => <Badge variant="outline">{DOCUMENT_TYPE_TR[row.original.documentType]}</Badge> },
-    { accessorKey: 'number', header: 'No' },
-    { accessorKey: 'createdAt', header: 'Oluşturulma', cell: ({ row }) => formatDateTime(row.original.createdAt) },
-    { accessorKey: 'customerId', header: 'Müşteri', cell: ({ row }) => row.original.customerName || companies.find((company) => company.id === row.original.customerId)?.name || '' },
-    { accessorKey: 'preparedByName', header: 'Hazırlayan', cell: ({ row }) => row.original.preparedByName || row.original.owner },
-    { accessorKey: 'total', header: 'Tutar', cell: ({ row }) => formatCurrency(row.original.total, row.original.currency) },
-    { accessorKey: 'status', header: 'Durum', cell: ({ row }) => <Badge variant="secondary">{quoteStatusTr(row.original.status)}</Badge> },
-    { accessorKey: 'validUntil', header: 'Geçerlilik', cell: ({ row }) => formatDate(row.original.validUntil) },
-    {
-      id: 'actions',
-      header: '',
-      cell: ({ row }) => (
-        <div className="flex items-center justify-end gap-2">
-          <Link to="/crm/quotes/$quoteId" params={{ quoteId: row.original.id }} className="text-xs text-primary underline">
-            Görüntüle
-          </Link>
-          <RbacGuard perm="quotes.edit">
-            <DocumentWizardTrigger
-              quote={row.original}
-              trigger={
-                <Button variant="ghost" size="sm">
-                  <Pencil className="mr-2 h-4 w-4" />
-                  Düzenle
-                </Button>
-              }
-            />
-          </RbacGuard>
-          <Button variant="ghost" size="sm" onClick={() => handleDownload(row.original)}>
-            <Download className="mr-2 h-4 w-4" />
-            İndir
-          </Button>
-          {row.original.documentType === 'Quote' ? (
+  const openQuoteEditor = async (quote: Quote) => {
+    setLoadingQuoteId(quote.id)
+    try {
+      const response = await api.get(`/quotes/${quote.id}/`)
+      setEditingQuote(mapQuote(response.data))
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Belge detayları alınamadı', variant: 'destructive' })
+    } finally {
+      setLoadingQuoteId(null)
+    }
+  }
+
+  const columns: ColumnDef<Quote>[] = useMemo(
+    () => [
+      { accessorKey: 'documentType', header: 'Tür', cell: ({ row }) => <Badge variant="outline">{DOCUMENT_TYPE_TR[row.original.documentType]}</Badge> },
+      { accessorKey: 'number', header: 'No' },
+      { accessorKey: 'createdAt', header: 'Oluşturulma', cell: ({ row }) => formatDateTime(row.original.createdAt) },
+      { accessorKey: 'customerId', header: 'Müşteri', cell: ({ row }) => row.original.customerName || companyNameById.get(row.original.customerId) || '' },
+      { accessorKey: 'preparedByName', header: 'Hazırlayan', cell: ({ row }) => row.original.preparedByName || row.original.owner },
+      { accessorKey: 'total', header: 'Tutar', cell: ({ row }) => formatCurrency(row.original.total, row.original.currency) },
+      { accessorKey: 'status', header: 'Durum', cell: ({ row }) => <Badge variant="secondary">{quoteStatusTr(row.original.status)}</Badge> },
+      { accessorKey: 'validUntil', header: 'Geçerlilik', cell: ({ row }) => formatDate(row.original.validUntil) },
+      {
+        id: 'actions',
+        header: '',
+        cell: ({ row }) => (
+          <div className="flex items-center justify-end gap-2">
+            <Link to="/crm/quotes/$quoteId" params={{ quoteId: row.original.id }} className="text-xs text-primary underline">
+              Görüntüle
+            </Link>
             <RbacGuard perm="quotes.edit">
-              <Button variant="ghost" size="sm" onClick={() => handleConvert(row.original)}>
-                <Check className="mr-2 h-4 w-4" />
-                Sözleşmeye dönüştür
+              <Button variant="ghost" size="sm" disabled={loadingQuoteId === row.original.id} onClick={() => openQuoteEditor(row.original)}>
+                <Pencil className="mr-2 h-4 w-4" />
+                {loadingQuoteId === row.original.id ? 'Açılıyor...' : 'Düzenle'}
               </Button>
             </RbacGuard>
-          ) : null}
-          <RbacGuard perm="quotes.edit">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-destructive hover:text-destructive"
-              disabled={deletingId === row.original.id}
-              onClick={() => handleDelete(row.original)}
-            >
-              <Trash2 className="mr-2 h-4 w-4" />
-              Sil
+            <Button variant="ghost" size="sm" onClick={() => handleDownload(row.original)}>
+              <Download className="mr-2 h-4 w-4" />
+              İndir
             </Button>
-          </RbacGuard>
-        </div>
-      ),
-    },
-  ]
+            {row.original.documentType === 'Quote' ? (
+              <RbacGuard perm="quotes.edit">
+                <Button variant="ghost" size="sm" onClick={() => handleConvert(row.original)}>
+                  <Check className="mr-2 h-4 w-4" />
+                  Sözleşmeye dönüştür
+                </Button>
+              </RbacGuard>
+            ) : null}
+            <RbacGuard perm="quotes.edit">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-destructive hover:text-destructive"
+                disabled={deletingId === row.original.id}
+                onClick={() => handleDelete(row.original)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Sil
+              </Button>
+            </RbacGuard>
+          </div>
+        ),
+      },
+    ],
+    [companyNameById, deletingId, loadingQuoteId]
+  )
+
+  const tableColumns = useMemo(
+    () => [
+      {
+        id: 'select',
+        header: ({ table }) => <Checkbox checked={table.getIsAllPageRowsSelected()} onCheckedChange={(value) => table.toggleAllPageRowsSelected(Boolean(value))} />,
+        cell: ({ row }) => <Checkbox checked={row.getIsSelected()} onCheckedChange={(value) => row.toggleSelected(Boolean(value))} />,
+        size: 32,
+      },
+      ...columns,
+    ],
+    [columns]
+  )
 
   return (
     <div className="space-y-4">
@@ -1128,6 +1175,16 @@ export function QuotesPage() {
           </div>
         }
       />
+
+      {editingQuote ? (
+        <DocumentWizardTrigger
+          quote={editingQuote}
+          open={Boolean(editingQuote)}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) setEditingQuote(null)
+          }}
+        />
+      ) : null}
 
 
       <div className="grid gap-3 rounded-xl border border-border/70 bg-card/40 p-4 md:grid-cols-2 xl:grid-cols-[220px_220px_minmax(280px,1fr)_140px_140px_auto]">
@@ -1204,7 +1261,7 @@ export function QuotesPage() {
       <Card>
         <CardContent className="pt-4">
           <DataTable
-            columns={[{ id: 'select', header: ({ table }) => <Checkbox checked={table.getIsAllPageRowsSelected()} onCheckedChange={(value) => table.toggleAllPageRowsSelected(Boolean(value))} />, cell: ({ row }) => <Checkbox checked={row.getIsSelected()} onCheckedChange={(value) => row.toggleSelected(Boolean(value))} />, size: 32 }, ...columns]}
+            columns={tableColumns}
             data={filtered}
             onExport={(rows) => {
               const blob = new Blob([buildCsv(rows)], { type: 'text/csv;charset=utf-8;' })
@@ -1220,7 +1277,19 @@ export function QuotesPage() {
   )
 }
 
-function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: SalesDocumentType; quote?: Quote; trigger?: React.ReactNode }) {
+function DocumentWizardTrigger({
+  mode = 'Quote',
+  quote,
+  trigger,
+  open: controlledOpen,
+  onOpenChange,
+}: {
+  mode?: SalesDocumentType
+  quote?: Quote
+  trigger?: React.ReactNode
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}) {
   const { data, createCompany, createQuote, updateQuote } = useAppStore()
   const { toast } = useToast()
   const [open, setOpen] = useState(false)
@@ -1230,6 +1299,12 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   const [priceLists, setPriceLists] = useState<PriceListOption[]>(normalizePriceLists())
   const [paymentOptions, setPaymentOptions] = useState<string[]>(normalizePaymentOptions())
   const [showProductCodesInPicker, setShowProductCodesInPicker] = useState(false)
+  const isControlled = controlledOpen !== undefined
+  const modalOpen = isControlled ? controlledOpen : open
+  const setModalOpen = (nextOpen: boolean) => {
+    if (!isControlled) setOpen(nextOpen)
+    onOpenChange?.(nextOpen)
+  }
   const companies = data.companies
   const sellerCompanies = data.sellerCompanies || []
   const products = data.products
@@ -1280,10 +1355,10 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
     const selected = getPriceListByKey(priceLists, currentKey || selectedCustomer?.priceListKey)
     form.setValue('priceListKey', selected.key, { shouldDirty: false })
     form.setValue('priceListLabel', selected.label, { shouldDirty: false })
-  }, [form, priceLists, open])
+  }, [form, priceLists, modalOpen])
 
   const handleOpenChange = (nextOpen: boolean) => {
-    setOpen(nextOpen)
+    setModalOpen(nextOpen)
     if (nextOpen) {
       setActiveTab('customer')
       form.reset(getFormDefaults())
@@ -1417,6 +1492,26 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
 
   const addLine = () => form.setValue('lines', [...lines, createEmptyLine()], { shouldDirty: true })
   const removeLine = (index: number) => form.setValue('lines', lines.filter((_, currentIndex) => currentIndex !== index), { shouldDirty: true })
+  const addTechnicalItem = (index: number) => {
+    const currentItems = lines[index]?.details?.technicalItems || []
+    form.setValue(`lines.${index}.details.technicalItems`, [...currentItems, ''], { shouldDirty: true, shouldValidate: true })
+  }
+  const updateTechnicalItem = (lineIndex: number, itemIndex: number, value: string) => {
+    const currentItems = lines[lineIndex]?.details?.technicalItems || []
+    form.setValue(
+      `lines.${lineIndex}.details.technicalItems`,
+      currentItems.map((item: string, currentIndex: number) => (currentIndex === itemIndex ? value : item)),
+      { shouldDirty: true, shouldValidate: true }
+    )
+  }
+  const removeTechnicalItem = (lineIndex: number, itemIndex: number) => {
+    const currentItems = lines[lineIndex]?.details?.technicalItems || []
+    form.setValue(
+      `lines.${lineIndex}.details.technicalItems`,
+      currentItems.filter((_: string, currentIndex: number) => currentIndex !== itemIndex),
+      { shouldDirty: true, shouldValidate: true }
+    )
+  }
   const applyProduct = (index: number, productId: string) => {
     const product = products.find((item) => item.id === productId)
     form.setValue(`lines.${index}`, buildLineForSelectedProduct(product, lines[index], selectedPriceListKey), { shouldDirty: true, shouldValidate: true })
@@ -1460,7 +1555,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
         await createQuote(payload as any)
       }
       toast({ title: quote ? `${DOCUMENT_TYPE_TR[documentMode]} güncellendi` : `${DOCUMENT_TYPE_TR[documentMode]} kaydedildi` })
-      setOpen(false)
+      setModalOpen(false)
     } catch (error: any) {
       toast({ title: error?.response?.data?.detail || 'Kayıt sırasında hata oluştu', variant: 'destructive' })
     } finally {
@@ -1486,15 +1581,17 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
   return (
     <>
       <CompanyModal open={customerModalOpen} onOpenChange={setCustomerModalOpen} onSubmit={handleCustomerCreate} />
-      <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        {trigger ?? (
-          <Button size="sm" variant={documentMode === 'Contract' ? 'default' : 'outline'}>
-            {isEditing ? <Pencil className="mr-2 h-4 w-4" /> : <Plus className="mr-2 h-4 w-4" />}
-            {isEditing ? `${DOCUMENT_TYPE_TR[documentMode]} düzenle` : documentMode === 'Contract' ? 'Yeni sözleşme' : 'Yeni teklif'}
-          </Button>
-        )}
-      </DialogTrigger>
+      <Dialog open={modalOpen} onOpenChange={handleOpenChange}>
+      {(!isControlled || trigger) && (
+        <DialogTrigger asChild>
+          {trigger ?? (
+            <Button size="sm" variant={documentMode === 'Contract' ? 'default' : 'outline'}>
+              {isEditing ? <Pencil className="mr-2 h-4 w-4" /> : <Plus className="mr-2 h-4 w-4" />}
+              {isEditing ? `${DOCUMENT_TYPE_TR[documentMode]} düzenle` : documentMode === 'Contract' ? 'Yeni sözleşme' : 'Yeni teklif'}
+            </Button>
+          )}
+        </DialogTrigger>
+      )}
       <DialogContent className={cn('max-h-[92vh] max-w-[82rem] overflow-y-auto', customerModalOpen && 'pointer-events-none opacity-0')}>
         <DialogHeader><DialogTitle>{isEditing ? `${DOCUMENT_TYPE_TR[documentMode]} düzenle` : documentMode === 'Contract' ? 'Sözleşme oluştur' : 'Teklif oluştur'}</DialogTitle></DialogHeader>
         <Tabs
@@ -1507,7 +1604,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
           <TabsList className="mb-3 grid grid-cols-5">
             <TabsTrigger value="customer">Cariler</TabsTrigger>
             <TabsTrigger value="document">Belge</TabsTrigger>
-            <TabsTrigger value="lines">Kalemler</TabsTrigger>
+            <TabsTrigger value="lines">Ürün Grupları</TabsTrigger>
             <TabsTrigger value="expenses">Masraflar</TabsTrigger>
             <TabsTrigger value="review">Özet</TabsTrigger>
           </TabsList>
@@ -1651,7 +1748,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
           <TabsContent value="lines" className="space-y-3">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div className="space-y-1">
-                <Label>Kalemler</Label>
+                <Label>Ürün Grupları</Label>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Checkbox
                     checked={showProductCodesInPicker}
@@ -1660,7 +1757,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
                   <span>Ürün seçiminde yalnızca ürün kodunu göster</span>
                 </div>
               </div>
-              <Button type="button" size="sm" variant="outline" onClick={addLine}><Plus className="mr-2 h-4 w-4" />Kalem ekle</Button>
+              <Button type="button" size="sm" variant="outline" onClick={addLine}><Plus className="mr-2 h-4 w-4" />Ürün grubu ekle</Button>
             </div>
             <div className="max-h-[58vh] space-y-3 overflow-y-auto pr-2">
               {lines.map((line, index) => {
@@ -1700,6 +1797,30 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
                       <div><Label>KDV %</Label><NumericEditor value={Number(line.tax || 0)} onValueChange={(value) => form.setValue(`lines.${index}.tax`, value)} /></div>
                       <div className="md:col-span-3 rounded-md border border-dashed border-border/70 px-3 py-2 text-xs text-muted-foreground">Etkin iskonto: %{getEffectiveDiscountRate(line).toFixed(2)}</div>
                       {dynamicSchema.length > 0 && <div className="md:col-span-3 grid gap-3 rounded-lg border border-border/70 p-3"><p className="text-sm font-medium">Teknik alanlar</p><div className="grid gap-3 md:grid-cols-2">{dynamicSchema.map((field) => { const value = line.details?.attributes?.[field.field_key] ?? ''; const path = `lines.${index}.details.attributes.${field.field_key}`; if (field.type === 'textarea') return <div key={field.field_key} className="md:col-span-2"><Label>{field.label}</Label><Textarea value={value} onChange={(event) => form.setValue(path, event.target.value)} /></div>; if (field.type === 'select') return <div key={field.field_key}><Label>{field.label}</Label><Select value={String(value || '__empty__')} onValueChange={(nextValue) => form.setValue(path, nextValue === '__empty__' ? '' : nextValue)}><SelectTrigger><SelectValue placeholder="Seçin" /></SelectTrigger><SelectContent><SelectItem value="__empty__">Boş</SelectItem>{(field.options || []).map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectContent></Select></div>; return <div key={field.field_key}><Label>{field.label}</Label><Input type={field.type === 'number' ? 'number' : 'text'} value={value} onChange={(event) => form.setValue(path, field.type === 'number' ? Number(event.target.value) : event.target.value)} /></div> })}</div></div>}
+                      <div className="md:col-span-3 space-y-2 rounded-lg border border-border/70 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-medium">Ürüne özel teknik maddeler</p>
+                          <Button type="button" size="sm" variant="outline" onClick={() => addTechnicalItem(index)}>
+                            <Plus className="mr-2 h-4 w-4" />
+                            Madde ekle
+                          </Button>
+                        </div>
+                        {(line.details?.technicalItems || []).length === 0 ? (
+                          <p className="text-xs text-muted-foreground">Bu ürün için teknik madde yok.</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {(line.details?.technicalItems || []).map((item: string, itemIndex: number) => (
+                              <div key={`technical-${index}-${itemIndex}`} className="grid gap-2 md:grid-cols-[1fr_auto]">
+                                <Input value={item} onChange={(event) => updateTechnicalItem(index, itemIndex, event.target.value)} placeholder={`${itemIndex + 1}. teknik madde`} />
+                                <Button type="button" variant="ghost" size="sm" onClick={() => removeTechnicalItem(index, itemIndex)}>
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  Sil
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </CardContent>
                   </Card>
                 )
@@ -1711,7 +1832,7 @@ function DocumentWizardTrigger({ mode = 'Quote', quote, trigger }: { mode?: Sale
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Hizmetler & montaj masrafları</CardTitle>
-                <CardDescription>Kalemlerde seçilen ürün gruplarına göre Excel&apos;deki HİZMETLER & MONTAJ bölümüne yazılacak kategori bazlı masrafları girin.</CardDescription>
+                <CardDescription>Ürün gruplarında seçilen kategorilere göre PDF&apos;teki MASRAFLAR bölümüne yazılacak kategori bazlı masrafları girin.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 {serviceExpenses.length === 0 ? (
@@ -1775,16 +1896,35 @@ export function QuoteDetailPage() {
   const [approvalSteps, setApprovalSteps] = useState<{ id: string; role: string; status: string; comment?: string; acted_by?: string; updated_at?: string }[]>([])
   const [busyStep, setBusyStep] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
-  const quote = data.quotes.find((item) => item.id === params.quoteId) ?? data.quotes[0]
+  const [fullQuote, setFullQuote] = useState<Quote | null>(null)
+  const storeQuote = data.quotes.find((item) => item.id === params.quoteId) ?? data.quotes[0]
+  const quote = fullQuote ?? storeQuote
   const company = data.companies.find((item) => item.id === quote?.customerId)
   const sellerCompanies = data.sellerCompanies || []
-  if (!quote) return <p className="text-muted-foreground">Belge bulunamadı</p>
+
+  useEffect(() => {
+    if (!params.quoteId) return
+    let alive = true
+    api
+      .get(`/quotes/${params.quoteId}/`)
+      .then((response) => {
+        if (alive) setFullQuote(mapQuote(response.data))
+      })
+      .catch(() => {
+        if (alive) setFullQuote(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [params.quoteId])
 
   useEffect(() => {
     if (!quote) return
     api.get('/audit/', { params: { entity: 'Quote', entity_id: quote.id } }).then((res) => setAuditLogs(res.data || [])).catch(() => setAuditLogs([]))
     api.get('/approvals/', { params: { quote_id: quote.id } }).then((res) => setApprovalSteps(res.data?.[0]?.steps || [])).catch(() => setApprovalSteps([]))
   }, [quote?.id])
+
+  if (!quote) return <p className="text-muted-foreground">Belge bulunamadı</p>
 
   const customerSnapshot = quote.contractConfig?.customerSnapshot || quote.contractConfig?.customer_snapshot || {}
   const termsLines = getTermsText(quote.contractConfig).split('\n').map((line) => line.trim()).filter(Boolean)
@@ -1876,7 +2016,7 @@ export function QuoteDetailPage() {
       <Tabs defaultValue="overview">
         <TabsList className="mb-3">
           <TabsTrigger value="overview">Özet</TabsTrigger>
-          <TabsTrigger value="lines">Kalemler</TabsTrigger>
+          <TabsTrigger value="lines">Ürün Grupları</TabsTrigger>
           <TabsTrigger value="document">Belge</TabsTrigger>
           <TabsTrigger value="pricing">Fiyatlama</TabsTrigger>
           <TabsTrigger value="approval">Onay</TabsTrigger>

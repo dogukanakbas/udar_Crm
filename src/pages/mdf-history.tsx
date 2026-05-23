@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useToast } from '@/components/ui/use-toast'
 import { fetchMdfHistory, formatApiError, type ApiMovement } from '@/lib/mdf-api'
+import { formatDate } from '@/lib/utils'
 
 type EntryRow = {
   id: number
@@ -33,7 +34,7 @@ type ExitRow = {
 function mapEntry(m: ApiMovement): EntryRow {
   return {
     id: m.id,
-    date: m.movement_date,
+    date: formatDate(m.movement_date),
     thicknessMm: m.thickness_mm,
     widthCm: m.width_cm,
     heightCm: m.height_cm,
@@ -45,7 +46,7 @@ function mapEntry(m: ApiMovement): EntryRow {
 function mapExit(m: ApiMovement): ExitRow {
   return {
     id: m.id,
-    date: m.movement_date,
+    date: formatDate(m.movement_date),
     thicknessMm: m.thickness_mm,
     widthCm: m.width_cm,
     heightCm: m.height_cm,

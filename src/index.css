@@ -6,45 +6,45 @@
 
 @layer base {
 :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --background: 160 20% 97%;
+    --foreground: 172 28% 10%;
+    --muted: 165 16% 93%;
+    --muted-foreground: 170 10% 39%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 47.4% 11.2%;
+    --popover-foreground: 172 28% 10%;
     --card: 0 0% 100%;
-    --card-foreground: 222.2 47.4% 11.2%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --primary: 222.2 47.4% 11.2%;
+    --card-foreground: 172 28% 10%;
+    --border: 170 17% 84%;
+    --input: 170 17% 84%;
+    --primary: 168 48% 22%;
     --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --secondary: 42 44% 90%;
+    --secondary-foreground: 32 42% 20%;
+    --accent: 42 80% 55%;
+    --accent-foreground: 31 42% 16%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 210 40% 98%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.75rem;
+    --ring: 168 48% 22%;
+    --radius: 0.5rem;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
+    --background: 174 33% 8%;
     --foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --popover: 222.2 84% 4.9%;
+    --muted: 174 24% 14%;
+    --muted-foreground: 165 12% 70%;
+    --popover: 174 33% 9%;
     --popover-foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
+    --card: 174 28% 10%;
     --card-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
+    --border: 174 20% 20%;
+    --input: 174 20% 20%;
+    --primary: 162 45% 62%;
+    --primary-foreground: 174 33% 8%;
+    --secondary: 40 28% 18%;
     --secondary-foreground: 210 40% 98%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 42 80% 58%;
+    --accent-foreground: 31 42% 12%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
     --ring: 212.7 26.8% 83.9%;
@@ -57,6 +57,16 @@
 
 body {
     @apply min-h-screen bg-background font-sans text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  #root {
+    min-height: 100vh;
+    width: 100%;
+  }
+
+  ::selection {
+    background: hsl(var(--accent) / 0.32);
   }
 
   ::-webkit-scrollbar {

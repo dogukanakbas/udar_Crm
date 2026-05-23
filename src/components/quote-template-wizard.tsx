@@ -334,7 +334,7 @@ export function TemplateQuoteWizardTrigger({
               Taraflar
             </TabsTrigger>
             <TabsTrigger value="lines" className="text-xs px-1 sm:text-sm sm:px-2">
-              Kalemler
+              Ürün Grupları
             </TabsTrigger>
             <TabsTrigger value="terms" className="text-xs px-1 sm:text-sm sm:px-2">
               Şartlar

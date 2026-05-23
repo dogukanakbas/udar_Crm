@@ -73,13 +73,13 @@ export function DataTable<TData>({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-card/80 p-3 shadow-sm">
         {searchKey && (
           <Input
             placeholder="Ara..."
             value={globalFilter ?? ''}
             onChange={(event) => setGlobalFilter(event.target.value)}
-            className="w-60"
+            className="w-full bg-background md:w-72"
           />
         )}
         {renderToolbar}
@@ -111,7 +111,7 @@ export function DataTable<TData>({
               Dışa aktar (CSV)
             </Button>
           )}
-          <span className="hidden text-xs text-muted-foreground md:inline">
+          <span className="hidden rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground md:inline">
             {table.getState().pagination.pageIndex + 1} / {Math.max(table.getPageCount(), 1)}
           </span>
           <Button
@@ -127,7 +127,7 @@ export function DataTable<TData>({
           </Button>
         </div>
       </div>
-      <div className="rounded-xl border border-border/70">
+      <div className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-[0_18px_50px_-40px_rgba(15,23,42,0.58)]">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -163,7 +163,7 @@ export function DataTable<TData>({
             ) : (
               <TableRow>
                 <TableCell colSpan={columns.length} className="h-24 text-center text-sm text-muted-foreground">
-                  No results.
+                  Sonuç bulunamadı.
                 </TableCell>
               </TableRow>
             )}
@@ -171,7 +171,7 @@ export function DataTable<TData>({
         </Table>
       </div>
       {selectedRows.length > 0 && (
-        <p className="text-xs text-muted-foreground">{selectedRows.length} row(s) selected</p>
+        <p className="text-xs text-muted-foreground">{selectedRows.length} satır seçildi</p>
       )}
     </div>
   )
