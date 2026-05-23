@@ -24,7 +24,7 @@ FROM node:22-alpine AS preview
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev
+RUN npm ci
 COPY --from=build /app/dist ./dist
 EXPOSE 5173
 CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0", "--port", "5173"]
