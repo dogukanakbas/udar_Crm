@@ -1,10 +1,12 @@
 import * as XLSX from 'xlsx'
 
 import type { Category, Product, CategoryTemplateField } from '@/types'
+import { normalizePriceListKey, type PriceListOption } from '@/lib/price-lists'
 
 const PRODUCT_SHEET = 'Ürünler'
 const CATEGORY_SHEET = 'Kategoriler'
 const GUIDE_SHEET = 'Açıklama'
+const PRICE_LIST_PREFIX = 'Fiyat Listesi:'
 
 const PRODUCT_HEADERS = [
   'SKU',
@@ -15,11 +17,16 @@ const PRODUCT_HEADERS = [
   'Rezerve',
   'Emniyet Stoğu',
   'Belge Grubu',
+  'Belge Sırası',
   'Varsayılan Birim',
   'Varsayılan KDV',
   'Varsayılan İskonto',
   'Varsayılan İskonto 2',
   'Şablon Ailesi',
+  'Tablo Kolonları',
+  'Detay 1 Varsayılan',
+  'Detay 2 Varsayılan',
+  'Ürün Teknik Maddeleri',
   'Teknik Alan Değerleri JSON',
   'Alan Şeması Override JSON',
 ] as const
@@ -27,11 +34,14 @@ const PRODUCT_HEADERS = [
 const CATEGORY_HEADERS = [
   'Kategori',
   'Belge Grubu',
+  'Belge Sırası',
   'Varsayılan Birim',
   'Varsayılan KDV',
   'Varsayılan İskonto',
   'Varsayılan İskonto 2',
   'Şablon Ailesi',
+  'Tablo Kolonları',
+  'Varsayılan Teknik Madde',
   'Alan Şeması JSON',
 ] as const
 
@@ -49,6 +59,7 @@ type InventoryProductPayload = {
   stock: number
   reserved: number
   reorder_point: number
+  price_lists?: Record<string, number>
   template_defaults: Record<string, any>
   attribute_values: Record<string, any>
   attribute_schema_override: CategoryTemplateField[]
@@ -68,6 +79,7 @@ function safeJson(value: unknown, fallback: string) {
 }
 
 function parseJsonObject(value: unknown) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, any>
   if (!value || typeof value !== 'string') return {}
   try {
     const parsed = JSON.parse(value)
@@ -78,6 +90,7 @@ function parseJsonObject(value: unknown) {
 }
 
 function parseJsonArray(value: unknown) {
+  if (Array.isArray(value)) return value.filter((item) => item && typeof item === 'object')
   if (!value || typeof value !== 'string') return []
   try {
     const parsed = JSON.parse(value)
@@ -92,6 +105,88 @@ function numberValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+function compactList(value: unknown, separators: RegExp) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean)
+  }
+  return String(value || '')
+    .split(separators)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function columnList(value: unknown) {
+  return compactList(value, /\r?\n|[,;]+/g)
+}
+
+function technicalItemList(value: unknown) {
+  return compactList(value, /\r?\n|;+|•+/g)
+}
+
+function priceListColumn(priceList: PriceListOption) {
+  return `${PRICE_LIST_PREFIX} ${priceList.label} (${priceList.key})`
+}
+
+function priceListHeaders(priceLists: PriceListOption[] = []) {
+  return priceLists.map(priceListColumn)
+}
+
+function productHeaders(priceLists: PriceListOption[] = []) {
+  const dynamicHeaders = priceListHeaders(priceLists)
+  if (!dynamicHeaders.length) return [...PRODUCT_HEADERS]
+  const headers: string[] = [...PRODUCT_HEADERS]
+  const priceIndex = headers.indexOf('Fiyat')
+  headers.splice(priceIndex + 1, 0, ...dynamicHeaders)
+  return headers
+}
+
+function productWidths(headers: string[]) {
+  return headers.map((header) => {
+    if (header.startsWith(PRICE_LIST_PREFIX)) return 24
+    if (header.includes('JSON') || header === 'Ürün Teknik Maddeleri') return 42
+    if (header === 'Tablo Kolonları') return 48
+    if (['Ürün Adı', 'Kategori'].includes(header)) return 28
+    if (['Detay 1 Varsayılan', 'Detay 2 Varsayılan'].includes(header)) return 24
+    if (header === 'SKU') return 18
+    return 16
+  })
+}
+
+function categoryWidths(headers: string[]) {
+  return headers.map((header) => {
+    if (header.includes('JSON') || header === 'Tablo Kolonları') return 44
+    if (header === 'Varsayılan Teknik Madde') return 36
+    if (header === 'Kategori') return 28
+    return 18
+  })
+}
+
+function priceListKeyFromHeader(header: string) {
+  const match = header.match(/\(([^)]+)\)\s*$/)
+  if (match?.[1]) return normalizePriceListKey(match[1], '')
+  return normalizePriceListKey(header.replace(PRICE_LIST_PREFIX, '').trim(), '')
+}
+
+function priceListsFromRow(row: Record<string, any>) {
+  const prices: Record<string, number> = {}
+  Object.entries(row).forEach(([header, value]) => {
+    if (!header.startsWith(PRICE_LIST_PREFIX)) return
+    const key = priceListKeyFromHeader(header)
+    if (!key) return
+    prices[key] = numberValue(value)
+  })
+  return prices
+}
+
+function priceListCells(product: Product, priceLists: PriceListOption[] = []) {
+  return Object.fromEntries(
+    priceLists.map((priceList) => [
+      priceListColumn(priceList),
+      numberValue(product.priceLists?.[priceList.key] ?? (priceList.is_default ? product.price : 0)),
+    ])
+  )
+}
+
 function buildGuideSheet() {
   const rows = [
     ['Toplu ürün şablonu'],
@@ -99,9 +194,14 @@ function buildGuideSheet() {
     ['1. Ürünler sayfasında her satır bir ürün kartıdır.'],
     ['2. Kategoriler sayfası opsiyoneldir ama önerilir; kategori varsayımlarını burada tutabilirsiniz.'],
     ['3. SKU doluysa aynı SKU güncellenir, yoksa yeni ürün oluşur.'],
-    ['4. Teknik alanlar JSON kolonlarına geçerli JSON yazabilirsiniz. Örn: {"renk":"Beyaz"}'],
-    ['5. Şablonu indirip düzenledikten sonra aynı ekrandan tekrar içe aktarabilirsiniz.'],
+    ['4. Fiyat Listesi kolonları firma ayarlarındaki liste anahtarlarını parantez içinde taşır; bu parantezleri değiştirmeyin.'],
+    ['5. Tablo Kolonları alanını virgül veya satır satır yazabilirsiniz.'],
+    ['6. Ürün Teknik Maddeleri alanında her satır veya noktalı virgül ayrı teknik madde olur.'],
+    ['7. Teknik alanlar JSON kolonlarına geçerli JSON yazabilirsiniz. Örn: {"renk":"Beyaz"}'],
+    ['8. Şablonu indirip düzenledikten sonra aynı ekrandan tekrar içe aktarabilirsiniz.'],
     [],
+    ['Örnek tablo kolonları', 'Kod, Satış Birimi, Ölçü / Gövde, Renk / Kapak, Miktar, Liste Fiyatı, Birim, Birim Net Fiyatı, Tutar'],
+    ['Örnek ürün teknik maddeleri', 'Kasa 1.2mm\nKanat içi taş yünü dolgu'],
     ['Örnek teknik alan JSON', '{"renk":"Beyaz","ölçü":"90x210"}'],
     ['Örnek alan şeması JSON', '[{"field_key":"renk","label":"Renk","type":"text"}]'],
   ]
@@ -115,11 +215,14 @@ function buildTemplateCategoryRows() {
     {
       Kategori: 'Örnek Kapı Grubu',
       'Belge Grubu': 'KAPI',
+      'Belge Sırası': 1,
       'Varsayılan Birim': 'Adet',
       'Varsayılan KDV': 20,
       'Varsayılan İskonto': 0,
       'Varsayılan İskonto 2': 0,
       'Şablon Ailesi': 'ornek_kapi',
+      'Tablo Kolonları': 'Kod, Satış Birimi, Ölçü / Gövde, Renk / Kapak, Miktar, Liste Fiyatı, Birim, Birim Net Fiyatı, Tutar',
+      'Varsayılan Teknik Madde': 'Kategori varsayılan teknik maddesi',
       'Alan Şeması JSON': safeJson(
         [{ field_key: 'renk', label: 'Renk', type: 'text', required: false, order: 1, applies_to_documents: 'both' }],
         '[]'
@@ -128,22 +231,28 @@ function buildTemplateCategoryRows() {
   ]
 }
 
-function buildTemplateProductRows() {
+function buildTemplateProductRows(priceLists: PriceListOption[] = []) {
   return [
     {
       SKU: 'ORNEK-001',
       'Ürün Adı': 'Örnek Kapı',
       Kategori: 'Örnek Kapı Grubu',
       Fiyat: 12500,
+      ...Object.fromEntries(priceLists.map((priceList) => [priceListColumn(priceList), priceList.is_default ? 12500 : 0])),
       Stok: 5,
       Rezerve: 1,
       'Emniyet Stoğu': 2,
       'Belge Grubu': 'KAPI',
+      'Belge Sırası': 1,
       'Varsayılan Birim': 'Adet',
       'Varsayılan KDV': 20,
       'Varsayılan İskonto': 0,
       'Varsayılan İskonto 2': 0,
       'Şablon Ailesi': 'ornek_kapi',
+      'Tablo Kolonları': 'Kod, Satış Birimi, Ölçü / Gövde, Renk / Kapak, Miktar, Liste Fiyatı, Birim, Birim Net Fiyatı, Tutar',
+      'Detay 1 Varsayılan': '90x210',
+      'Detay 2 Varsayılan': 'Beyaz',
+      'Ürün Teknik Maddeleri': 'Kasa 1.2mm\nKanat içi taş yünü dolgu',
       'Teknik Alan Değerleri JSON': safeJson({ renk: 'Beyaz', ölçü: '90x210' }, '{}'),
       'Alan Şeması Override JSON': safeJson([], '[]'),
     },
@@ -154,30 +263,39 @@ function categoryRowsFromState(categories: Category[]) {
   return categories.map((category) => ({
     Kategori: category.name || '',
     'Belge Grubu': category.templateDefaults?.section_key || '',
+    'Belge Sırası': numberValue(category.templateDefaults?.document_order),
     'Varsayılan Birim': category.templateDefaults?.unit || '',
     'Varsayılan KDV': numberValue(category.templateDefaults?.tax),
     'Varsayılan İskonto': numberValue(category.templateDefaults?.discount),
     'Varsayılan İskonto 2': numberValue(category.templateDefaults?.discount_secondary),
     'Şablon Ailesi': category.templateDefaults?.template_family || '',
+    'Tablo Kolonları': Array.isArray(category.templateDefaults?.document_columns) ? category.templateDefaults.document_columns.join(', ') : '',
+    'Varsayılan Teknik Madde': Array.isArray(category.templateDefaults?.technical_items) ? category.templateDefaults.technical_items[0] || '' : '',
     'Alan Şeması JSON': safeJson(category.attributeSchema || [], '[]'),
   }))
 }
 
-function productRowsFromState(products: Product[]) {
+function productRowsFromState(products: Product[], priceLists: PriceListOption[] = []) {
   return products.map((product) => ({
     SKU: product.sku || '',
     'Ürün Adı': product.name || '',
     Kategori: product.categoryName || product.category || '',
     Fiyat: numberValue(product.price),
+    ...priceListCells(product, priceLists),
     Stok: numberValue(product.stock),
     Rezerve: numberValue(product.reserved),
     'Emniyet Stoğu': numberValue(product.reorderPoint),
     'Belge Grubu': product.templateDefaults?.section_key || '',
+    'Belge Sırası': numberValue(product.templateDefaults?.document_order),
     'Varsayılan Birim': product.templateDefaults?.unit || '',
     'Varsayılan KDV': numberValue(product.templateDefaults?.tax),
     'Varsayılan İskonto': numberValue(product.templateDefaults?.discount),
     'Varsayılan İskonto 2': numberValue(product.templateDefaults?.discount_secondary),
     'Şablon Ailesi': product.templateDefaults?.template_family || '',
+    'Tablo Kolonları': Array.isArray(product.templateDefaults?.document_columns) ? product.templateDefaults.document_columns.join(', ') : '',
+    'Detay 1 Varsayılan': product.templateDefaults?.primary || '',
+    'Detay 2 Varsayılan': product.templateDefaults?.secondary || '',
+    'Ürün Teknik Maddeleri': Array.isArray(product.templateDefaults?.technical_items) ? product.templateDefaults.technical_items.join('\n') : '',
     'Teknik Alan Değerleri JSON': safeJson(product.attributeValues || {}, '{}'),
     'Alan Şeması Override JSON': safeJson(product.attributeSchemaOverride || [], '[]'),
   }))
@@ -195,35 +313,37 @@ function appendSizedSheet(
   XLSX.utils.book_append_sheet(workbook, sheet, sheetName)
 }
 
-export function downloadInventoryTemplateWorkbook() {
+export function downloadInventoryTemplateWorkbook(priceLists: PriceListOption[] = []) {
   const workbook = XLSX.utils.book_new()
-  appendSizedSheet(workbook, buildTemplateProductRows(), PRODUCT_SHEET, PRODUCT_HEADERS, [18, 28, 22, 12, 10, 10, 14, 16, 16, 14, 16, 18, 18, 40, 40])
-  appendSizedSheet(workbook, buildTemplateCategoryRows(), CATEGORY_SHEET, CATEGORY_HEADERS, [24, 18, 16, 14, 16, 18, 18, 40])
+  const headers = productHeaders(priceLists)
+  appendSizedSheet(workbook, buildTemplateProductRows(priceLists), PRODUCT_SHEET, headers, productWidths(headers))
+  appendSizedSheet(workbook, buildTemplateCategoryRows(), CATEGORY_SHEET, CATEGORY_HEADERS, categoryWidths([...CATEGORY_HEADERS]))
   XLSX.utils.book_append_sheet(workbook, buildGuideSheet(), GUIDE_SHEET)
-  XLSX.writeFile(workbook, 'stok_toplu_urun_sablonu.xlsx')
+  XLSX.writeFile(workbook, 'stok_tum_urun_detayli_sablon.xlsx')
 }
 
-export function downloadInventoryStateWorkbook(products: Product[], categories: Category[]) {
+export function downloadInventoryStateWorkbook(products: Product[], categories: Category[], priceLists: PriceListOption[] = []) {
   const workbook = XLSX.utils.book_new()
-  const productRows = productRowsFromState(products)
+  const productRows = productRowsFromState(products, priceLists)
   const categoryRows = categoryRowsFromState(categories)
+  const headers = productHeaders(priceLists)
   appendSizedSheet(
     workbook,
-    productRows.length ? productRows : buildTemplateProductRows(),
+    productRows.length ? productRows : buildTemplateProductRows(priceLists),
     PRODUCT_SHEET,
-    PRODUCT_HEADERS,
-    [18, 28, 22, 12, 10, 10, 14, 16, 16, 14, 16, 18, 18, 40, 40]
+    headers,
+    productWidths(headers)
   )
   appendSizedSheet(
     workbook,
     categoryRows.length ? categoryRows : buildTemplateCategoryRows(),
     CATEGORY_SHEET,
     CATEGORY_HEADERS,
-    [24, 18, 16, 14, 16, 18, 18, 40]
+    categoryWidths([...CATEGORY_HEADERS])
   )
   XLSX.utils.book_append_sheet(workbook, buildGuideSheet(), GUIDE_SHEET)
   const fileDate = new Date().toISOString().slice(0, 10)
-  XLSX.writeFile(workbook, `stok_urunleri_${fileDate}.xlsx`)
+  XLSX.writeFile(workbook, `stok_tum_urun_detayli_${fileDate}.xlsx`)
 }
 
 function categoryPayloadFromRow(row: Record<string, any>): InventoryCategoryPayload | null {
@@ -233,11 +353,14 @@ function categoryPayloadFromRow(row: Record<string, any>): InventoryCategoryPayl
     name,
     template_defaults: {
       section_key: String(row['Belge Grubu'] || '').trim(),
+      document_order: numberValue(row['Belge Sırası']),
       unit: String(row['Varsayılan Birim'] || '').trim(),
       tax: numberValue(row['Varsayılan KDV']),
       discount: numberValue(row['Varsayılan İskonto']),
       discount_secondary: numberValue(row['Varsayılan İskonto 2']),
       template_family: String(row['Şablon Ailesi'] || '').trim(),
+      document_columns: columnList(row['Tablo Kolonları']),
+      technical_items: technicalItemList(row['Varsayılan Teknik Madde']).slice(0, 1),
     },
     attribute_schema: parseJsonArray(row['Alan Şeması JSON']),
   }
@@ -248,21 +371,30 @@ function productPayloadFromRow(row: Record<string, any>): InventoryProductPayloa
   const name = String(row['Ürün Adı'] || '').trim()
   const categoryName = String(row['Kategori'] || '').trim()
   if (!sku && !name) return null
+  const priceLists = priceListsFromRow(row)
+  const fallbackPrice = Object.values(priceLists).find((value) => Number.isFinite(value))
+  const price = numberValue(row['Fiyat'] || fallbackPrice)
   return {
     sku,
     name: name || sku,
     category_name: categoryName,
-    price: numberValue(row['Fiyat']),
+    price,
     stock: numberValue(row['Stok']),
     reserved: numberValue(row['Rezerve']),
     reorder_point: numberValue(row['Emniyet Stoğu']),
+    price_lists: Object.keys(priceLists).length ? priceLists : undefined,
     template_defaults: {
       section_key: String(row['Belge Grubu'] || '').trim(),
+      document_order: numberValue(row['Belge Sırası']),
       unit: String(row['Varsayılan Birim'] || '').trim(),
       tax: numberValue(row['Varsayılan KDV']),
       discount: numberValue(row['Varsayılan İskonto']),
       discount_secondary: numberValue(row['Varsayılan İskonto 2']),
       template_family: String(row['Şablon Ailesi'] || '').trim(),
+      document_columns: columnList(row['Tablo Kolonları']),
+      primary: String(row['Detay 1 Varsayılan'] || '').trim(),
+      secondary: String(row['Detay 2 Varsayılan'] || '').trim(),
+      technical_items: technicalItemList(row['Ürün Teknik Maddeleri']),
     },
     attribute_values: parseJsonObject(row['Teknik Alan Değerleri JSON']),
     attribute_schema_override: parseJsonArray(row['Alan Şeması Override JSON']),

@@ -751,6 +751,7 @@ export function CompaniesPage() {
   const [countryFilter, setCountryFilter] = useState('all')
   const [regionFilter, setRegionFilter] = useState('all')
   const [sizeFilter, setSizeFilter] = useState('all')
+  const [editingCompany, setEditingCompany] = useState<CompanyType | null>(null)
   const normalizeFilterValue = (value?: string) => value?.trim() ?? ''
 
   const normalizedCompanies = useMemo(
@@ -813,6 +814,15 @@ export function CompaniesPage() {
     regionFilter !== 'all' ||
     sizeFilter !== 'all'
 
+  const companyStats = useMemo(
+    () => ({
+      total: data.companies.length,
+      taxReady: data.companies.filter((company) => company.taxNumber || company.taxOffice).length,
+      contactReady: data.companies.filter((company) => company.phone || company.email || company.address).length,
+    }),
+    [data.companies]
+  )
+
   const resetFilters = () => {
     setIndustryFilter('all')
     setCountryFilter('all')
@@ -820,55 +830,64 @@ export function CompaniesPage() {
     setSizeFilter('all')
   }
 
-  const columns: ColumnDef<(typeof data.companies)[number]>[] = [
-    { accessorKey: 'name', header: 'Şirket' },
-    { accessorKey: 'industry', header: 'Sektör' },
-    { accessorKey: 'authorizedPerson', header: 'Yetkili' },
-    {
-      accessorKey: 'taxNumber',
-      header: 'Vergi',
-      cell: ({ row }) => [row.original.taxOffice, row.original.taxNumber].filter(Boolean).join(' / ') || '—',
-    },
-    {
-      accessorKey: 'contact',
-      header: 'İletişim',
-      cell: ({ row }) => [row.original.phone, row.original.email].filter(Boolean).join(' / ') || '—',
-    },
-    {
-      accessorKey: 'currency',
-      header: 'Para birimi',
-      cell: ({ row }) => row.original.currency || '—',
-    },
-    {
-      accessorKey: 'location',
-      header: 'Konum',
-      cell: ({ row }) => [row.original.region, row.original.country].filter(Boolean).join(' / ') || '—',
-    },
-    {
-      accessorKey: 'address',
-      header: 'Adres',
-      cell: ({ row }) => row.original.address || '—',
-    },
-    {
-      id: 'actions',
-      header: '',
-      cell: ({ row }) => (
-        <CompanyModal
-          company={row.original}
-          onSubmit={async (values) => {
-            await updateCompany(row.original.id, values as any)
-            toast({ title: 'Şirket güncellendi' })
-          }}
-        >
-          <Button variant="ghost" size="sm">
+  const columns: ColumnDef<(typeof data.companies)[number]>[] = useMemo(
+    () => [
+      { accessorKey: 'name', header: 'Şirket' },
+      { accessorKey: 'industry', header: 'Sektör' },
+      { accessorKey: 'authorizedPerson', header: 'Yetkili' },
+      {
+        accessorKey: 'taxNumber',
+        header: 'Vergi',
+        cell: ({ row }) => [row.original.taxOffice, row.original.taxNumber].filter(Boolean).join(' / ') || '—',
+      },
+      {
+        accessorKey: 'contact',
+        header: 'İletişim',
+        cell: ({ row }) => [row.original.phone, row.original.email].filter(Boolean).join(' / ') || '—',
+      },
+      {
+        accessorKey: 'currency',
+        header: 'Para birimi',
+        cell: ({ row }) => row.original.currency || '—',
+      },
+      {
+        accessorKey: 'location',
+        header: 'Konum',
+        cell: ({ row }) => [row.original.region, row.original.country].filter(Boolean).join(' / ') || '—',
+      },
+      {
+        accessorKey: 'address',
+        header: 'Adres',
+        cell: ({ row }) => row.original.address || '—',
+      },
+      {
+        id: 'actions',
+        header: '',
+        cell: ({ row }) => (
+          <Button variant="ghost" size="sm" onClick={() => setEditingCompany(row.original)}>
             Düzenle
           </Button>
-        </CompanyModal>
-      ),
-    },
-  ]
+        ),
+      },
+    ],
+    []
+  )
   return (
     <div className="space-y-4">
+      {editingCompany ? (
+        <CompanyModal
+          company={editingCompany}
+          open={Boolean(editingCompany)}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) setEditingCompany(null)
+          }}
+          onSubmit={async (values) => {
+            await updateCompany(editingCompany.id, values as any)
+            toast({ title: 'Şirket güncellendi' })
+            setEditingCompany(null)
+          }}
+        />
+      ) : null}
       <PageHeader
         title="Şirketler"
         description="Cari bilgiler, vergi detayları ve sözleşmede kullanılacak alıcı alanları"
@@ -905,14 +924,14 @@ export function CompaniesPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Toplam şirket</CardTitle>
           </CardHeader>
-          <CardContent className="text-2xl font-semibold">{data.companies.length}</CardContent>
+          <CardContent className="text-2xl font-semibold">{companyStats.total}</CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Vergi bilgisi dolu</CardTitle>
           </CardHeader>
           <CardContent className="text-2xl font-semibold">
-            {data.companies.filter((company) => company.taxNumber || company.taxOffice).length}
+            {companyStats.taxReady}
           </CardContent>
         </Card>
         <Card>
@@ -920,7 +939,7 @@ export function CompaniesPage() {
             <CardTitle className="text-sm">İletişim bilgisi dolu</CardTitle>
           </CardHeader>
           <CardContent className="text-2xl font-semibold">
-            {data.companies.filter((company) => company.phone || company.email || company.address).length}
+            {companyStats.contactReady}
           </CardContent>
         </Card>
       </div>
@@ -1036,4 +1055,3 @@ export function ContactsPage() {
     </div>
   )
 }
-

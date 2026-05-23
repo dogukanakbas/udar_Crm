@@ -52,26 +52,28 @@ export const formatExchangeRate = (rate: number | string, currency?: string) => 
 export const formatNumber = (value: number) =>
   new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 1 }).format(value)
 
+const parseDisplayDate = (value: string | number | Date) => {
+  if (typeof value === 'string') {
+    const dateOnlyMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (dateOnlyMatch) {
+      return new Date(Number(dateOnlyMatch[1]), Number(dateOnlyMatch[2]) - 1, Number(dateOnlyMatch[3]))
+    }
+  }
+  return new Date(value)
+}
+
+const padDatePart = (value: number) => String(value).padStart(2, '0')
+
 export const formatDate = (value: string | number | Date) => {
-  const d = new Date(value)
+  const d = parseDisplayDate(value)
   if (Number.isNaN(d.getTime())) return '—'
-  return new Intl.DateTimeFormat('tr-TR', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  }).format(d)
+  return `${padDatePart(d.getDate())}.${padDatePart(d.getMonth() + 1)}.${d.getFullYear()}`
 }
 
 export const formatDateTime = (value: string | number | Date) => {
-  const d = new Date(value)
+  const d = parseDisplayDate(value)
   if (Number.isNaN(d.getTime())) return '—'
-  return new Intl.DateTimeFormat('tr-TR', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(d)
+  return `${formatDate(d)} ${padDatePart(d.getHours())}:${padDatePart(d.getMinutes())}`
 }
 
 /** datetime-local input için yerel tarih-saat (UTC ISO kullanmayın). */
@@ -147,4 +149,3 @@ export function addWorkingMinutes(
   }
   return toDatetimeLocalValue(d)
 }
-

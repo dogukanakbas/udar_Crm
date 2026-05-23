@@ -20,6 +20,7 @@ class BusinessPartner(models.Model):
     tax_office = models.CharField(max_length=100, blank=True)
     tax_number = models.CharField(max_length=64, blank=True)
     authorized_person = models.CharField(max_length=255, blank=True)
+    owner = models.CharField(max_length=128, blank=True, default='')
     group = models.CharField(max_length=50, blank=True)
 
     def __str__(self):

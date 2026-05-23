@@ -15,7 +15,7 @@ const SheetOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
-    className={cn('fixed inset-0 z-40 bg-black/40 backdrop-blur-sm', className)}
+    className={cn('fixed inset-0 z-40 bg-slate-950/45 backdrop-blur-sm', className)}
     {...props}
   />
 ))
@@ -33,9 +33,9 @@ const SheetContent = React.forwardRef<React.ElementRef<typeof DialogPrimitive.Co
         ref={ref}
         aria-describedby={(props as any)['aria-describedby'] ?? undefined}
         className={cn(
-          'fixed z-50 flex flex-col gap-4 bg-background p-6 shadow-lg transition-transform',
-          side === 'right' && 'inset-y-0 right-0 w-[480px] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right',
-          side === 'left' && 'inset-y-0 left-0 w-[480px] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left',
+          'fixed z-50 flex flex-col gap-4 border-border/80 bg-background p-6 shadow-[0_28px_90px_-42px_rgba(2,6,23,0.65)] transition-transform',
+          side === 'right' && 'inset-y-0 right-0 w-[min(520px,96vw)] border-l data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right',
+          side === 'left' && 'inset-y-0 left-0 w-[min(520px,96vw)] border-r data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left',
           side === 'top' && 'inset-x-0 top-0 h-[300px] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-top data-[state=closed]:slide-out-to-top',
           side === 'bottom' && 'inset-x-0 bottom-0 h-[300px] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-bottom data-[state=closed]:slide-out-to-bottom',
           className
@@ -44,7 +44,7 @@ const SheetContent = React.forwardRef<React.ElementRef<typeof DialogPrimitive.Co
       >
         {children}
         <DialogPrimitive.Description className="sr-only" />
-        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-md p-1 text-muted-foreground opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
+        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-md p-1 text-muted-foreground opacity-80 transition hover:bg-muted hover:text-foreground hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring/30">
           <X className="h-4 w-4" />
         </DialogPrimitive.Close>
       </DialogPrimitive.Content>
@@ -86,4 +86,3 @@ export {
   SheetTitle,
   SheetTrigger,
 }
-

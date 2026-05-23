@@ -34,10 +34,10 @@ const rootRoute = new RootRoute({
       throw redirect({ to: '/login' })
     }
     
-    // Route geçişlerinde istek patlamasını önlemek için non-force hydrate kullan.
+    // Route geçişini API bekletmesin; veri arka planda tazelensin.
     try {
       const store = useAppStore.getState()
-      await store.hydrateFromApi({ force: false })
+      void store.hydrateFromApi({ force: false })
     } catch (err) {
       console.error('Route hydration failed', err)
       // Hata olsa bile route'a izin ver (offline durumlar için)
@@ -286,4 +286,3 @@ declare module '@tanstack/react-router' {
 export function AppRouter() {
   return <RouterProvider router={router} />
 }
-

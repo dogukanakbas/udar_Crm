@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from accounts.price_lists import normalize_product_price_lists
 from audit.utils import log_change
 
 from .models import Category, Product
@@ -95,6 +96,10 @@ def upsert_product_catalog(
         stock = Decimal(str(raw_product.get('stock') or 0))
         reserved = Decimal(str(raw_product.get('reserved') or 0))
         reorder_point = Decimal(str(raw_product.get('reorder_point') or raw_product.get('reorderPoint') or 0))
+        price_lists = normalize_product_price_lists(
+            raw_product.get('price_lists') or raw_product.get('priceLists'),
+            price,
+        )
 
         product = Product.objects.filter(organization=organization, sku=sku).first()
         if product:
@@ -107,6 +112,18 @@ def upsert_product_catalog(
                 changed = True
             if product.price != price:
                 product.price = price
+                changed = True
+            if product.price_lists != price_lists:
+                product.price_lists = price_lists
+                changed = True
+            if product.stock != stock:
+                product.stock = stock
+                changed = True
+            if product.reserved != reserved:
+                product.reserved = reserved
+                changed = True
+            if product.reorder_point != reorder_point:
+                product.reorder_point = reorder_point
                 changed = True
             if product.template_defaults != template_defaults:
                 product.template_defaults = template_defaults
@@ -123,6 +140,10 @@ def upsert_product_catalog(
                         'name',
                         'category',
                         'price',
+                        'price_lists',
+                        'stock',
+                        'reserved',
+                        'reorder_point',
                         'template_defaults',
                         'attribute_values',
                         'attribute_schema_override',
@@ -136,6 +157,7 @@ def upsert_product_catalog(
                 name=name,
                 category=category,
                 price=price,
+                price_lists=price_lists,
                 stock=stock,
                 reserved=reserved,
                 reorder_point=reorder_point,

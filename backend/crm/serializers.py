@@ -92,6 +92,7 @@ class BusinessPartnerSerializer(serializers.ModelSerializer):
             'tax_office': {'required': False, 'allow_blank': True},
             'tax_number': {'required': False, 'allow_blank': True},
             'authorized_person': {'required': False, 'allow_blank': True},
+            'owner': {'required': False, 'allow_blank': True},
         }
 
     def validate(self, attrs):
@@ -654,6 +655,9 @@ class QuoteSerializer(serializers.ModelSerializer):
                     details['secondary'] = defaults.get('secondary')
                 if product.attribute_values and 'attributes' not in details:
                     details['attributes'] = product.attribute_values
+                if 'technicalItems' not in details and 'technical_items' not in details:
+                    technical_items = document_defaults.get('technical_items') or []
+                    details['technicalItems'] = [str(item or '').strip() for item in technical_items if str(item or '').strip()]
                 if line.get('unit_price') in [None, '']:
                     line['unit_price'] = get_product_price_for_list(product, price_list_key)
 
@@ -722,6 +726,37 @@ class QuoteSerializer(serializers.ModelSerializer):
         quote.tax_total = tax + service_tax
         quote.total = subtotal - discount + tax + service_subtotal + service_tax
         quote.save(update_fields=['subtotal', 'discount_total', 'tax_total', 'total'])
+
+
+class QuoteListSerializer(QuoteSerializer):
+    class Meta(QuoteSerializer.Meta):
+        fields = [
+            'id',
+            'document_type',
+            'number',
+            'customer',
+            'customer_name',
+            'opportunity',
+            'owner',
+            'owner_name',
+            'prepared_by',
+            'prepared_by_name',
+            'seller_company_key',
+            'status',
+            'valid_until',
+            'subtotal',
+            'discount_total',
+            'tax_total',
+            'total',
+            'currency',
+            'payment_terms',
+            'delivery_terms',
+            'notes',
+            'vat_rate',
+            'contract_config',
+            'created_at',
+            'updated_at',
+        ]
 
 
 class PricingRuleSerializer(serializers.ModelSerializer):

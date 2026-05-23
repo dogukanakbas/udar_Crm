@@ -27,7 +27,7 @@ import type { Category, Product } from '@/types'
 
 const EMPTY_CATEGORY = {
   name: '',
-  templateDefaults: { section_key: '', unit: '', tax: 20, discount: 0, discount_secondary: 0, template_family: '' },
+  templateDefaults: { section_key: '', unit: '', tax: 20, discount: 0, discount_secondary: 0, template_family: '', technical_items: [] },
   attributeSchema: [],
 }
 
@@ -40,7 +40,7 @@ const EMPTY_PRODUCT = {
   stock: 0,
   reserved: 0,
   reorderPoint: 0,
-  templateDefaults: { section_key: '', unit: '', tax: 20, discount: 0, discount_secondary: 0, template_family: '' },
+  templateDefaults: { section_key: '', unit: '', tax: 20, discount: 0, discount_secondary: 0, template_family: '', technical_items: [] },
   attributeValues: {},
   attributeSchemaOverride: [],
 }
@@ -284,7 +284,7 @@ export function InventoryPanel() {
             <TabsContent value="products" className="space-y-3">
               <div className="flex flex-wrap justify-end gap-2">
                 <RbacGuard perm="products.edit">
-                  <Button size="sm" variant="outline" onClick={() => downloadInventoryTemplateWorkbook()}>
+                  <Button size="sm" variant="outline" onClick={() => downloadInventoryTemplateWorkbook(priceLists)}>
                     Şablon indir
                   </Button>
                 </RbacGuard>
@@ -292,7 +292,7 @@ export function InventoryPanel() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => downloadInventoryStateWorkbook(products, categories)}
+                    onClick={() => downloadInventoryStateWorkbook(products, categories, priceLists)}
                   >
                     Dışa aktar
                   </Button>
@@ -425,6 +425,7 @@ function ProductEditorDialog({ open, product, categories, priceLists, onClose, o
               discount: Number(product.templateDefaults?.discount ?? 0),
               discount_secondary: Number(product.templateDefaults?.discount_secondary ?? 0),
               template_family: product.templateDefaults?.template_family || '',
+              technical_items: Array.isArray(product.templateDefaults?.technical_items) ? product.templateDefaults.technical_items : [],
             },
             attributeValues: product.attributeValues || {},
             attributeSchemaOverride: product.attributeSchemaOverride || [],
@@ -443,6 +444,9 @@ function ProductEditorDialog({ open, product, categories, priceLists, onClose, o
       return { ...current, priceLists: nextPriceLists, price: key === defaultKey ? Number(value || 0) : current.price }
     })
   const setAttr = (key: string, value: any) => setValues((current: any) => ({ ...current, attributeValues: { ...(current.attributeValues || {}), [key]: value } }))
+  const addTechnicalItem = () => setTemplate('technical_items', [...(values.templateDefaults?.technical_items || []), ''])
+  const updateTechnicalItem = (index: number, value: string) => setTemplate('technical_items', (values.templateDefaults?.technical_items || []).map((item: string, itemIndex: number) => (itemIndex === index ? value : item)))
+  const removeTechnicalItem = (index: number) => setTemplate('technical_items', (values.templateDefaults?.technical_items || []).filter((_: string, itemIndex: number) => itemIndex !== index))
   const addOverride = () => setValues((current: any) => ({ ...current, attributeSchemaOverride: [...(current.attributeSchemaOverride || []), createSchemaRow((current.attributeSchemaOverride || []).length)] }))
   const updateOverride = (index: number, key: string, value: any) => setValues((current: any) => ({ ...current, attributeSchemaOverride: (current.attributeSchemaOverride || []).map((row: any, rowIndex: number) => (rowIndex === index ? { ...row, [key]: value } : row)) }))
   const removeOverride = (index: number) => setValues((current: any) => ({ ...current, attributeSchemaOverride: (current.attributeSchemaOverride || []).filter((_: any, rowIndex: number) => rowIndex !== index) }))
@@ -476,6 +480,7 @@ function ProductEditorDialog({ open, product, categories, priceLists, onClose, o
                         discount: Number(current.templateDefaults?.discount ?? nextCategory.templateDefaults?.discount ?? 0),
                         discount_secondary: Number(current.templateDefaults?.discount_secondary ?? nextCategory.templateDefaults?.discount_secondary ?? 0),
                         template_family: current.templateDefaults?.template_family || nextCategory.templateDefaults?.template_family || '',
+                        technical_items: current.templateDefaults?.technical_items || [],
                       },
                     }))
                   }
@@ -521,6 +526,32 @@ function ProductEditorDialog({ open, product, categories, priceLists, onClose, o
             <Field label="Vars. iskonto 2"><Input type="number" value={values.templateDefaults?.discount_secondary || 0} onChange={(event) => setTemplate('discount_secondary', Number(event.target.value))} /></Field>
           </div>
 
+          <div className="space-y-3 rounded-lg border border-border/70 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="font-medium">Ürüne özel teknik maddeler</p>
+                <p className="text-xs text-muted-foreground">Teklif oluştururken bu ürün seçildiğinde maddeler ayrı ayrı düzenlenebilir.</p>
+              </div>
+              <Button type="button" size="sm" variant="outline" onClick={addTechnicalItem}>
+                Madde ekle
+              </Button>
+            </div>
+            {(values.templateDefaults?.technical_items || []).length === 0 ? (
+              <p className="text-sm text-muted-foreground">Henüz teknik madde yok.</p>
+            ) : (
+              <div className="space-y-2">
+                {(values.templateDefaults?.technical_items || []).map((item: string, index: number) => (
+                  <div key={`product-technical-${index}`} className="grid gap-2 md:grid-cols-[1fr_auto]">
+                    <Input value={item} onChange={(event) => updateTechnicalItem(index, event.target.value)} placeholder={`${index + 1}. teknik madde`} />
+                    <Button type="button" variant="ghost" size="sm" onClick={() => removeTechnicalItem(index)}>
+                      Sil
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {mergedSchema.length > 0 && (
             <div className="space-y-3 rounded-lg border border-border/70 p-4">
               <div className="flex items-center justify-between">
@@ -555,8 +586,8 @@ function ProductEditorDialog({ open, product, categories, priceLists, onClose, o
                   reserved: Number(values.reserved || 0),
                   reorderPoint: Number(values.reorderPoint || 0),
                   reorder_point: Number(values.reorderPoint || 0),
-                  templateDefaults: values.templateDefaults,
-                  template_defaults: values.templateDefaults,
+                  templateDefaults: { ...(values.templateDefaults || {}), technical_items: (values.templateDefaults?.technical_items || []).map((item: string) => String(item || '').trim()).filter(Boolean) },
+                  template_defaults: { ...(values.templateDefaults || {}), technical_items: (values.templateDefaults?.technical_items || []).map((item: string) => String(item || '').trim()).filter(Boolean) },
                   attributeValues: values.attributeValues || {},
                   attribute_values: values.attributeValues || {},
                   attributeSchemaOverride: values.attributeSchemaOverride || [],
@@ -594,6 +625,7 @@ function CategoryTemplateDialog({ open, category, onClose, onSave }: { open: boo
               discount: Number(category.templateDefaults?.discount ?? 0),
               discount_secondary: Number(category.templateDefaults?.discount_secondary ?? 0),
               template_family: category.templateDefaults?.template_family || '',
+              technical_items: Array.isArray(category.templateDefaults?.technical_items) ? category.templateDefaults.technical_items.slice(0, 1) : [],
             },
             attributeSchema: category.attributeSchema || [],
           }
@@ -626,6 +658,9 @@ function CategoryTemplateDialog({ open, category, onClose, onSave }: { open: boo
             <Field label="Iskonto"><Input type="number" value={values.templateDefaults?.discount || 0} onChange={(event) => setTemplate('discount', Number(event.target.value))} /></Field>
             <Field label="Iskonto 2"><Input type="number" value={values.templateDefaults?.discount_secondary || 0} onChange={(event) => setTemplate('discount_secondary', Number(event.target.value))} /></Field>
           </div>
+          <Field label="Varsayılan teknik madde">
+            <Input value={(values.templateDefaults?.technical_items || [])[0] || ''} onChange={(event) => setTemplate('technical_items', event.target.value.trim() ? [event.target.value] : [])} placeholder="Bu kategori için tek satırlık varsayılan madde" />
+          </Field>
           <SchemaBuilder title="Teknik alan şablonu" rows={values.attributeSchema || []} onAdd={addSchema} onChange={updateSchema} onRemove={removeSchema} />
         </div>
         <DialogFooter>
@@ -634,7 +669,11 @@ function CategoryTemplateDialog({ open, category, onClose, onSave }: { open: boo
             onClick={async () => {
               setSubmitError(null)
               try {
-                await onSave({ id: category?.id, name: values.name || '', templateDefaults: values.templateDefaults, template_defaults: values.templateDefaults, attributeSchema: values.attributeSchema || [], attribute_schema: values.attributeSchema || [] })
+                const templateDefaults = {
+                  ...(values.templateDefaults || {}),
+                  technical_items: (values.templateDefaults?.technical_items || []).map((item: string) => String(item || '').trim()).filter(Boolean).slice(0, 1),
+                }
+                await onSave({ id: category?.id, name: values.name || '', templateDefaults, template_defaults: templateDefaults, attributeSchema: values.attributeSchema || [], attribute_schema: values.attributeSchema || [] })
               } catch (err: any) {
                 const detail = err?.response?.data
                 setSubmitError(detail?.name?.[0] || detail?.detail || 'Kaydedilemedi')

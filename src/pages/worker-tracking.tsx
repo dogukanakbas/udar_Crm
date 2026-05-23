@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router'
 import { RbacGuard } from '@/components/rbac'
 import { Badge } from '@/components/ui/badge'
 import api from '@/lib/api'
+import { formatDateTime } from '@/lib/utils'
 
 type WorkerTracking = {
   worker_id: number
@@ -204,7 +205,7 @@ export function WorkerTrackingPage() {
                   <td className="px-4 py-3">
                     {worker.last_activity ? (
                       <div className="text-sm text-slate-600">
-                        {new Date(worker.last_activity).toLocaleString('tr-TR')}
+                        {formatDateTime(worker.last_activity)}
                       </div>
                     ) : (
                       <span className="text-sm text-slate-400">-</span>
@@ -218,7 +219,7 @@ export function WorkerTrackingPage() {
                         </div>
                         <div className="text-slate-600 mt-1">{worker.last_handover.note}</div>
                         <div className="text-slate-400 text-xs mt-1">
-                          {new Date(worker.last_handover.at).toLocaleString('tr-TR')}
+                          {formatDateTime(worker.last_handover.at)}
                         </div>
                       </div>
                     ) : (
@@ -277,7 +278,7 @@ export function WorkerTrackingPage() {
                     {row.notes || '—'}
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-600">
-                    {row.last_activity ? new Date(row.last_activity).toLocaleString('tr-TR') : '—'}
+                    {row.last_activity ? formatDateTime(row.last_activity) : '—'}
                   </td>
                 </tr>
               ))}

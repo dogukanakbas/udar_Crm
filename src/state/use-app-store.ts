@@ -127,7 +127,7 @@ const emptySnapshot: MockDbSnapshot = {
   },
 }
 
-const mapQuote = (q: any, idx = 0) => ({
+export const mapQuote = (q: any, idx = 0) => ({
   id: String(q.id ?? idx),
   documentType: q.document_type || 'Quote',
   number: q.number,
@@ -188,6 +188,7 @@ const serializeCompanyPayload = (payload: Partial<Company>) => ({
   tax_office: payload.taxOffice || '',
   tax_number: payload.taxNumber || '',
   authorized_person: payload.authorizedPerson || '',
+  owner: payload.owner || '',
   phone: payload.phone || '',
   email: payload.email || '',
 })
@@ -212,6 +213,8 @@ const mapSellerCompany = (profile: any, idx = 0): SellerCompanyProfile => ({
   signatureName: profile.signature_name || profile.signatureName || '',
   signatureTitle: profile.signature_title || profile.signatureTitle || '',
   signatureLabel: profile.signature_label || profile.signatureLabel || '',
+  bankIbanLabel: profile.bank_iban_label || profile.bankIbanLabel || '1. IBAN',
+  bankIban2Label: profile.bank_iban_2_label || profile.bankIban2Label || '2. IBAN',
   notes: profile.notes || '',
   isActive: profile.is_active !== false,
   sortOrder: Number(profile.sort_order ?? profile.sortOrder ?? idx),
@@ -219,6 +222,8 @@ const mapSellerCompany = (profile: any, idx = 0): SellerCompanyProfile => ({
     bank: account.bank || '',
     iban: account.iban || '',
     currency: account.currency || 'TRY',
+    iban2: account.iban_2 || account.iban2 || '',
+    currency2: account.currency_2 || account.currency2 || 'USD',
     branch: account.branch || '',
     accountHolder: account.account_holder || account.accountHolder || '',
   })),
@@ -318,7 +323,7 @@ export const useAppStore = create<AppState>()(
       const settled = await Promise.allSettled([
         isWorkerRole ? emptyList : api.get('/products/'),
         isWorkerRole ? emptyList : api.get('/categories/'),
-        isWorkerRole ? emptyList : api.get('/quotes/'),
+        isWorkerRole ? emptyList : api.get('/quotes/', { params: { summary: 1 } }),
         isWorkerRole ? emptyList : api.get('/seller-companies/'),
         isWorkerRole ? emptyList : api.get('/partners/'),
         isWorkerRole ? emptyList : api.get('/contacts/'),
@@ -381,7 +386,7 @@ export const useAppStore = create<AppState>()(
         region: c.city || '',
         country: normalizeCountryLabel(c.country),
         size: normalizeCompanySize(c.size),
-        owner: 'N/A',
+        owner: c.owner || '',
         rating: 0,
         currency: resolveCompanyCurrency(c.currency, c.country),
         priceListKey: c.price_list_key || '',
@@ -1388,4 +1393,3 @@ export const useAppStore = create<AppState>()(
     }
   )
 )
-

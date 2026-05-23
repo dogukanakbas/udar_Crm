@@ -42,13 +42,15 @@ type PageHeaderProps = {
 }
 
 export const PageHeader = ({ title, description, actions, breadcrumb }: PageHeaderProps) => (
-  <div className="mb-6 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-    <div>
+  <div className="mb-6 rounded-lg border border-border/70 bg-card/85 p-4 shadow-[0_18px_50px_-38px_rgba(15,23,42,0.55)] backdrop-blur md:p-5">
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div className="min-w-0 space-y-1">
       {breadcrumb}
-      <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-      {description && <p className="text-muted-foreground">{description}</p>}
+      <h1 className="text-2xl font-semibold tracking-normal text-foreground md:text-[1.7rem]">{title}</h1>
+      {description && <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p>}
     </div>
-    {actions}
+    {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+    </div>
   </div>
 )
 
@@ -138,9 +140,12 @@ export function AppShell() {
   const isWideWorkspace = isQuotesWorkspace || isSellerCompanyWorkspace || isQuoteTemplateWorkspace || isInventoryWorkspace
 
   if (isPublic) {
+    if (activePath.startsWith('/login')) {
+      return <Outlet />
+    }
     return (
       <div className="min-h-screen bg-background">
-        <main className="mx-auto max-w-[520px] p-6">
+        <main className="mx-auto max-w-[560px] p-6">
           <Outlet />
         </main>
       </div>
@@ -148,20 +153,20 @@ export function AppShell() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background to-muted/30">
-      <div className={cn('mx-auto flex', isWideWorkspace ? 'max-w-[1640px]' : 'max-w-[1400px]')}>
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,hsl(var(--accent)/0.12),transparent_30rem),linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.38))]">
+      <div className="flex min-h-screen w-full">
         {loggedIn && (
-          <aside className="hidden w-64 shrink-0 border-r border-border/70 bg-card/60 p-4 lg:block">
-          <div className="mb-6 flex items-center gap-2">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground font-semibold">
+          <aside className="sticky top-0 hidden h-screen w-[276px] shrink-0 border-r border-white/10 bg-[#102d29] p-4 text-white lg:block">
+          <div className="mb-6 flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.06] p-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-white text-[#173f38] font-semibold shadow-[0_16px_38px_-22px_rgba(0,0,0,0.8)]">
               U
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Udar CRM + ERP</p>
-              <p className="text-base font-semibold">Çalışma alanı</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-white/45">Udar</p>
+              <p className="text-base font-semibold">CRM + ERP</p>
             </div>
           </div>
-          <ScrollArea className="h-[calc(100vh-120px)] pr-2">
+          <ScrollArea className="h-[calc(100vh-116px)] pr-2">
             <nav className="space-y-6 text-sm">
               {nav
                 .filter((group) => group.roles.includes(data.settings.role))
@@ -170,7 +175,7 @@ export function AppShell() {
                   if (item.children) {
                     return (
                       <div key={item.label} className="space-y-2">
-                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-white/45">
                           <Icon className="h-4 w-4" />
                           {item.label}
                         </div>
@@ -180,8 +185,8 @@ export function AppShell() {
                               key={child.to}
                               to={child.to}
                               className={cn(
-                                'flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-muted',
-                                activePath === child.to ? 'bg-muted text-foreground' : 'text-muted-foreground'
+                                'flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-white/10',
+                                activePath === child.to ? 'bg-white text-[#173f38] shadow-sm' : 'text-white/68'
                               )}
                             >
                               <span>{child.label}</span>
@@ -197,8 +202,8 @@ export function AppShell() {
                       key={item.to}
                       to={item.to!}
                       className={cn(
-                        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-semibold transition-colors hover:bg-muted',
-                        activePath === item.to ? 'bg-primary/10 text-primary' : 'text-foreground'
+                        'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-semibold transition-colors hover:bg-white/10',
+                        activePath === item.to ? 'bg-white text-[#173f38] shadow-sm' : 'text-white/82'
                       )}
                     >
                       <Icon className="h-4 w-4" />
@@ -211,16 +216,16 @@ export function AppShell() {
           </aside>
         )}
 
-        <main className={cn('flex-1 min-w-0 overflow-x-hidden px-3 md:px-6', isWideWorkspace && 'xl:px-7')}>
-          <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-border/80 bg-background/80 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+        <main className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
+          <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-border/70 bg-background/90 px-3 py-3 shadow-[0_14px_42px_-36px_rgba(15,23,42,0.45)] backdrop-blur supports-[backdrop-filter]:bg-background/80 md:px-5">
             <div className="lg:hidden">
               <MobileMenu />
             </div>
-            <div className="relative flex-1 max-w-md">
+            <div className="relative flex-1 max-w-xl">
               <Input
                 placeholder="Global arama (⌘/Ctrl + K)"
                 onFocus={() => setSearchOpen(true)}
-                className="pl-10"
+                className="h-10 bg-card/90 pl-10"
               />
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             </div>
@@ -238,7 +243,7 @@ export function AppShell() {
             <UserMenu />
           </header>
 
-          <div className="p-4 md:p-6">
+          <div className={cn('w-full p-4 md:p-6 xl:p-7', isWideWorkspace ? 'max-w-none' : 'max-w-[1680px]')}>
             <Outlet />
           </div>
         </main>
@@ -407,4 +412,3 @@ function UserMenu() {
     </DropdownMenu>
   )
 }
-

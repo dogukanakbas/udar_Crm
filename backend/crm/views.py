@@ -32,7 +32,7 @@ from .contracts import (
 )
 from workflow.models import ApprovalInstance, ApprovalStep
 from erp.models import Product
-from .serializers import QuoteSerializer, PricingRuleSerializer, BusinessPartnerSerializer, ProductSerializer, LeadSerializer, OpportunitySerializer, ContactSerializer
+from .serializers import QuoteListSerializer, QuoteSerializer, PricingRuleSerializer, BusinessPartnerSerializer, ProductSerializer, LeadSerializer, OpportunitySerializer, ContactSerializer
 from permissions import IsOrgMember, IsOwnerOrManager, HasAPIPermission
 from audit.utils import log_entity_action
 
@@ -206,14 +206,21 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['number', 'customer__name', 'status', 'document_type']
     ordering_fields = ['created_at', 'total']
-    queryset = Quote.objects.all().select_related('customer', 'owner', 'prepared_by').prefetch_related('lines__product__category')
+    queryset = Quote.objects.all()
+
+    def get_serializer_class(self):
+        if self.action == 'list' and self.request.query_params.get('summary') == '1':
+            return QuoteListSerializer
+        return QuoteSerializer
 
     def _attach_audit_user(self, quote):
         quote._audit_user = self.request.user
         return quote
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = super().get_queryset().select_related('customer', 'owner', 'prepared_by')
+        if not (self.action == 'list' and self.request.query_params.get('summary') == '1'):
+            qs = qs.prefetch_related('lines__product__category')
         user = self.request.user
         document_type = self.request.query_params.get('document_type')
         if document_type:
