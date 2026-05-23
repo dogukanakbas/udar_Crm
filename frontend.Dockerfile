@@ -25,6 +25,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json* ./
 RUN npm ci --include=dev
+COPY vite.config.ts ./
 COPY --from=build /app/dist ./dist
 EXPOSE 5173
 CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0", "--port", "5173"]
