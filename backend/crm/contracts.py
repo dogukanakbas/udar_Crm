@@ -1380,7 +1380,7 @@ def _build_reportlab_document_pdf_export(quote):
         story.append(basic_table(rows, widths=[28 * mm, 78 * mm, 22 * mm, 20 * mm, 33 * mm, 33 * mm, 33 * mm], header_rows=1))
         story.append(Spacer(1, 6))
 
-    service_rows = [[p('Kod', heading), p('Ürün / Hizmet', heading), p('Miktar', heading), p('Ara Toplam', heading), p('K.D.V. %', heading), p('K.D.V.', heading), p('Yekün', heading)]]
+    service_rows = [[p('Kod', heading), p('Ürün Adı', heading), p('Miktar', heading), p('Ara Toplam', heading), p('K.D.V. %', heading), p('K.D.V.', heading), p('Yekün', heading)]]
     subtotal_total = Decimal('0')
     tax_total = Decimal('0')
     grand_total = Decimal('0')
@@ -1909,16 +1909,26 @@ def _service_expense_rows(quote, groups=None):
     if configured:
         return configured
 
-    rows = []
-    seen = set()
+    rows_by_key = {}
     for group in groups or []:
-        key = str(group.get('key') or '').strip()
-        if not key or key == 'service' or key in seen:
+        if str(group.get('key') or '').strip() == 'service':
             continue
-        seen.add(key)
-        quantity = sum((Decimal(getattr(line, 'qty', 0) or 0) for line in group.get('lines') or []), Decimal('0'))
-        rows.append({'label': group.get('label') or _section_label(key), 'quantity': quantity, 'amount': Decimal('0'), 'tax_rate': Decimal('0'), 'tax': Decimal('0')})
-    return rows
+        for line in group.get('lines') or []:
+            product = getattr(line, 'product', None)
+            key = str(getattr(product, 'id', '') or '').strip()
+            if key:
+                key = f'product:{key}'
+            else:
+                code = str((getattr(line, 'details', None) or {}).get('code') or getattr(line, 'sku', '') or '').strip()
+                key = f'code:{code}' if code else f'name:{str(getattr(line, "name", "") or "").strip().lower()}'
+            if not key:
+                continue
+            label = str(getattr(product, 'name', '') or getattr(line, 'name', '') or getattr(product, 'sku', '') or 'Ürün').strip()
+            quantity = Decimal(getattr(line, 'qty', 0) or 0)
+            if key not in rows_by_key:
+                rows_by_key[key] = {'label': label, 'quantity': Decimal('0'), 'amount': Decimal('0'), 'tax_rate': Decimal('0'), 'tax': Decimal('0')}
+            rows_by_key[key]['quantity'] += quantity
+    return list(rows_by_key.values())
 
 
 def _write_service_summary_group(ws, quote, groups, row, column, physical_width):
@@ -1929,7 +1939,7 @@ def _write_service_summary_group(ws, quote, groups, row, column, physical_width)
     header_fill = PatternFill('solid', fgColor='EAF2F8')
     thin = Side(style='thin', color='9FB2C8')
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    headers = ['Ürün Kategori', 'Miktar', 'Ara Toplam', 'K.D.V. %', 'K.D.V.', 'Yekün']
+    headers = ['Ürün Adı', 'Miktar', 'Ara Toplam', 'K.D.V. %', 'K.D.V.', 'Yekün']
     spans = _dynamic_column_spans(headers, column_count)
 
     _unmerge_overlapping_range(ws, row, row, column, last_column)
@@ -2014,8 +2024,9 @@ def _write_service_summary_row(ws, row, column, spans, values, currency_code, bo
                 cell.number_format = '0.##"%"'
         cell.font = _seller_master_font(color='203864' if bold else '000000', bold=bold, size=SELLER_MASTER_TABLE_FONT_SIZE)
         is_amount_column = index >= 2
+        is_quantity_column = index == 1
         cell.alignment = Alignment(
-            horizontal='right' if is_amount_column else 'left',
+            horizontal='center' if is_quantity_column else ('right' if is_amount_column else 'left'),
             vertical='center',
             wrap_text=True,
             shrink_to_fit=is_amount_column,

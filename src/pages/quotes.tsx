@@ -896,9 +896,18 @@ const getServiceExpenseTaxTotal = (expenses: any[] = []) =>
   expenses.reduce((sum, item) => sum + getServiceExpenseAmount(item) * (Number(item.tax || 0) / 100), 0)
 const getServiceExpenseGrandTotal = (expenses: any[] = []) => getServiceExpenseSubtotal(expenses) + getServiceExpenseTaxTotal(expenses)
 
-const getLineCategoryLabel = (line: any, products: Product[], sectionOptions = SECTION_OPTIONS) => {
+const getLineServiceKey = (line: any, index = 0) => {
+  const productId = String(line?.productId || '').trim()
+  if (productId) return `product:${productId}`
+  const code = String(line?.details?.code || line?.sku || '').trim()
+  if (code) return `code:${code}`
+  const name = String(line?.name || '').trim().toLocaleLowerCase('tr-TR')
+  return name ? `manual:${name}` : `line:${index}`
+}
+
+const getLineServiceLabel = (line: any, products: Product[]) => {
   const product = products.find((item) => item.id === line.productId)
-  return sectionOptions.find((item) => item.value === line.sectionKey)?.label || product?.categoryName || sectionLabel(line.sectionKey)
+  return product?.name || line.name || product?.sku || 'Ürün'
 }
 
 const getExpenseCategoryKey = (row: any) => String(row?.categoryKey || row?.category_key || '').trim()
@@ -907,9 +916,9 @@ const buildServiceExpenseRows = (lines: any[], products: Product[], sectionOptio
   const previousByKey = new Map(previousRows.map((row) => [getExpenseCategoryKey(row), row]).filter(([key]) => key))
   const groups = new Map<string, { categoryKey: string; categoryLabel: string; quantity: number; tax: number }>()
 
-  lines.forEach((line) => {
+  lines.forEach((line, index) => {
     if (line.sectionKey === 'service') return
-    const key = String(line.sectionKey || '').trim()
+    const key = getLineServiceKey(line, index)
     if (!key) return
     const existing = groups.get(key)
     if (existing) {
@@ -918,7 +927,7 @@ const buildServiceExpenseRows = (lines: any[], products: Product[], sectionOptio
     }
     groups.set(key, {
       categoryKey: key,
-      categoryLabel: getLineCategoryLabel(line, products, sectionOptions),
+      categoryLabel: getLineServiceLabel(line, products),
       quantity: Math.max(0, Number(line.qty || 0)),
       tax: Number(line.tax ?? 20),
     })
@@ -1419,7 +1428,7 @@ function DocumentWizardTrigger({
   const lines = form.watch('lines') || []
   const serviceExpenses = form.watch('serviceExpenses') || []
   const selectedExpenseGroupKey = useMemo(
-    () => lines.map((line) => `${line.sectionKey || ''}:${line.productId || ''}:${line.qty || 0}:${line.tax || 0}`).filter(Boolean).join('|'),
+    () => lines.map((line, index) => `${getLineServiceKey(line, index)}:${line.name || ''}:${line.qty || 0}:${line.tax || 0}`).filter(Boolean).join('|'),
     [lines]
   )
 
@@ -1874,11 +1883,11 @@ function DocumentWizardTrigger({
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Hizmetler & montaj masrafları</CardTitle>
-                <CardDescription>Ürün gruplarında seçilen kategorilere göre PDF&apos;teki HİZMETLER bölümüne yazılacak kategori bazlı masrafları girin.</CardDescription>
+                <CardDescription>Ürün kalemlerine göre PDF&apos;teki HİZMETLER bölümüne yazılacak ürün bazlı hizmet tutarlarını girin.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 {serviceExpenses.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Masraf yazılacak ürün grubu yok. Önce kalemler sayfasında ürün grubu seçin.</p>
+                  <p className="text-sm text-muted-foreground">Hizmet yazılacak ürün yok. Önce ürün grupları sayfasında kalem ekleyin.</p>
                 ) : (
                   <div className="space-y-2">
                     {serviceExpenses.map((expense, index) => {
@@ -1886,7 +1895,7 @@ function DocumentWizardTrigger({
                       return (
                       <div key={expense.categoryKey || index} className="grid gap-3 rounded-md border border-border/70 p-3 md:grid-cols-[minmax(180px,1fr)_120px_160px_120px_minmax(150px,auto)] md:items-end">
                         <div>
-                          <Label>Ürün kategori</Label>
+                          <Label>Ürün adı</Label>
                           <Input value={expense.categoryLabel || ''} readOnly />
                         </div>
                         <div>
