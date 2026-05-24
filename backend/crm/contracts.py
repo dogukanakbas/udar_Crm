@@ -1877,11 +1877,51 @@ def _write_dynamic_product_group(ws, quote, group, row, column, physical_width=N
 
 
 def _service_expense_rows(quote, groups=None):
+    def normalize_label(value):
+        return _normalize_document_group_text(value or '')
+
+    def line_service_key(line):
+        product = getattr(line, 'product', None)
+        product_id = str(getattr(product, 'id', '') or '').strip()
+        if product_id:
+            return f'product:{product_id}'
+        details = getattr(line, 'details', None) or {}
+        code = str(details.get('code') or getattr(line, 'sku', '') or '').strip()
+        if code:
+            return f'code:{code}'
+        name = str(getattr(line, 'name', '') or '').strip().lower()
+        return f'name:{name}' if name else ''
+
+    def line_service_label(line):
+        product = getattr(line, 'product', None)
+        product_name = str(getattr(product, 'name', '') or getattr(line, 'name', '') or '').strip()
+        category_name = str(getattr(getattr(product, 'category', None), 'name', '') or _section_label(getattr(line, 'section_key', '') or '') or '').strip()
+        if product_name and normalize_label(product_name) != normalize_label(category_name):
+            return product_name
+        details = getattr(line, 'details', None) or {}
+        code = str(details.get('code') or getattr(product, 'sku', '') or getattr(line, 'sku', '') or '').strip()
+        primary = str(details.get('primary') or '').strip()
+        secondary = str(details.get('secondary') or '').strip()
+        detailed_name = ' - '.join([part for part in (code, primary, secondary) if part])
+        return detailed_name or product_name or code or 'Ürün'
+
+    line_labels_by_key = {}
+    for group in groups or _build_dynamic_line_groups(quote):
+        if str(group.get('key') or '').strip() == 'service':
+            continue
+        for line in group.get('lines') or []:
+            key = line_service_key(line)
+            if key and key not in line_labels_by_key:
+                line_labels_by_key[key] = line_service_label(line)
+
     configured = []
     for item in (quote.contract_config or {}).get('service_expenses') or []:
         if not isinstance(item, dict):
             continue
+        category_key = str(item.get('category_key') or item.get('categoryKey') or '').strip()
         label = str(item.get('category_label') or item.get('categoryLabel') or '').strip()
+        if category_key in line_labels_by_key:
+            label = line_labels_by_key[category_key]
         if not label:
             continue
         try:
@@ -1914,16 +1954,10 @@ def _service_expense_rows(quote, groups=None):
         if str(group.get('key') or '').strip() == 'service':
             continue
         for line in group.get('lines') or []:
-            product = getattr(line, 'product', None)
-            key = str(getattr(product, 'id', '') or '').strip()
-            if key:
-                key = f'product:{key}'
-            else:
-                code = str((getattr(line, 'details', None) or {}).get('code') or getattr(line, 'sku', '') or '').strip()
-                key = f'code:{code}' if code else f'name:{str(getattr(line, "name", "") or "").strip().lower()}'
+            key = line_service_key(line)
             if not key:
                 continue
-            label = str(getattr(product, 'name', '') or getattr(line, 'name', '') or getattr(product, 'sku', '') or 'Ürün').strip()
+            label = line_service_label(line)
             quantity = Decimal(getattr(line, 'qty', 0) or 0)
             if key not in rows_by_key:
                 rows_by_key[key] = {'label': label, 'quantity': Decimal('0'), 'amount': Decimal('0'), 'tax_rate': Decimal('0'), 'tax': Decimal('0')}

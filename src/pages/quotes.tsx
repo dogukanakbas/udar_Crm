@@ -905,9 +905,20 @@ const getLineServiceKey = (line: any, index = 0) => {
   return name ? `manual:${name}` : `line:${index}`
 }
 
+const normalizeServiceLabelText = (value?: string) => normalizeProductGroupText(value || '')
+
 const getLineServiceLabel = (line: any, products: Product[]) => {
   const product = products.find((item) => item.id === line.productId)
-  return product?.name || line.name || product?.sku || 'Ürün'
+  const productName = String(product?.name || line.name || '').trim()
+  const categoryName = String(product?.categoryName || sectionLabel(line.sectionKey) || '').trim()
+  if (productName && normalizeServiceLabelText(productName) !== normalizeServiceLabelText(categoryName)) {
+    return productName
+  }
+  const code = String(line?.details?.code || product?.sku || line?.sku || '').trim()
+  const primary = String(line?.details?.primary || '').trim()
+  const secondary = String(line?.details?.secondary || '').trim()
+  const detailedName = [code, primary, secondary].filter(Boolean).join(' - ')
+  return detailedName || productName || code || 'Ürün'
 }
 
 const getExpenseCategoryKey = (row: any) => String(row?.categoryKey || row?.category_key || '').trim()
@@ -1656,7 +1667,7 @@ function DocumentWizardTrigger({
             <TabsTrigger value="customer">Cariler</TabsTrigger>
             <TabsTrigger value="document">Belge</TabsTrigger>
             <TabsTrigger value="lines">Ürün Grupları</TabsTrigger>
-            <TabsTrigger value="expenses">Masraflar</TabsTrigger>
+            <TabsTrigger value="expenses">Hizmetler</TabsTrigger>
             <TabsTrigger value="review">Özet</TabsTrigger>
           </TabsList>
           <TabsContent value="customer" className="space-y-4">
@@ -1882,7 +1893,7 @@ function DocumentWizardTrigger({
           <TabsContent value="expenses" className="space-y-3">
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Hizmetler & montaj masrafları</CardTitle>
+                <CardTitle className="text-base">Ürün bazlı hizmetler</CardTitle>
                 <CardDescription>Ürün kalemlerine göre PDF&apos;teki HİZMETLER bölümüne yazılacak ürün bazlı hizmet tutarlarını girin.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -1941,7 +1952,7 @@ function DocumentWizardTrigger({
           </TabsContent>
 
             <TabsContent value="review" className="space-y-3">
-              <Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Belge türü: {DOCUMENT_TYPE_TR[documentMode]}</p><p>Müşteri: {form.watch('customerName') || selectedCustomer?.name || '-'}</p><p>Hazırlayan: {preparedByDisplayName || '-'}</p><p>Satıcı firma: {getSellerCompanyLabel(sellerCompanies, form.watch('sellerCompanyKey'))}</p><p>Fiyat listesi: {selectedPriceList.label}</p><p>Para birimi: {getCurrencySymbol(form.watch('currency'))} {getCurrencyLabel(form.watch('currency'))}</p><p>Kur: {formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p><p>Teslim tarihi: {form.watch('delivery') ? formatDate(form.watch('delivery')) : '-'}</p><p>Şablon: {templateLabel(documentMode, form.watch('templateKey'))}</p><p>Satır sayısı: {lines.length}</p><p>Ara toplam: {formatDocumentAmount(subtotal, form.watch('currency'))}</p><p>Toplam iskonto: {formatDocumentAmount(discountTotal, form.watch('currency'))}</p><p>Ürün KDV: {formatDocumentAmount(taxTotal, form.watch('currency'))}</p><p>Hizmetler & montaj yekün: {formatDocumentAmount(serviceExpenseGrandTotal, form.watch('currency'))}</p><p>Genel toplam: {formatDocumentAmount(total, form.watch('currency'))}</p></CardContent></Card>
+              <Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Belge türü: {DOCUMENT_TYPE_TR[documentMode]}</p><p>Müşteri: {form.watch('customerName') || selectedCustomer?.name || '-'}</p><p>Hazırlayan: {preparedByDisplayName || '-'}</p><p>Satıcı firma: {getSellerCompanyLabel(sellerCompanies, form.watch('sellerCompanyKey'))}</p><p>Fiyat listesi: {selectedPriceList.label}</p><p>Para birimi: {getCurrencySymbol(form.watch('currency'))} {getCurrencyLabel(form.watch('currency'))}</p><p>Kur: {formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p><p>Teslim tarihi: {form.watch('delivery') ? formatDate(form.watch('delivery')) : '-'}</p><p>Şablon: {templateLabel(documentMode, form.watch('templateKey'))}</p><p>Satır sayısı: {lines.length}</p><p>Ara toplam: {formatDocumentAmount(subtotal, form.watch('currency'))}</p><p>Toplam iskonto: {formatDocumentAmount(discountTotal, form.watch('currency'))}</p><p>Ürün KDV: {formatDocumentAmount(taxTotal, form.watch('currency'))}</p><p>Hizmetler yekün: {formatDocumentAmount(serviceExpenseGrandTotal, form.watch('currency'))}</p><p>Genel toplam: {formatDocumentAmount(total, form.watch('currency'))}</p></CardContent></Card>
           </TabsContent>
         </Tabs>
         <DialogFooter><Button type="button" onClick={handleSaveClick} disabled={saving}>{saving ? 'Kaydediliyor...' : isEditing ? 'Değişiklikleri kaydet' : 'Kaydet'}</Button></DialogFooter>
