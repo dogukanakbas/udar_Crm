@@ -7,6 +7,9 @@ from django.contrib.auth.tokens import default_token_generator
 from django.contrib.auth import get_user_model
 from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
 from django.conf import settings
+from django.db import IntegrityError, transaction
+from django.db.models.deletion import ProtectedError, RestrictedError
+import logging
 import os
 import pyotp
 import secrets
@@ -28,6 +31,9 @@ from .payment_options import normalize_payment_options
 from .price_lists import DEFAULT_PRICE_LIST_LABEL, get_default_price_list, normalize_price_lists
 from .serializers import TeamSerializer, TeamAssociateSerializer
 from .utils import ensure_permissions_seeded, get_effective_permissions, user_has_perm
+
+
+logger = logging.getLogger(__name__)
 
 
 class MeView(APIView):
@@ -168,8 +174,53 @@ class DeleteUserView(APIView):
       user = User.objects.get(pk=pk, organization=org)
     except User.DoesNotExist:
       return Response({"detail": "Kullanıcı bulunamadı"}, status=status.HTTP_404_NOT_FOUND)
-    log_entity_action(user, "deleted", user=request.user)
-    user.delete()
+
+    audit_snapshot = {
+        "username": user.username,
+        "email": user.email or "",
+        "role": user.role,
+        "full_name": f"{(user.first_name or '').strip()} {(user.last_name or '').strip()}".strip(),
+    }
+
+    try:
+      with transaction.atomic():
+        user.teams.clear()
+        try:
+          log_entity_action(user, "deleted", user=request.user, old_value=audit_snapshot)
+        except Exception:
+          logger.exception("Kullanıcı silme audit kaydı oluşturulamadı", extra={"deleted_user_id": user.pk})
+        user.delete()
+    except (ProtectedError, RestrictedError) as exc:
+      logger.exception("Kullanıcı ilişkili kayıtlar nedeniyle silinemedi", extra={"deleted_user_id": pk})
+      return Response(
+          {
+              "detail": (
+                  "Bu kullanıcıya bağlı kayıtlar olduğu için kullanıcı silinemedi. "
+                  "Önce bağlı görev, kayıt veya işlem sahipliklerini başka kullanıcıya aktarın."
+              ),
+              "error": str(exc),
+          },
+          status=status.HTTP_400_BAD_REQUEST,
+      )
+    except IntegrityError as exc:
+      logger.exception("Kullanıcı silinirken veritabanı bütünlük hatası oluştu", extra={"deleted_user_id": pk})
+      return Response(
+          {
+              "detail": (
+                  "Kullanıcı silinemedi. Bu kullanıcıya bağlı eski kayıtlar veritabanında duruyor olabilir; "
+                  "ilişkili kayıtlar temizlendikten veya başka kullanıcıya aktarıldıktan sonra tekrar deneyin."
+              ),
+              "error": str(exc),
+          },
+          status=status.HTTP_400_BAD_REQUEST,
+      )
+    except Exception as exc:
+      logger.exception("Kullanıcı silinirken beklenmeyen hata oluştu", extra={"deleted_user_id": pk})
+      return Response(
+          {"detail": "Kullanıcı silinirken beklenmeyen bir hata oluştu.", "error": str(exc)},
+          status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+      )
+
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
