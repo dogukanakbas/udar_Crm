@@ -225,6 +225,12 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         document_type = self.request.query_params.get('document_type')
         if document_type:
             qs = qs.filter(document_type=document_type)
+        prepared_by = self.request.query_params.get('prepared_by')
+        if prepared_by:
+            if prepared_by == '__empty__':
+                qs = qs.filter(prepared_by__isnull=True)
+            else:
+                qs = qs.filter(prepared_by_id=prepared_by)
         if getattr(user, 'role', '') not in ['Admin', 'Manager']:
             qs = qs.filter(owner=user)
         return qs.order_by('-created_at', '-id')

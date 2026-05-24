@@ -1062,6 +1062,7 @@ export function QuotesPage() {
   const { toast } = useToast()
   const [status, setStatus] = useState('all')
   const [customer, setCustomer] = useState('all')
+  const [preparedBy, setPreparedBy] = useState('all')
   const [documentType, setDocumentType] = useState<'all' | SalesDocumentType>('all')
   const [minAmount, setMinAmount] = useState('')
   const [maxAmount, setMaxAmount] = useState('')
@@ -1071,9 +1072,32 @@ export function QuotesPage() {
 
   const quotes = data.quotes ?? []
   const companies = data.companies
+  const users = data.users ?? []
   const companyNameById = useMemo(
     () => new Map(companies.map((company) => [company.id, company.name])),
     [companies]
+  )
+  const preparerOptions = useMemo(() => {
+    const byId = new Map<string, { id: string; label: string }>()
+    users.forEach((user) => {
+      byId.set(user.id, {
+        id: user.id,
+        label: user.fullName || user.username || user.email || `Kullanıcı #${user.id}`,
+      })
+    })
+    quotes.forEach((quote) => {
+      if (quote.preparedById && !byId.has(quote.preparedById)) {
+        byId.set(quote.preparedById, {
+          id: quote.preparedById,
+          label: quote.preparedByName || quote.owner || `Kullanıcı #${quote.preparedById}`,
+        })
+      }
+    })
+    return Array.from(byId.values()).sort((a, b) => a.label.localeCompare(b.label, 'tr'))
+  }, [quotes, users])
+  const hasUnassignedPreparer = useMemo(
+    () => quotes.some((quote) => !quote.preparedById && !quote.preparedByName),
+    [quotes]
   )
 
   const filtered = useMemo(
@@ -1081,15 +1105,18 @@ export function QuotesPage() {
       quotes.filter((quote) => {
         const matchesStatus = status === 'all' || quote.status === status
         const matchesCustomer = customer === 'all' || quote.customerId === customer
+        const matchesPreparer =
+          preparedBy === 'all' ||
+          (preparedBy === '__empty__' ? !quote.preparedById && !quote.preparedByName : quote.preparedById === preparedBy)
         const matchesType = documentType === 'all' || quote.documentType === documentType
         const matchesMin = !minAmount || quote.total >= Number(minAmount)
         const matchesMax = !maxAmount || quote.total <= Number(maxAmount)
-        return matchesStatus && matchesCustomer && matchesType && matchesMin && matchesMax
+        return matchesStatus && matchesCustomer && matchesPreparer && matchesType && matchesMin && matchesMax
       }),
-    [quotes, status, customer, documentType, minAmount, maxAmount]
+    [quotes, status, customer, preparedBy, documentType, minAmount, maxAmount]
   )
 
-  const hasActiveFilters = documentType !== 'all' || status !== 'all' || customer !== 'all' || Boolean(minAmount) || Boolean(maxAmount)
+  const hasActiveFilters = documentType !== 'all' || status !== 'all' || customer !== 'all' || preparedBy !== 'all' || Boolean(minAmount) || Boolean(maxAmount)
 
   const handleDownload = async (quote: Quote) => {
     try {
@@ -1247,7 +1274,7 @@ export function QuotesPage() {
       ) : null}
 
 
-      <div className="grid gap-3 rounded-xl border border-border/70 bg-card/40 p-4 md:grid-cols-2 xl:grid-cols-[220px_220px_minmax(280px,1fr)_140px_140px_auto]">
+      <div className="grid gap-3 rounded-xl border border-border/70 bg-card/40 p-4 md:grid-cols-2 xl:grid-cols-[200px_200px_minmax(240px,1fr)_minmax(220px,280px)_140px_140px_auto]">
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">Belge tipi</Label>
           <Select value={documentType} onValueChange={(value) => setDocumentType(value as any)}>
@@ -1289,6 +1316,22 @@ export function QuotesPage() {
         </div>
 
         <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Hazırlayan</Label>
+          <Select value={preparedBy} onValueChange={setPreparedBy}>
+            <SelectTrigger>
+              <SelectValue placeholder="Tüm hazırlayanlar" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tüm hazırlayanlar</SelectItem>
+              {preparerOptions.map((preparer) => (
+                <SelectItem key={preparer.id} value={preparer.id}>{preparer.label}</SelectItem>
+              ))}
+              {hasUnassignedPreparer ? <SelectItem value="__empty__">Hazırlayan yok</SelectItem> : null}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">Min. tutar</Label>
           <Input placeholder="Alt limit" value={minAmount} onChange={(event) => setMinAmount(event.target.value)} inputMode="numeric" />
         </div>
@@ -1309,6 +1352,7 @@ export function QuotesPage() {
               setDocumentType('all')
               setStatus('all')
               setCustomer('all')
+              setPreparedBy('all')
               setMinAmount('')
               setMaxAmount('')
             }}
