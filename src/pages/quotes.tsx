@@ -53,6 +53,8 @@ const DOCUMENT_TYPE_TR = {
 const ADD_CUSTOMER_OPTION = '__add_company__'
 const DOCUMENT_CURRENCY_OPTIONS = getCompanyCurrencyOptions(DEFAULT_COMPANY_COUNTRY_LABEL)
 const CUSTOM_OPTION = '__custom__'
+const MAX_LINE_DISCOUNT = 50
+const MAX_SECONDARY_DISCOUNT = 12
 const VALIDITY_PRESETS = [
   { value: '3', label: '3 gün' },
   { value: '5', label: '5 gün' },
@@ -182,8 +184,8 @@ const lineSchema = z.object({
   unit: z.string().min(1),
   qty: z.coerce.number().min(0),
   unitPrice: z.coerce.number().min(0),
-  discount: z.coerce.number().min(0).max(50),
-  discountSecondary: z.coerce.number().min(0).max(50).default(0),
+  discount: z.coerce.number().min(0).max(MAX_LINE_DISCOUNT),
+  discountSecondary: z.coerce.number().min(0).max(MAX_SECONDARY_DISCOUNT).default(0),
   tax: z.coerce.number().min(0),
   details: z.object({
     code: z.string().optional(),
@@ -200,6 +202,8 @@ const lineSchema = z.object({
 const serviceExpenseSchema = z.object({
   categoryKey: z.string().min(1),
   categoryLabel: z.string().min(1),
+  quantity: z.coerce.number().min(0).default(1),
+  unitAmount: z.coerce.number().min(0).default(0),
   amount: z.coerce.number().min(0).default(0),
   tax: z.coerce.number().min(0).default(20),
 })
@@ -327,6 +331,12 @@ const normalizeValidityDays = (value: unknown, fallback = 7) => {
 const normalizeTechnicalItems = (items: any) =>
   Array.isArray(items) ? items.map((item) => String(item || '').trim()).filter(Boolean) : []
 
+const clampNumber = (value: unknown, min = 0, max = Number.POSITIVE_INFINITY) => {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return min
+  return Math.min(Math.max(parsed, min), max)
+}
+
 const buildLineFromProduct = (product?: Product, previousLine?: any, priceListKey?: string) => {
   const defaults = product?.templateDefaults || {}
   const categoryDefaults = product?.categoryTemplateDefaults || {}
@@ -349,8 +359,8 @@ const buildLineFromProduct = (product?: Product, previousLine?: any, priceListKe
     unit: previousLine?.unit || defaults.unit || categoryDefaults.unit || 'Adet',
     qty: previousLine?.qty ?? 1,
     unitPrice: previousLine?.unitPrice ?? resolveProductPrice(product, priceListKey),
-    discount: previousLine?.discount ?? Number(defaults.discount ?? categoryDefaults.discount ?? 0),
-    discountSecondary: previousLine?.discountSecondary ?? Number(defaults.discount_secondary ?? categoryDefaults.discount_secondary ?? 0),
+    discount: clampNumber(previousLine?.discount ?? defaults.discount ?? categoryDefaults.discount ?? 0, 0, MAX_LINE_DISCOUNT),
+    discountSecondary: clampNumber(previousLine?.discountSecondary ?? defaults.discount_secondary ?? categoryDefaults.discount_secondary ?? 0, 0, MAX_SECONDARY_DISCOUNT),
     tax: previousLine?.tax ?? Number(defaults.tax ?? categoryDefaults.tax ?? 20),
     details: {
       code: previousLine?.details?.code || product?.sku || '',
@@ -444,8 +454,8 @@ const getInitialValues = (
           unit: line.unit || 'Adet',
           qty: Number(line.qty ?? 0),
           unitPrice: Number(line.unitPrice ?? 0),
-          discount: Number(line.discount ?? 0),
-          discountSecondary: Number(line.discountSecondary ?? 0),
+          discount: clampNumber(line.discount ?? 0, 0, MAX_LINE_DISCOUNT),
+          discountSecondary: clampNumber(line.discountSecondary ?? 0, 0, MAX_SECONDARY_DISCOUNT),
           tax: Number(line.tax ?? 0),
           details: {
             code: line.details?.code || line.sku || '',
@@ -533,12 +543,18 @@ const buildDocumentPayload = (values: any, mode: SalesDocumentType, status = 'Dr
     },
     termsText: values.termsText || '',
     contractNotesText: values.contractNotesText || '',
-    serviceExpenses: (values.serviceExpenses || []).map((item: any) => ({
-      categoryKey: item.categoryKey,
-      categoryLabel: item.categoryLabel,
-      amount: Number(item.amount || 0),
-      tax: Number(item.tax || 0),
-    })),
+    serviceExpenses: (values.serviceExpenses || []).map((item: any) => {
+      const quantity = Math.max(0, Number(item.quantity ?? 1) || 0)
+      const unitAmount = Math.max(0, Number(item.unitAmount ?? item.unit_amount ?? 0) || 0)
+      return {
+        categoryKey: item.categoryKey,
+        categoryLabel: item.categoryLabel,
+        quantity,
+        unitAmount,
+        amount: unitAmount * quantity,
+        tax: Number(item.tax || 0),
+      }
+    }),
   },
   lines: values.lines.map((line: any, index: number) => ({
     productId: line.mode === 'product' ? line.productId : undefined,
@@ -548,8 +564,8 @@ const buildDocumentPayload = (values: any, mode: SalesDocumentType, status = 'Dr
     unit: line.unit,
     qty: Number(line.qty || 0),
     unitPrice: Number(line.unitPrice || 0),
-    discount: Number(line.discount || 0),
-    discountSecondary: Number(line.discountSecondary || 0),
+    discount: clampNumber(line.discount || 0, 0, MAX_LINE_DISCOUNT),
+    discountSecondary: clampNumber(line.discountSecondary || 0, 0, MAX_SECONDARY_DISCOUNT),
     tax: Number(line.tax || 0),
     sortOrder: index,
     details: {
@@ -869,9 +885,15 @@ const getLineDiscountedBase = (line: any) => {
 }
 const getLineDiscountTotal = (line: any) => getLineBase(line) - getLineDiscountedBase(line)
 const getEffectiveDiscountRate = (line: any) => 100 - ((100 - Number(line.discount || 0)) * (100 - Number(line.discountSecondary || 0))) / 100
-const getServiceExpenseSubtotal = (expenses: any[] = []) => expenses.reduce((sum, item) => sum + Number(item.amount || 0), 0)
+const getServiceExpenseAmount = (item: any) => {
+  const quantity = Math.max(0, Number(item?.quantity ?? 1) || 0)
+  const unitAmount = Number(item?.unitAmount ?? item?.unit_amount)
+  if (Number.isFinite(unitAmount)) return quantity * Math.max(0, unitAmount)
+  return Math.max(0, Number(item?.amount || 0))
+}
+const getServiceExpenseSubtotal = (expenses: any[] = []) => expenses.reduce((sum, item) => sum + getServiceExpenseAmount(item), 0)
 const getServiceExpenseTaxTotal = (expenses: any[] = []) =>
-  expenses.reduce((sum, item) => sum + Number(item.amount || 0) * (Number(item.tax || 0) / 100), 0)
+  expenses.reduce((sum, item) => sum + getServiceExpenseAmount(item) * (Number(item.tax || 0) / 100), 0)
 const getServiceExpenseGrandTotal = (expenses: any[] = []) => getServiceExpenseSubtotal(expenses) + getServiceExpenseTaxTotal(expenses)
 
 const getLineCategoryLabel = (line: any, products: Product[], sectionOptions = SECTION_OPTIONS) => {
@@ -879,24 +901,42 @@ const getLineCategoryLabel = (line: any, products: Product[], sectionOptions = S
   return sectionOptions.find((item) => item.value === line.sectionKey)?.label || product?.categoryName || sectionLabel(line.sectionKey)
 }
 
+const getExpenseCategoryKey = (row: any) => String(row?.categoryKey || row?.category_key || '').trim()
+
 const buildServiceExpenseRows = (lines: any[], products: Product[], sectionOptions = SECTION_OPTIONS, previousRows: any[] = []) => {
-  const previousByKey = new Map(previousRows.map((row) => [String(row.categoryKey || ''), row]))
-  const rows = new Map<string, { categoryKey: string; categoryLabel: string; amount: number; tax: number }>()
+  const previousByKey = new Map(previousRows.map((row) => [getExpenseCategoryKey(row), row]).filter(([key]) => key))
+  const groups = new Map<string, { categoryKey: string; categoryLabel: string; quantity: number; tax: number }>()
 
   lines.forEach((line) => {
     if (line.sectionKey === 'service') return
     const key = String(line.sectionKey || '').trim()
-    if (!key || rows.has(key)) return
-    const previous = previousByKey.get(key)
-    rows.set(key, {
+    if (!key) return
+    const existing = groups.get(key)
+    if (existing) {
+      existing.quantity += Math.max(0, Number(line.qty || 0))
+      return
+    }
+    groups.set(key, {
       categoryKey: key,
       categoryLabel: getLineCategoryLabel(line, products, sectionOptions),
-      amount: Number(previous?.amount || 0),
-      tax: Number(previous?.tax ?? line.tax ?? 20),
+      quantity: Math.max(0, Number(line.qty || 0)),
+      tax: Number(line.tax ?? 20),
     })
   })
 
-  return Array.from(rows.values())
+  return Array.from(groups.values()).map((row) => {
+    const previous = previousByKey.get(row.categoryKey)
+    const quantity = row.quantity || 0
+    const previousUnitAmount = Number(previous?.unitAmount ?? previous?.unit_amount)
+    const fallbackUnitAmount = quantity > 0 ? Number(previous?.amount || 0) / quantity : Number(previous?.amount || 0)
+    const unitAmount = Number.isFinite(previousUnitAmount) ? previousUnitAmount : Math.max(0, Number(fallbackUnitAmount || 0))
+    return {
+      ...row,
+      unitAmount,
+      amount: unitAmount * quantity,
+      tax: Number(previous?.tax ?? row.tax ?? 20),
+    }
+  })
 }
 
 const buildCsv = (quotes: Quote[]) =>
@@ -1379,7 +1419,7 @@ function DocumentWizardTrigger({
   const lines = form.watch('lines') || []
   const serviceExpenses = form.watch('serviceExpenses') || []
   const selectedExpenseGroupKey = useMemo(
-    () => lines.map((line) => `${line.sectionKey || ''}:${line.productId || ''}:${line.tax || 0}`).filter(Boolean).join('|'),
+    () => lines.map((line) => `${line.sectionKey || ''}:${line.productId || ''}:${line.qty || 0}:${line.tax || 0}`).filter(Boolean).join('|'),
     [lines]
   )
 
@@ -1518,6 +1558,8 @@ function DocumentWizardTrigger({
   }
   const setManualMode = (index: number) => form.setValue(`lines.${index}`, { ...lines[index], mode: 'manual', productId: undefined }, { shouldDirty: true })
   const getDiscountValidationMessage = (nextLines: any[]) => {
+    const invalidSecondaryDiscountIndex = nextLines.findIndex((line) => Number(line.discountSecondary || 0) > MAX_SECONDARY_DISCOUNT)
+    if (invalidSecondaryDiscountIndex >= 0) return `${invalidSecondaryDiscountIndex + 1}. kalemde 2. iskonto en fazla %${MAX_SECONDARY_DISCOUNT} olabilir.`
     const invalidLineIndex = nextLines.findIndex((line) => getEffectiveDiscountRate(line) > 50)
     return invalidLineIndex >= 0 ? `${invalidLineIndex + 1}. kalemde iki iskonto birlikte en fazla %50 etkin iskonto oluşturabilir.` : null
   }
@@ -1792,8 +1834,8 @@ function DocumentWizardTrigger({
                       <div><Label>Detay 2</Label><Input value={line.details?.secondary || ''} onChange={(event) => form.setValue(`lines.${index}.details.secondary`, event.target.value)} /></div>
                       <div><Label>Miktar</Label><NumericEditor value={Number(line.qty || 0)} onValueChange={(value) => form.setValue(`lines.${index}.qty`, value)} /></div>
                       <div><Label>{`Birim fiyat (${getCurrencySymbol(form.watch('currency'))})`}</Label><NumericEditor value={Number(line.unitPrice || 0)} onValueChange={(value) => form.setValue(`lines.${index}.unitPrice`, value)} /></div>
-                      <div><Label>İskonto 1 %</Label><NumericEditor value={Number(line.discount || 0)} max={50} onValueChange={(value) => form.setValue(`lines.${index}.discount`, value)} /></div>
-                      <div><Label>İskonto 2 %</Label><NumericEditor value={Number(line.discountSecondary || 0)} max={50} onValueChange={(value) => form.setValue(`lines.${index}.discountSecondary`, value)} /></div>
+                      <div><Label>İskonto 1 %</Label><NumericEditor value={Number(line.discount || 0)} max={MAX_LINE_DISCOUNT} onValueChange={(value) => form.setValue(`lines.${index}.discount`, value)} /></div>
+                      <div><Label>İskonto 2 %</Label><NumericEditor value={Number(line.discountSecondary || 0)} max={MAX_SECONDARY_DISCOUNT} onValueChange={(value) => form.setValue(`lines.${index}.discountSecondary`, value)} /></div>
                       <div><Label>KDV %</Label><NumericEditor value={Number(line.tax || 0)} onValueChange={(value) => form.setValue(`lines.${index}.tax`, value)} /></div>
                       <div className="md:col-span-3 rounded-md border border-dashed border-border/70 px-3 py-2 text-xs text-muted-foreground">Etkin iskonto: %{getEffectiveDiscountRate(line).toFixed(2)}</div>
                       {dynamicSchema.length > 0 && <div className="md:col-span-3 grid gap-3 rounded-lg border border-border/70 p-3"><p className="text-sm font-medium">Teknik alanlar</p><div className="grid gap-3 md:grid-cols-2">{dynamicSchema.map((field) => { const value = line.details?.attributes?.[field.field_key] ?? ''; const path = `lines.${index}.details.attributes.${field.field_key}`; if (field.type === 'textarea') return <div key={field.field_key} className="md:col-span-2"><Label>{field.label}</Label><Textarea value={value} onChange={(event) => form.setValue(path, event.target.value)} /></div>; if (field.type === 'select') return <div key={field.field_key}><Label>{field.label}</Label><Select value={String(value || '__empty__')} onValueChange={(nextValue) => form.setValue(path, nextValue === '__empty__' ? '' : nextValue)}><SelectTrigger><SelectValue placeholder="Seçin" /></SelectTrigger><SelectContent><SelectItem value="__empty__">Boş</SelectItem>{(field.options || []).map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectContent></Select></div>; return <div key={field.field_key}><Label>{field.label}</Label><Input type={field.type === 'number' ? 'number' : 'text'} value={value} onChange={(event) => form.setValue(path, field.type === 'number' ? Number(event.target.value) : event.target.value)} /></div> })}</div></div>}
@@ -1832,24 +1874,34 @@ function DocumentWizardTrigger({
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Hizmetler & montaj masrafları</CardTitle>
-                <CardDescription>Ürün gruplarında seçilen kategorilere göre PDF&apos;teki MASRAFLAR bölümüne yazılacak kategori bazlı masrafları girin.</CardDescription>
+                <CardDescription>Ürün gruplarında seçilen kategorilere göre PDF&apos;teki HİZMETLER bölümüne yazılacak kategori bazlı masrafları girin.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 {serviceExpenses.length === 0 ? (
                   <p className="text-sm text-muted-foreground">Masraf yazılacak ürün grubu yok. Önce kalemler sayfasında ürün grubu seçin.</p>
                 ) : (
                   <div className="space-y-2">
-                    {serviceExpenses.map((expense, index) => (
-                      <div key={expense.categoryKey || index} className="grid gap-3 rounded-md border border-border/70 p-3 md:grid-cols-[minmax(180px,1fr)_160px_120px_minmax(150px,auto)] md:items-end">
+                    {serviceExpenses.map((expense, index) => {
+                      const expenseAmount = getServiceExpenseAmount(expense)
+                      return (
+                      <div key={expense.categoryKey || index} className="grid gap-3 rounded-md border border-border/70 p-3 md:grid-cols-[minmax(180px,1fr)_120px_160px_120px_minmax(150px,auto)] md:items-end">
                         <div>
                           <Label>Ürün kategori</Label>
                           <Input value={expense.categoryLabel || ''} readOnly />
                         </div>
                         <div>
-                          <Label>{`Masraf (${getCurrencySymbol(form.watch('currency'))})`}</Label>
+                          <Label>Ürün miktarı</Label>
+                          <Input value={Number(expense.quantity || 0)} readOnly />
+                        </div>
+                        <div>
+                          <Label>{`Tek ürün masrafı (${getCurrencySymbol(form.watch('currency'))})`}</Label>
                           <NumericEditor
-                            value={Number(expense.amount || 0)}
-                            onValueChange={(value) => form.setValue(`serviceExpenses.${index}.amount`, value, { shouldDirty: true, shouldValidate: true })}
+                            value={Number(expense.unitAmount || 0)}
+                            onValueChange={(value) => {
+                              const quantity = Math.max(0, Number(form.getValues(`serviceExpenses.${index}.quantity`) || 0))
+                              form.setValue(`serviceExpenses.${index}.unitAmount`, value, { shouldDirty: true, shouldValidate: true })
+                              form.setValue(`serviceExpenses.${index}.amount`, value * quantity, { shouldDirty: true, shouldValidate: true })
+                            }}
                           />
                         </div>
                         <div>
@@ -1861,10 +1913,13 @@ function DocumentWizardTrigger({
                         </div>
                         <div className="text-sm">
                           <p className="text-muted-foreground">Yekün</p>
-                          <p className="font-semibold">{formatDocumentAmount(Number(expense.amount || 0) * (1 + Number(expense.tax || 0) / 100), form.watch('currency'))}</p>
+                          <p className="font-semibold">{formatDocumentAmount(expenseAmount * (1 + Number(expense.tax || 0) / 100), form.watch('currency'))}</p>
+                          <p className="text-xs text-muted-foreground">
+                            KDV %{Number(expense.tax || 0)}: {formatDocumentAmount(expenseAmount * (Number(expense.tax || 0) / 100), form.watch('currency'))}
+                          </p>
                         </div>
                       </div>
-                    ))}
+                    )})}
                   </div>
                 )}
                 <div className="grid gap-2 rounded-md bg-muted/30 p-3 text-sm md:grid-cols-3">

@@ -66,6 +66,7 @@ class ProductViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         'partial_update': 'products.edit',
         'destroy': 'products.edit',
         'import_template_catalog': 'products.edit',
+        'bulk_delete': 'products.edit',
         'bulk_upsert': 'products.edit',
     }
     queryset = Product.objects.all()
@@ -105,6 +106,34 @@ class ProductViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 audit_field='bulk_product_import',
             )
         return Response(result)
+
+    @action(detail=False, methods=['post'], url_path='bulk-delete')
+    def bulk_delete(self, request):
+        data = request.data if isinstance(request.data, dict) else {}
+        org = _ensure_org(request)
+        ids = data.get('ids') or []
+        delete_all = bool(data.get('all'))
+
+        queryset = Product.objects.filter(organization=org)
+        if delete_all:
+            if data.get('confirm') is not True:
+                return Response({'detail': 'Tüm ürünleri silmek için confirm=true gönderilmelidir.'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            if not isinstance(ids, list) or not ids:
+                return Response({'detail': 'Silinecek ürün id listesi veya all=true gerekli.'}, status=status.HTTP_400_BAD_REQUEST)
+            queryset = queryset.filter(id__in=ids)
+
+        product_count = queryset.count()
+        stock_movement_count = StockMovement.objects.filter(organization=org, product__in=queryset).count()
+        with transaction.atomic():
+            queryset.delete()
+
+        return Response(
+            {
+                'deleted_products': product_count,
+                'deleted_stock_movements': stock_movement_count,
+            }
+        )
 
 
 class CategoryViewSet(OrgScopedMixin, viewsets.ModelViewSet):

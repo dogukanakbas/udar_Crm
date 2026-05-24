@@ -170,7 +170,7 @@ YEKUN_SUMMARY_GROUPS = [
     ('bathroom', 'BANYO DOLAPLARI'),
     ('accessory', 'AKSESUARLAR'),
     ('laminate', 'PARKE'),
-    ('service', 'MASRAFLAR'),
+    ('service', 'HİZMETLER'),
 ]
 SELLER_MASTER_BODY_FONT_SIZE = 12
 SELLER_MASTER_TABLE_FONT_SIZE = 11
@@ -1380,7 +1380,7 @@ def _build_reportlab_document_pdf_export(quote):
         story.append(basic_table(rows, widths=[28 * mm, 78 * mm, 22 * mm, 20 * mm, 33 * mm, 33 * mm, 33 * mm], header_rows=1))
         story.append(Spacer(1, 6))
 
-    service_rows = [[p('Kod', heading), p('Ürün / Hizmet', heading), p('Miktar', heading), p('Ara Toplam', heading), p('K.D.V.', heading), p('Yekün', heading)]]
+    service_rows = [[p('Kod', heading), p('Ürün / Hizmet', heading), p('Miktar', heading), p('Ara Toplam', heading), p('K.D.V. %', heading), p('K.D.V.', heading), p('Yekün', heading)]]
     subtotal_total = Decimal('0')
     tax_total = Decimal('0')
     grand_total = Decimal('0')
@@ -1391,15 +1391,16 @@ def _build_reportlab_document_pdf_export(quote):
             product = getattr(line, 'product', None)
             subtotal = _line_subtotal(line)
             tax = _line_tax(line)
+            tax_rate = Decimal(getattr(line, 'tax', 0) or 0)
             qty = Decimal(line.qty or 0)
             subtotal_total += subtotal
             tax_total += tax
             grand_total += subtotal + tax
             qty_total += qty
-            service_rows.append([p(details.get('code') or getattr(product, 'sku', '') or '', small), p(line.name or '', small), p(f'{qty:,.2f}', small), p(money(subtotal), small), p(money(tax), small), p(money(subtotal + tax), small)])
-    service_rows.append([p('TOPLAM', small), '', p(f'{qty_total:,.2f}', small), p(money(subtotal_total), small), p(money(tax_total), small), p(money(grand_total), small)])
-    story.append(p('MASRAFLAR', heading))
-    story.append(basic_table(service_rows, widths=[28 * mm, 94 * mm, 24 * mm, 34 * mm, 32 * mm, 35 * mm], header_rows=1))
+            service_rows.append([p(details.get('code') or getattr(product, 'sku', '') or '', small), p(line.name or '', small), p(f'{qty:,.2f}', small), p(money(subtotal), small), p(f'%{tax_rate:,.2f}', small), p(money(tax), small), p(money(subtotal + tax), small)])
+    service_rows.append([p('TOPLAM', small), '', p(f'{qty_total:,.2f}', small), p(money(subtotal_total), small), '', p(money(tax_total), small), p(money(grand_total), small)])
+    story.append(p('HİZMETLER', heading))
+    story.append(basic_table(service_rows, widths=[26 * mm, 78 * mm, 22 * mm, 32 * mm, 22 * mm, 30 * mm, 32 * mm], header_rows=1))
     story.append(Spacer(1, 8))
 
     config = quote.contract_config or {}
@@ -1888,10 +1889,23 @@ def _service_expense_rows(quote, groups=None):
         except (InvalidOperation, TypeError, ValueError):
             amount = Decimal('0')
         try:
+            quantity = Decimal(str(item.get('quantity') if item.get('quantity') not in [None, ''] else 1))
+        except (InvalidOperation, TypeError, ValueError):
+            quantity = Decimal('1')
+        try:
+            unit_amount = Decimal(str(item.get('unit_amount') if item.get('unit_amount') not in [None, ''] else item.get('unitAmount', '')))
+        except (InvalidOperation, TypeError, ValueError):
+            unit_amount = Decimal('-1')
+        quantity = max(quantity, Decimal('0'))
+        amount = max(amount, Decimal('0'))
+        if unit_amount >= Decimal('0'):
+            amount = max(unit_amount, Decimal('0')) * quantity
+        try:
             tax_rate = Decimal(str(item.get('tax') or item.get('tax_rate') or item.get('taxRate') or 0))
         except (InvalidOperation, TypeError, ValueError):
             tax_rate = Decimal('0')
-        configured.append({'label': label, 'amount': max(amount, Decimal('0')), 'tax': max(amount, Decimal('0')) * (max(tax_rate, Decimal('0')) / Decimal('100'))})
+        tax_rate = max(tax_rate, Decimal('0'))
+        configured.append({'label': label, 'quantity': quantity, 'amount': amount, 'tax_rate': tax_rate, 'tax': amount * (tax_rate / Decimal('100'))})
     if configured:
         return configured
 
@@ -1902,7 +1916,8 @@ def _service_expense_rows(quote, groups=None):
         if not key or key == 'service' or key in seen:
             continue
         seen.add(key)
-        rows.append({'label': group.get('label') or _section_label(key), 'amount': Decimal('0'), 'tax': Decimal('0')})
+        quantity = sum((Decimal(getattr(line, 'qty', 0) or 0) for line in group.get('lines') or []), Decimal('0'))
+        rows.append({'label': group.get('label') or _section_label(key), 'quantity': quantity, 'amount': Decimal('0'), 'tax_rate': Decimal('0'), 'tax': Decimal('0')})
     return rows
 
 
@@ -1914,13 +1929,13 @@ def _write_service_summary_group(ws, quote, groups, row, column, physical_width)
     header_fill = PatternFill('solid', fgColor='EAF2F8')
     thin = Side(style='thin', color='9FB2C8')
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    headers = ['Ürün Kategori', 'Miktar', 'Ara Toplam', 'K.D.V.', 'Yekün']
+    headers = ['Ürün Kategori', 'Miktar', 'Ara Toplam', 'K.D.V. %', 'K.D.V.', 'Yekün']
     spans = _dynamic_column_spans(headers, column_count)
 
     _unmerge_overlapping_range(ws, row, row, column, last_column)
     ws.merge_cells(start_row=row, start_column=column, end_row=row, end_column=last_column)
     title = ws.cell(row, column)
-    title.value = 'MASRAFLAR'
+    title.value = 'HİZMETLER'
     title.fill = dark_fill
     title.font = _seller_master_font(color='FFFFFF', bold=True, size=SELLER_MASTER_HEADER_FONT_SIZE)
     title.alignment = Alignment(horizontal='center', vertical='center')
@@ -1958,11 +1973,14 @@ def _write_service_summary_group(ws, quote, groups, row, column, physical_width)
         subtotal_total += subtotal
         tax_total += tax
         grand_total += grand
-        quantity_total += Decimal('1')
+        quantity = Decimal(item.get('quantity') or 0)
+        tax_rate = Decimal(item.get('tax_rate') or 0)
+        quantity_total += quantity
         row = _write_service_summary_row(ws, row, column, spans, [
             item['label'],
-            Decimal('1'),
+            quantity,
             subtotal,
+            tax_rate,
             tax,
             grand,
         ], currency_code, border)
@@ -1971,6 +1989,7 @@ def _write_service_summary_group(ws, quote, groups, row, column, physical_width)
         'TOPLAM',
         quantity_total,
         subtotal_total,
+        '',
         tax_total,
         grand_total,
     ], currency_code, border, bold=True)
@@ -1991,6 +2010,8 @@ def _write_service_summary_row(ws, row, column, spans, values, currency_code, bo
             cell.number_format = _currency_number_format(currency_code)
             if index == 1:
                 cell.number_format = '#,##0.##'
+            elif index == 3:
+                cell.number_format = '0.##"%"'
         cell.font = _seller_master_font(color='203864' if bold else '000000', bold=bold, size=SELLER_MASTER_TABLE_FONT_SIZE)
         is_amount_column = index >= 2
         cell.alignment = Alignment(
@@ -2098,7 +2119,7 @@ def _yekun_summary_label(group):
     key = str(group.get('key') or '').strip()
     label = str(group.get('label') or '').strip() or _section_label(key)
     if key == 'service':
-        return 'MASRAFLAR'
+        return 'HİZMETLER'
     normalized_label = _normalize_document_group_text(label)
     if normalized_label.endswith('grubu'):
         return _turkish_upper(label)
@@ -2123,7 +2144,7 @@ def _build_yekun_summary_rows(quote):
         _add_yekun_summary_row(rows_by_key, group.get('key'), _yekun_summary_label(group), amount)
 
     service_expense_total = sum((item['amount'] + item['tax'] for item in _service_expense_rows(quote)), Decimal('0'))
-    _add_yekun_summary_row(rows_by_key, 'service', 'MASRAFLAR', service_expense_total)
+    _add_yekun_summary_row(rows_by_key, 'service', 'HİZMETLER', service_expense_total)
     return list(rows_by_key.values())
 
 

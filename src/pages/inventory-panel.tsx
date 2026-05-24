@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
+import { Trash2 } from 'lucide-react'
 
 import { DataTable } from '@/components/data-table'
 import { Badge } from '@/components/ui/badge'
@@ -52,6 +53,7 @@ export function InventoryPanel() {
     upsertCategory,
     upsertProduct,
     deleteProduct,
+    bulkDeleteProducts,
     bulkUpsertProducts,
     syncTemplateCatalogToInventory,
   } = useAppStore()
@@ -64,6 +66,7 @@ export function InventoryPanel() {
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
   const [importingTemplateCatalog, setImportingTemplateCatalog] = useState(false)
   const [bulkImporting, setBulkImporting] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null)
   const [priceLists, setPriceLists] = useState<PriceListOption[]>(normalizePriceLists())
 
@@ -111,6 +114,34 @@ export function InventoryPanel() {
       })
     } finally {
       setBulkImporting(false)
+    }
+  }
+
+  const handleDeleteAllProducts = async () => {
+    if (products.length === 0) {
+      toast({ title: 'Silinecek ürün yok' })
+      return
+    }
+    const confirmation = window.prompt(
+      `${products.length} ürün ve bu ürünlere bağlı stok hareketleri silinecek. Eski teklif satırları korunur ancak ürün bağlantıları boşalır.\n\nDevam etmek için SİL yazın.`
+    )
+    if (confirmation !== 'SİL') return
+
+    setBulkDeleting(true)
+    try {
+      const result = await bulkDeleteProducts({ all: true })
+      toast({
+        title: 'Ürün listesi sıfırlandı',
+        description: `${result.deleted_products} ürün ve ${result.deleted_stock_movements} stok hareketi silindi.`,
+      })
+    } catch {
+      toast({
+        title: 'Toplu silme başarısız',
+        description: 'Ürün listesi silinemedi, lütfen tekrar deneyin.',
+        variant: 'destructive',
+      })
+    } finally {
+      setBulkDeleting(false)
     }
   }
 
@@ -327,6 +358,17 @@ export function InventoryPanel() {
                     }}
                   >
                     {importingTemplateCatalog ? 'Ekleniyor...' : 'Şablon ürünlerini stoğa ekle'}
+                  </Button>
+                </RbacGuard>
+                <RbacGuard perm="products.edit">
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={bulkDeleting || products.length === 0}
+                    onClick={handleDeleteAllProducts}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    {bulkDeleting ? 'Siliniyor...' : 'Tüm ürünleri sil'}
                   </Button>
                 </RbacGuard>
                 <RbacGuard perm="products.edit">

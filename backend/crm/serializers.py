@@ -26,6 +26,8 @@ from .models import BusinessPartner, Contact, Lead, Opportunity, PricingRule, Qu
 
 SUPPORTED_CURRENCIES = {'TRY', 'USD', 'EUR'}
 TURKEY_ALIASES = {'turkiye', 'türkiye', 'turkey', 'turk', 'türk', 'tr', 'tur'}
+MAX_LINE_DISCOUNT = Decimal('50')
+MAX_SECONDARY_DISCOUNT = Decimal('12')
 
 
 def normalize_currency_code(value, default='TRY'):
@@ -244,15 +246,16 @@ class QuoteLineSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         hundred = Decimal('100')
-        max_discount = Decimal('50')
         first_discount = Decimal(attrs.get('discount') or 0)
         second_discount = Decimal(attrs.get('discount_secondary') or 0)
 
-        if first_discount > max_discount or second_discount > max_discount:
-            raise serializers.ValidationError('Her iskonto alanı en fazla %50 olabilir.')
+        if first_discount > MAX_LINE_DISCOUNT:
+            raise serializers.ValidationError('1. iskonto en fazla %50 olabilir.')
+        if second_discount > MAX_SECONDARY_DISCOUNT:
+            raise serializers.ValidationError('2. iskonto en fazla %12 olabilir.')
 
         effective_discount = hundred - (((hundred - first_discount) * (hundred - second_discount)) / hundred)
-        if effective_discount > max_discount:
+        if effective_discount > MAX_LINE_DISCOUNT:
             raise serializers.ValidationError('İki iskonto birlikte en fazla %50 etkin iskonto oluşturabilir.')
         return attrs
 
@@ -617,9 +620,22 @@ class QuoteSerializer(serializers.ModelSerializer):
             if not category_key or not category_label or category_key in seen:
                 continue
             try:
+                quantity = Decimal(str(item.get('quantity') if item.get('quantity') not in [None, ''] else 1))
+            except (InvalidOperation, TypeError, ValueError):
+                quantity = Decimal('1')
+            quantity = max(quantity, Decimal('0'))
+            try:
+                unit_amount = Decimal(str(item.get('unit_amount') if item.get('unit_amount') not in [None, ''] else item.get('unitAmount', '')))
+            except (InvalidOperation, TypeError, ValueError):
+                unit_amount = Decimal('-1')
+            try:
                 amount = Decimal(str(item.get('amount') or 0))
             except (InvalidOperation, TypeError, ValueError):
                 amount = Decimal('0')
+            if unit_amount < Decimal('0'):
+                unit_amount = amount / quantity if quantity > Decimal('0') else amount
+            unit_amount = max(unit_amount, Decimal('0'))
+            amount = unit_amount * quantity
             try:
                 tax = Decimal(str(item.get('tax') if item.get('tax') not in [None, ''] else item.get('tax_rate', item.get('taxRate', 20))))
             except (InvalidOperation, TypeError, ValueError):
@@ -629,6 +645,8 @@ class QuoteSerializer(serializers.ModelSerializer):
                 {
                     'category_key': category_key[:80],
                     'category_label': category_label[:160],
+                    'quantity': str(quantity.quantize(Decimal('0.01'))),
+                    'unit_amount': str(unit_amount.quantize(Decimal('0.01'))),
                     'amount': str(max(amount, Decimal('0')).quantize(Decimal('0.01'))),
                     'tax': str(max(tax, Decimal('0')).quantize(Decimal('0.01'))),
                 }
@@ -713,9 +731,20 @@ class QuoteSerializer(serializers.ModelSerializer):
             except (InvalidOperation, TypeError, ValueError):
                 amount = Decimal('0')
             try:
+                quantity = Decimal(str(item.get('quantity') if item.get('quantity') not in [None, ''] else 1))
+            except (InvalidOperation, TypeError, ValueError):
+                quantity = Decimal('1')
+            try:
+                unit_amount = Decimal(str(item.get('unit_amount') if item.get('unit_amount') not in [None, ''] else item.get('unitAmount', '')))
+            except (InvalidOperation, TypeError, ValueError):
+                unit_amount = Decimal('-1')
+            if unit_amount >= Decimal('0'):
+                amount = max(unit_amount, Decimal('0')) * max(quantity, Decimal('0'))
+            try:
                 tax_rate = Decimal(str(item.get('tax') or 0))
             except (InvalidOperation, TypeError, ValueError):
                 tax_rate = Decimal('0')
+            amount = max(amount, Decimal('0'))
             service_subtotal += amount
             service_tax += amount * (tax_rate / hundred)
 

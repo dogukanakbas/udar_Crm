@@ -52,6 +52,7 @@ type AppState = {
   adjustInventory: (sku: string, delta: number) => void
   upsertProduct: (product: Partial<Product> & { sku: string }) => Promise<void>
   deleteProduct: (id: string) => Promise<void>
+  bulkDeleteProducts: (options?: { ids?: string[]; all?: boolean }) => Promise<{ deleted_products: number; deleted_stock_movements: number }>
   upsertCategory: (category: Partial<Category>) => Promise<void>
   bulkUpsertProducts: (payload: {
     categories: Array<Record<string, any>>
@@ -904,6 +905,28 @@ export const useAppStore = create<AppState>()(
       }))
     } catch (err) {
       console.error('API deleteProduct failed', err)
+      throw err
+    }
+  },
+  bulkDeleteProducts: async (options = {}) => {
+    try {
+      const payload = options.all
+        ? { all: true, confirm: true }
+        : { ids: options.ids || [] }
+      const response = await api.post('/products/bulk-delete/', payload)
+      const ids = new Set(options.ids || [])
+      set((state) => ({
+        data: {
+          ...state.data,
+          products: options.all
+            ? []
+            : state.data.products.filter((product) => !ids.has(product.id)),
+        },
+      }))
+      await get().hydrateFromApi({ force: true })
+      return response.data
+    } catch (err) {
+      console.error('API bulkDeleteProducts failed', err)
       throw err
     }
   },
