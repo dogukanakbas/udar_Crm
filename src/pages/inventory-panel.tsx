@@ -4,6 +4,7 @@ import { type ColumnDef } from '@tanstack/react-table'
 import { Trash2 } from 'lucide-react'
 
 import { DataTable } from '@/components/data-table'
+import { SortableTable } from '@/components/sortable-table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -69,6 +70,8 @@ export function InventoryPanel() {
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null)
   const [priceLists, setPriceLists] = useState<PriceListOption[]>(normalizePriceLists())
+  const [reorderingProducts, setReorderingProducts] = useState(false)
+  const [reorderingCategories, setReorderingCategories] = useState(false)
 
   const products = data.products || []
   const categories = data.categories || []
@@ -142,6 +145,52 @@ export function InventoryPanel() {
       })
     } finally {
       setBulkDeleting(false)
+    }
+  }
+
+  const handleReorderProducts = async (reorderedProducts: Product[]) => {
+    setReorderingProducts(true)
+    try {
+      const new_positions = reorderedProducts.map((product, index) => ({
+        id: product.id,
+        order: index,
+      }))
+      await api.post('/api/products/reorder/', { new_positions })
+      toast({
+        title: 'Ürün sıralaması güncellendi',
+        description: `${reorderedProducts.length} ürün başarıyla sıralandı.`,
+      })
+    } catch (error) {
+      toast({
+        title: 'Sıralama güncellenemedi',
+        description: 'Ürün sıralama işlemi başarısız oldu, lütfen tekrar deneyin.',
+        variant: 'destructive',
+      })
+    } finally {
+      setReorderingProducts(false)
+    }
+  }
+
+  const handleReorderCategories = async (reorderedCategories: Category[]) => {
+    setReorderingCategories(true)
+    try {
+      const new_positions = reorderedCategories.map((category, index) => ({
+        id: category.id,
+        order: index,
+      }))
+      await api.post('/api/categories/reorder/', { new_positions })
+      toast({
+        title: 'Kategori sıralaması güncellendi',
+        description: `${reorderedCategories.length} kategori başarıyla sıralandı.`,
+      })
+    } catch (error) {
+      toast({
+        title: 'Kategori sıralama güncellenemedi',
+        description: 'Kategori sıralama işlemi başarısız oldu, lütfen tekrar deneyin.',
+        variant: 'destructive',
+      })
+    } finally {
+      setReorderingCategories(false)
     }
   }
 
@@ -383,12 +432,15 @@ export function InventoryPanel() {
                   </Button>
                 </RbacGuard>
               </div>
-              <DataTable
+              <SortableTable
                 columns={productColumns}
                 data={products}
                 searchKey="sku"
                 pageSizeOptions={[10, 25, 50, 100]}
                 initialPageSize={25}
+                enableDragAndDrop={true}
+                onReorder={handleReorderProducts}
+                getRowId={(product) => String(product.id)}
               />
             </TabsContent>
             <TabsContent value="categories" className="space-y-3">
@@ -405,7 +457,14 @@ export function InventoryPanel() {
                   </Button>
                 </RbacGuard>
               </div>
-              <DataTable columns={categoryColumns} data={categories} searchKey="name" />
+              <SortableTable
+                columns={categoryColumns}
+                data={categories}
+                searchKey="name"
+                enableDragAndDrop={true}
+                onReorder={handleReorderCategories}
+                getRowId={(category) => String(category.id)}
+              />
             </TabsContent>
           </Tabs>
         </CardContent>

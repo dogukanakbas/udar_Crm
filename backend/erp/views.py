@@ -68,7 +68,11 @@ class ProductViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         'import_template_catalog': 'products.edit',
         'bulk_delete': 'products.edit',
         'bulk_upsert': 'products.edit',
+        'reorder': 'products.edit',
     }
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['order', 'created_at', 'sku', 'name']
+    ordering = ['order', 'id']  # Default ordering
     queryset = Product.objects.all()
 
     @action(detail=False, methods=['post'], url_path='import-template-catalog')
@@ -135,6 +139,37 @@ class ProductViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             }
         )
 
+    @action(detail=False, methods=['post'], url_path='reorder')
+    def reorder(self, request):
+        """Reorder products by updating their order field. Accepts list of {id, order} tuples."""
+        data = request.data if isinstance(request.data, dict) else {}
+        org = _ensure_org(request)
+        new_positions = data.get('new_positions') or []
+
+        if not isinstance(new_positions, list) or not new_positions:
+            return Response({'detail': 'new_positions listesi gerekli'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Verify all products belong to this organization
+        product_ids = [pos.get('id') for pos in new_positions if isinstance(pos, dict)]
+        existing_products = set(Product.objects.filter(organization=org, id__in=product_ids).values_list('id', flat=True))
+        provided_ids = set(product_ids)
+
+        if provided_ids != existing_products:
+            return Response({'detail': 'Bazı ürün ID\'leri geçersiz veya bu organizasyona ait değil.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Update order field for each product
+        with transaction.atomic():
+            for pos in new_positions:
+                if isinstance(pos, dict) and 'id' in pos and 'order' in pos:
+                    try:
+                        product = Product.objects.get(organization=org, id=pos['id'])
+                        product.order = pos['order']
+                        product.save(update_fields=['order'])
+                    except Product.DoesNotExist:
+                        pass
+
+        return Response({'detail': 'Ürünler başarıyla sıralandı.', 'count': len([p for p in new_positions if 'id' in p])})
+
 
 class CategoryViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = CategorySerializer
@@ -145,8 +180,43 @@ class CategoryViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         'update': 'products.edit',
         'partial_update': 'products.edit',
         'destroy': 'products.edit',
+        'reorder': 'products.edit',
     }
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['order', 'created_at', 'name']
+    ordering = ['order', 'id']  # Default ordering
     queryset = Category.objects.all()
+
+    @action(detail=False, methods=['post'], url_path='reorder')
+    def reorder(self, request):
+        """Reorder categories by updating their order field. Accepts list of {id, order} tuples."""
+        data = request.data if isinstance(request.data, dict) else {}
+        org = _ensure_org(request)
+        new_positions = data.get('new_positions') or []
+
+        if not isinstance(new_positions, list) or not new_positions:
+            return Response({'detail': 'new_positions listesi gerekli'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Verify all categories belong to this organization
+        category_ids = [pos.get('id') for pos in new_positions if isinstance(pos, dict)]
+        existing_categories = set(Category.objects.filter(organization=org, id__in=category_ids).values_list('id', flat=True))
+        provided_ids = set(category_ids)
+
+        if provided_ids != existing_categories:
+            return Response({'detail': 'Bazı kategori ID\'leri geçersiz veya bu organizasyona ait değil.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Update order field for each category
+        with transaction.atomic():
+            for pos in new_positions:
+                if isinstance(pos, dict) and 'id' in pos and 'order' in pos:
+                    try:
+                        category = Category.objects.get(organization=org, id=pos['id'])
+                        category.order = pos['order']
+                        category.save(update_fields=['order'])
+                    except Category.DoesNotExist:
+                        pass
+
+        return Response({'detail': 'Kategoriler başarıyla sıralandı.', 'count': len([p for p in new_positions if 'id' in p])})
 
 
 class SalesOrderViewSet(OrgScopedMixin, viewsets.ModelViewSet):
