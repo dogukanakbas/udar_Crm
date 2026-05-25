@@ -192,7 +192,7 @@ def _document_group_order_fallback(section_key, label):
     normalized_key = _normalize_document_group_text(section_key)
     normalized_label = _normalize_document_group_text(label)
     combined = f'{normalized_key} {normalized_label}'
-    if 'celik' in combined and 'kapi' in combined:
+    if 'celik' in combined and ('kapi' in combined or 'grup' in combined or 'grub' in combined):
         return 10
     if ('saft' in combined or 'rogar' in combined) and ('kapak' in combined or 'kapagi' in combined):
         return 20
@@ -205,6 +205,77 @@ def _document_group_order_fallback(section_key, label):
     if 'montaj' in combined or 'hizmet' in combined:
         return 90
     return 999
+
+
+def _document_order_value(value, fallback=999):
+    try:
+        return int(value if value not in (None, '') else fallback)
+    except Exception:
+        return fallback
+
+
+def _document_group_catalog(organization):
+    if not organization:
+        return {}
+    try:
+        from erp.models import Category
+    except Exception:
+        return {}
+
+    entries = {}
+    categories = Category.objects.filter(organization=organization).order_by('order', 'id')
+    for category in categories:
+        defaults = dict(getattr(category, 'template_defaults', {}) or {})
+        raw_section_key = defaults.get('section_key') or category.name
+        section_key = _canonical_section_key(raw_section_key) or str(raw_section_key or '').strip()
+        label = str(category.name or defaults.get('label') or _section_label(section_key) or section_key).strip()
+        order = _document_order_value(defaults.get('document_order'), getattr(category, 'order', 999))
+        if order == 999:
+            order = _document_group_order_fallback(section_key, label)
+        columns = defaults.get('document_columns')
+        if not isinstance(columns, list) or not columns:
+            columns = DEFAULT_DYNAMIC_DOCUMENT_COLUMNS
+        entry = {
+            'section_key': str(section_key or '').strip() or 'service',
+            'label': label or _section_label(section_key),
+            'order': order,
+            'columns': [str(column or '').strip() for column in columns if str(column or '').strip()] or DEFAULT_DYNAMIC_DOCUMENT_COLUMNS,
+            'template_family': defaults.get('template_family') or '',
+        }
+        keys = {
+            entry['section_key'],
+            _normalize_document_group_text(entry['section_key']),
+            _normalize_document_group_text(label),
+            _normalize_document_group_text(raw_section_key),
+        }
+        for key in {str(item or '').strip() for item in keys if str(item or '').strip()}:
+            current = entries.get(key)
+            if current is None or (entry['order'], entry['label']) < (current.get('order', 999), current.get('label', '')):
+                entries[key] = entry
+    return entries
+
+
+def _document_group_catalog_entry(line, resolved, catalog):
+    if not catalog:
+        return None
+    product = getattr(line, 'product', None)
+    category = getattr(product, 'category', None) if product else None
+    category_defaults = dict(getattr(category, 'template_defaults', {}) or {}) if category else {}
+    candidates = [
+        resolved.get('section_key'),
+        resolved.get('label'),
+        getattr(line, 'section_key', ''),
+        category_defaults.get('section_key'),
+        getattr(category, 'name', ''),
+    ]
+    for candidate in candidates:
+        raw = str(candidate or '').strip()
+        if not raw:
+            continue
+        entry = catalog.get(raw) or catalog.get(_canonical_section_key(raw)) or catalog.get(_normalize_document_group_text(raw))
+        if entry:
+            return entry
+    return None
 
 
 def _asset_path(filename: str) -> Path:
@@ -489,10 +560,7 @@ def resolve_product_document_defaults(product=None, fallback_section_key='', lin
         or _section_label(section_key)
         or section_key
     )
-    try:
-        order = int(group_defaults.get('document_order', category_defaults.get('document_order', 999)) or 999)
-    except Exception:
-        order = 999
+    order = _document_order_value(group_defaults.get('document_order', category_defaults.get('document_order', 999)), 999)
     if order == 999:
         order = _document_group_order_fallback(section_key, label)
     columns = group_defaults.get('document_columns') or category_defaults.get('document_columns') or product_defaults.get('document_columns')
@@ -1721,10 +1789,11 @@ def _format_quantity(value):
 
 def _build_dynamic_line_groups(quote):
     grouped = {}
+    catalog = _document_group_catalog(getattr(quote, 'organization', None))
     for line in quote.lines.select_related('product__category').order_by('sort_order', 'id'):
         if not _line_is_meaningful(line):
             continue
-        group = _line_dynamic_group(line)
+        group = _line_dynamic_group(line, catalog)
         key = group['key']
         if key not in grouped:
             grouped[key] = group
@@ -1732,15 +1801,16 @@ def _build_dynamic_line_groups(quote):
     return sorted(grouped.values(), key=lambda item: (item['order'], item['label']))
 
 
-def _line_dynamic_group(line):
+def _line_dynamic_group(line, catalog=None):
     product = getattr(line, 'product', None)
     resolved = resolve_product_document_defaults(product, fallback_section_key=line.section_key, line_name=line.name)
-    section_key = resolved['section_key']
+    catalog_entry = _document_group_catalog_entry(line, resolved, catalog)
+    section_key = (catalog_entry or {}).get('section_key') or resolved['section_key']
     return {
         'key': section_key,
-        'label': resolved['label'],
-        'order': resolved['order'],
-        'columns': resolved['columns'],
+        'label': (catalog_entry or {}).get('label') or resolved['label'],
+        'order': (catalog_entry or {}).get('order', resolved['order']),
+        'columns': (catalog_entry or {}).get('columns') or resolved['columns'],
         'lines': [],
     }
 
