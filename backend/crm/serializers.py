@@ -254,9 +254,6 @@ class QuoteLineSerializer(serializers.ModelSerializer):
         if second_discount > MAX_SECONDARY_DISCOUNT:
             raise serializers.ValidationError('2. iskonto en fazla %12 olabilir.')
 
-        effective_discount = hundred - (((hundred - first_discount) * (hundred - second_discount)) / hundred)
-        if effective_discount > MAX_LINE_DISCOUNT:
-            raise serializers.ValidationError('İki iskonto birlikte en fazla %50 etkin iskonto oluşturabilir.')
         return attrs
 
 

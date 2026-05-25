@@ -2,12 +2,27 @@ from accounts.models import Permission, RolePermission
 from accounts.permissions_map import DEFAULT_ROLE_PERMS
 
 DEPRECATED_PERMISSIONS = {"leads.view", "leads.edit"}
+ROLE_PERMISSION_REVOKES = {
+    "Manager": {"contacts.view", "contacts.edit"},
+    "Sales": {
+        "contacts.view",
+        "contacts.edit",
+        "orders.view",
+        "orders.edit",
+        "orders.receive",
+        "tasks.view",
+        "tasks.edit",
+    },
+    "Worker": {"contacts.view", "contacts.edit"},
+}
 
 
 def ensure_permissions_seeded():
     if DEPRECATED_PERMISSIONS:
         RolePermission.objects.filter(permission__code__in=DEPRECATED_PERMISSIONS).delete()
         Permission.objects.filter(code__in=DEPRECATED_PERMISSIONS).delete()
+    for role, codes in ROLE_PERMISSION_REVOKES.items():
+        RolePermission.objects.filter(role__iexact=role, permission__code__in=codes).delete()
 
     for perms in DEFAULT_ROLE_PERMS.values():
         for code in perms:

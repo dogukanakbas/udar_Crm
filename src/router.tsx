@@ -65,6 +65,14 @@ function secured(Component: ComponentType, perm?: string) {
   }
 }
 
+function adminOnly(Component: ComponentType) {
+  return function AdminOnlyRouteComponent() {
+    const role = useAppStore((state) => state.data.settings.role)
+    if (role !== 'Admin') return <AccessDeniedPage />
+    return <Component />
+  }
+}
+
 const dashboardRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/',
@@ -86,7 +94,7 @@ const companiesRoute = new Route({
 const contactsRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/crm/contacts',
-  component: secured(ContactsPage, 'contacts.view'),
+  component: adminOnly(ContactsPage),
 })
 
 const quotesRoute = new Route({
@@ -122,7 +130,7 @@ const sellerCompaniesRoute = new Route({
 const salesOrdersRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/erp/sales-orders',
-  component: secured(SalesOrdersPage, 'orders.view'),
+  component: adminOnly(SalesOrdersPage),
 })
 
 const purchasesRoute = new Route({
@@ -164,7 +172,7 @@ const logisticsRoute = new Route({
 const tasksRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/tasks',
-  component: secured(TasksPage, 'tasks.view'),
+  component: adminOnly(TasksPage),
 })
 
 const taskDetailRoute = new Route({
@@ -176,7 +184,7 @@ const taskDetailRoute = new Route({
 const calendarRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/calendar',
-  component: secured(CalendarPage, 'tasks.view'),
+  component: adminOnly(CalendarPage),
 })
 
 const workerTrackingRoute = new Route({

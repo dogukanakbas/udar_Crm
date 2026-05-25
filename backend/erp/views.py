@@ -152,12 +152,12 @@ class CategoryViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 class SalesOrderViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = SalesOrderSerializer
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
-    required_perm = 'orders.view'
+    required_perm = 'sales_orders.admin'
     permission_map = {
-        'create': 'orders.edit',
-        'update': 'orders.edit',
-        'partial_update': 'orders.edit',
-        'destroy': 'orders.edit',
+        'create': 'sales_orders.admin',
+        'update': 'sales_orders.admin',
+        'partial_update': 'sales_orders.admin',
+        'destroy': 'sales_orders.admin',
     }
     queryset = SalesOrder.objects.all()
 

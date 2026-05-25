@@ -324,17 +324,19 @@ export const useAppStore = create<AppState>()(
       const canRead = (perm: string) => hasPermission(effectiveRole, [], perm)
       const fetchIf = (perm: string, url: string, config: Record<string, any> = {}) =>
         canRead(perm) ? api.get(url, { ...config, ...quiet }) : emptyList
+      const fetchIfAdmin = (url: string, config: Record<string, any> = {}) =>
+        effectiveRole === 'Admin' ? api.get(url, { ...config, ...quiet }) : emptyList
       const settled = await Promise.allSettled([
         fetchIf('products.view', '/products/'),
         fetchIf('products.view', '/categories/'),
         fetchIf('quotes.view', '/quotes/', { params: { summary: 1 } }),
         fetchIf('quotes.view', '/seller-companies/'),
         fetchIf('partners.view', '/partners/'),
-        fetchIf('contacts.view', '/contacts/'),
+        fetchIfAdmin('/contacts/'),
         fetchIf('opportunities.view', '/opportunities/'),
         fetchIf('tickets.view', '/tickets/'),
         fetchIf('logistics.view', '/vehicles/'),
-        fetchIf('orders.view', '/sales-orders/'),
+        fetchIfAdmin('/sales-orders/'),
         fetchIf('teams.view', '/teams/'),
         api.get('/auth/users/', quiet),
         fetchIf('tasks.view', '/tasks/'),

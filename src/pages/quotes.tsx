@@ -195,9 +195,6 @@ const lineSchema = z.object({
     attributes: z.record(z.string(), z.any()).optional().default({}),
     technicalItems: z.array(z.string()).optional().default([]),
   }),
-}).superRefine((value, ctx) => {
-  const effectiveDiscount = 100 - ((100 - Number(value.discount || 0)) * (100 - Number(value.discountSecondary || 0))) / 100
-  if (effectiveDiscount > 50) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'İki iskonto birlikte en fazla %50 etkin iskonto oluşturabilir.', path: ['discountSecondary'] })
 })
 
 const serviceExpenseSchema = z.object({
@@ -1636,8 +1633,7 @@ function DocumentWizardTrigger({
   const getDiscountValidationMessage = (nextLines: any[]) => {
     const invalidSecondaryDiscountIndex = nextLines.findIndex((line) => Number(line.discountSecondary || 0) > MAX_SECONDARY_DISCOUNT)
     if (invalidSecondaryDiscountIndex >= 0) return `${invalidSecondaryDiscountIndex + 1}. kalemde 2. iskonto en fazla %${MAX_SECONDARY_DISCOUNT} olabilir.`
-    const invalidLineIndex = nextLines.findIndex((line) => getEffectiveDiscountRate(line) > 50)
-    return invalidLineIndex >= 0 ? `${invalidLineIndex + 1}. kalemde iki iskonto birlikte en fazla %50 etkin iskonto oluşturabilir.` : null
+    return null
   }
   const handleCustomerCreate = async (values: any) => {
     const createdCompany = await createCompany(values as any)

@@ -74,7 +74,7 @@ const nav: Array<{
     children: [
       { label: 'Fırsatlar', to: '/crm/opportunities', perm: 'opportunities.view' },
       { label: 'Cari Kartı', to: '/crm/companies', perm: 'partners.view' },
-      { label: 'Kişiler', to: '/crm/contacts', perm: 'contacts.view' },
+      { label: 'Kişiler', to: '/crm/contacts', perm: 'contacts.view', roles: ['Admin'] },
       { label: 'Teklifler', to: '/crm/quotes', perm: 'quotes.view' },
       { label: 'Satıcı Firmalar', to: '/crm/seller-companies', perm: 'pricing.manage', roles: ['Admin', 'Manager'] },
       { label: 'Şablon Yönetimi', to: '/crm/quote-templates', perm: 'pricing.manage', roles: ['Admin', 'Manager'] },
@@ -83,9 +83,9 @@ const nav: Array<{
   {
     label: 'ERP',
     icon: Package,
-    roles: ['Admin', 'Manager', 'Finance', 'Warehouse', 'Sales'],
+    roles: ['Admin', 'Manager', 'Finance', 'Warehouse'],
     children: [
-      { label: 'Satış Siparişleri', to: '/erp/sales-orders', perm: 'orders.view' },
+      { label: 'Satış Siparişleri', to: '/erp/sales-orders', perm: 'orders.view', roles: ['Admin'] },
       { label: 'Satınalma', to: '/erp/purchases', perm: 'orders.view', roles: ['Admin', 'Manager', 'Finance', 'Warehouse'] },
       { label: 'Stok', to: '/erp/inventory', perm: 'inventory.view' },
       { label: 'Faturalama', to: '/erp/invoicing', perm: 'invoices.view' },
@@ -101,9 +101,9 @@ const nav: Array<{
     roles: ['Admin', 'Support', 'Manager'],
     children: [{ label: 'Destek talepleri', to: '/support/tickets', perm: 'tickets.view' }],
   },
-  { label: 'Görevler', to: '/tasks', icon: ClipboardCheckIcon, roles: ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse'], perm: 'tasks.view' },
+  { label: 'Görevler', to: '/tasks', icon: ClipboardCheckIcon, roles: ['Admin'], perm: 'tasks.view' },
   { label: 'Çalışan Takibi', to: '/worker-tracking', icon: Activity, roles: ['Admin', 'Manager'], perm: 'teams.view' },
-  { label: 'Takvim', to: '/calendar', icon: CalendarIconMini, roles: ['Admin', 'Manager', 'Sales', 'Support', 'Warehouse'], perm: 'tasks.view' },
+  { label: 'Takvim', to: '/calendar', icon: CalendarIconMini, roles: ['Admin'], perm: 'tasks.view' },
   { label: 'Raporlar', to: '/reports', icon: BarChart3, roles: ['Admin', 'Manager', 'Finance'], perm: 'audit.view' },
   { label: 'Ayarlar', to: '/settings', icon: Settings, roles: ['Admin', 'Manager'], perm: 'teams.edit' },
 ]
