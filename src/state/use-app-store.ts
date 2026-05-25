@@ -4,6 +4,7 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import api from '@/lib/api'
 import { clearTokens, getTokens } from '@/lib/auth'
 import { normalizeCompanySize, normalizeCountryLabel, resolveCompanyCurrency } from '@/lib/location-data'
+import { normalizeQuoteWorkflowStatus } from '@/lib/quote-status'
 import { buildTemplateCatalogImportPayload } from '@/lib/template-product-catalog'
 import type {
   Category,
@@ -139,7 +140,7 @@ export const mapQuote = (q: any, idx = 0) => ({
   preparedById: q.prepared_by ? String(q.prepared_by) : undefined,
   preparedByName: q.prepared_by_name || '',
   sellerCompanyKey: q.seller_company_key || '',
-  status: q.status,
+  status: normalizeQuoteWorkflowStatus(q.status),
   validUntil: q.valid_until,
   total: Number(q.total ?? 0),
   subtotal: Number(q.subtotal ?? 0),

@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx'
 import type { Quote, QuoteLine } from '@/types'
+import { quoteStatusLabelTr } from '@/lib/quote-status'
 import { formatExchangeRate, getCurrencySymbol, normalizeCurrency } from '@/lib/utils'
 
 export function downloadQuoteAsXlsx(quote: Quote, customerName: string) {
@@ -20,7 +21,7 @@ export function downloadQuoteAsXlsx(quote: Quote, customerName: string) {
   const header = [
     ['Teklif No', quote.number],
     ['Müşteri', customerName],
-    ['Durum', quote.status],
+    ['Durum', quoteStatusLabelTr(quote.status)],
     ['Geçerlilik', quote.validUntil ?? ''],
     ['Para birimi', `${getCurrencySymbol(currency)} ${currency}`],
     ['Kur', formatExchangeRate(exchangeRate, currency)],

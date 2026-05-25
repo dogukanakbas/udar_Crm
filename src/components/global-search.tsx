@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { useToast } from '@/components/ui/use-toast'
 import api from '@/lib/api'
+import { quoteStatusLabelTr } from '@/lib/quote-status'
 import { taskStatusLabelTR } from '@/lib/task-labels'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
@@ -262,7 +263,7 @@ const [limit, setLimit] = useState(10)
                   <FileText className="mr-2 h-4 w-4" />
                   <span>{q.number}</span>
                   <Badge variant="outline" className="ml-auto">
-                    {q.status}
+                    {quoteStatusLabelTr(q.status)}
                   </Badge>
                 </CommandItem>
               ))}

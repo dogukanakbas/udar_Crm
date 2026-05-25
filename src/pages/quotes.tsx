@@ -33,25 +33,15 @@ import {
 } from '@/lib/location-data'
 import { normalizePaymentOptions } from '@/lib/payment-options'
 import { getDefaultPriceList, getPriceListByKey, normalizePriceLists, resolveProductPrice, type PriceListOption } from '@/lib/price-lists'
+import { QUOTE_WORKFLOW_STATUSES, normalizeQuoteWorkflowStatus, quoteStatusLabelTr } from '@/lib/quote-status'
 import { cn, formatCurrency, formatDate, formatDateTime, formatExchangeRate, getCurrencyLabel, getCurrencySymbol, normalizeCurrency } from '@/lib/utils'
 import { mapQuote, useAppStore } from '@/state/use-app-store'
 import type { Product, Quote, SalesDocumentType, SellerCompanyProfile } from '@/types'
 
-const QUOTE_STATUS_TR = {
-  Pending: 'Beklemede',
-  Approved: 'Onaylandı',
-  Rejected: 'Ret',
-}
-
-const QUOTE_WORKFLOW_STATUSES = [
-  { value: 'Rejected', label: 'Ret', activeClassName: 'border-red-500 bg-red-600 text-white hover:bg-red-600', idleClassName: 'text-red-700 hover:bg-red-500/10 dark:text-red-300' },
-  { value: 'Pending', label: 'Beklemede', activeClassName: 'border-amber-500 bg-amber-500 text-amber-950 hover:bg-amber-500', idleClassName: 'text-amber-700 hover:bg-amber-500/10 dark:text-amber-300' },
-  { value: 'Approved', label: 'Onaylandı', activeClassName: 'border-emerald-500 bg-emerald-600 text-white hover:bg-emerald-600', idleClassName: 'text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300' },
-]
-
-const normalizeQuoteWorkflowStatus = (status?: string) => {
-  if (status === 'Approved' || status === 'Rejected') return status
-  return 'Pending'
+const QUOTE_STATUS_STYLES = {
+  Rejected: { activeClassName: 'border-red-500 bg-red-600 text-white hover:bg-red-600', idleClassName: 'text-red-700 hover:bg-red-500/10 dark:text-red-300' },
+  Pending: { activeClassName: 'border-amber-500 bg-amber-500 text-amber-950 hover:bg-amber-500', idleClassName: 'text-amber-700 hover:bg-amber-500/10 dark:text-amber-300' },
+  Approved: { activeClassName: 'border-emerald-500 bg-emerald-600 text-white hover:bg-emerald-600', idleClassName: 'text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300' },
 }
 
 const DOCUMENT_TYPE_TR = {
@@ -250,7 +240,7 @@ const documentSchema = z.object({
   serviceExpenses: z.array(serviceExpenseSchema).optional().default([]),
 })
 
-const quoteStatusTr = (status: string) => QUOTE_STATUS_TR[normalizeQuoteWorkflowStatus(status)] ?? status
+const quoteStatusTr = (status: string) => quoteStatusLabelTr(status)
 const sectionLabel = (sectionKey?: string) => SECTION_OPTIONS.find((item) => item.value === sectionKey)?.label ?? sectionKey ?? 'Genel'
 const templateLabel = (documentType: SalesDocumentType, templateKey?: string) => TEMPLATE_OPTIONS[documentType].find((item) => item.value === (templateKey || ''))?.label ?? 'Otomatik'
 const getResolvedSchema = (product?: Product) => product?.resolvedAttributeSchema || product?.categoryAttributeSchema || []
@@ -1100,6 +1090,7 @@ function QuoteStatusButtons({
     <div className="inline-flex min-w-max overflow-hidden rounded-md border border-border/70 bg-background/70">
       {QUOTE_WORKFLOW_STATUSES.map((item) => {
         const selected = current === item.value
+        const styles = QUOTE_STATUS_STYLES[item.value]
         return (
           <Button
             key={item.value}
@@ -1109,7 +1100,7 @@ function QuoteStatusButtons({
             disabled={disabled}
             className={cn(
               'h-8 rounded-none border-0 px-2.5 text-xs font-semibold shadow-none first:rounded-l-md last:rounded-r-md',
-              selected ? item.activeClassName : item.idleClassName
+              selected ? styles.activeClassName : styles.idleClassName
             )}
             onClick={() => {
               if (!selected) onChange(item.value)
@@ -1142,6 +1133,7 @@ export function QuotesPage() {
   const companies = data.companies
   const users = data.users ?? []
   const canFilterByPreparer = canSeeAllQuotes(data.settings.role)
+  const canManageQuoteStatus = canSeeAllQuotes(data.settings.role)
   const companyNameById = useMemo(
     () => new Map(companies.map((company) => [company.id, company.name])),
     [companies]
@@ -1256,18 +1248,16 @@ export function QuotesPage() {
       {
         accessorKey: 'status',
         header: 'Durum',
-        cell: ({ row }) => (
-          <RbacGuard
-            perm="quotes.edit"
-            fallback={<Badge variant={getQuoteStatusBadgeVariant(row.original.status) as any}>{quoteStatusTr(row.original.status)}</Badge>}
-          >
+        cell: ({ row }) =>
+          canManageQuoteStatus ? (
             <QuoteStatusButtons
               value={row.original.status}
               disabled={statusUpdatingId === row.original.id}
               onChange={(nextStatus) => handleStatusChange(row.original, nextStatus)}
             />
-          </RbacGuard>
-        ),
+          ) : (
+            <Badge variant={getQuoteStatusBadgeVariant(row.original.status) as any}>{quoteStatusTr(row.original.status)}</Badge>
+          ),
       },
       { accessorKey: 'validUntil', header: 'Geçerlilik', cell: ({ row }) => formatDate(row.original.validUntil) },
       {
@@ -1314,7 +1304,7 @@ export function QuotesPage() {
         ),
       },
     ],
-    [companyNameById, deletingId, loadingQuoteId, statusUpdatingId]
+    [companyNameById, deletingId, loadingQuoteId, statusUpdatingId, canManageQuoteStatus]
   )
 
   const tableColumns = useMemo(
