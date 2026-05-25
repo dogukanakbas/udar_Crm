@@ -10,7 +10,7 @@ class IsOrgMember(permissions.BasePermission):
 class IsOwnerOrManager(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         user = request.user
-        if getattr(user, 'role', '') in ['Admin', 'Manager']:
+        if getattr(user, 'role', '') in ['Admin', 'Manager', 'Sales']:
             return True
         owner = getattr(obj, 'owner', None)
         return owner == user
@@ -88,4 +88,3 @@ class ViewOnlyRestriction(permissions.BasePermission):
         if not prefs.get('view_only'):
             return True
         return request.method in permissions.SAFE_METHODS
-

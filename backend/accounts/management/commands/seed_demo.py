@@ -47,7 +47,7 @@ class Command(BaseCommand):
             number="Q-10001",
             customer=partner,
             owner=User.objects.filter(role="Sales", organization=org).first(),
-            status="Draft",
+            status="Pending",
             valid_until=date.today() + timedelta(days=15),
             currency="USD",
             vat_rate=Decimal("20"),
@@ -65,11 +65,10 @@ class Command(BaseCommand):
             organization=org,
             number="SO-10001",
             customer_name=partner.name,
-            status="Draft",
+            status="Pending",
             amount=Decimal("5000"),
             shipping_date=date.today(),
             expected_delivery=date.today() + timedelta(days=5),
         )
 
         self.stdout.write(self.style.SUCCESS("Demo data seeded."))
-

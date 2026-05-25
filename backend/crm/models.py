@@ -91,12 +91,9 @@ class Quote(models.Model):
         ('Contract', 'Contract'),
     ]
     STATUSES = [
-        ('Draft', 'Draft'),
-        ('Sent', 'Sent'),
-        ('Under Review', 'Under Review'),
+        ('Pending', 'Pending'),
         ('Approved', 'Approved'),
         ('Rejected', 'Rejected'),
-        ('Converted', 'Converted'),
     ]
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='quotes')
     document_type = models.CharField(max_length=20, choices=DOCUMENT_TYPES, default='Quote')
@@ -106,7 +103,7 @@ class Quote(models.Model):
     owner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     prepared_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='prepared_quotes')
     seller_company_key = models.CharField(max_length=50, blank=True)
-    status = models.CharField(max_length=20, choices=STATUSES, default='Draft')
+    status = models.CharField(max_length=20, choices=STATUSES, default='Pending')
     valid_until = models.DateField(null=True, blank=True)
     subtotal = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     discount_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)

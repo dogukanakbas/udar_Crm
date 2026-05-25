@@ -52,7 +52,7 @@ class ApprovalActionView(APIView):
             if step.role == 'Finance':
                 quote.status = 'Approved'
             else:
-                quote.status = 'Under Review'
+                quote.status = 'Pending'
             quote.save(update_fields=['status'])
         elif action == 'reject':
             step.status = 'Rejected'
@@ -69,7 +69,7 @@ class ApprovalActionView(APIView):
                 s.save(update_fields=['status', 'comment', 'acted_by', 'updated_at'])
             step.instance.status = 'Waiting'
             step.instance.save(update_fields=['status'])
-            quote.status = 'Under Review'
+            quote.status = 'Pending'
             quote.save(update_fields=['status'])
         else:
             return Response({'error': 'Invalid action'}, status=400)

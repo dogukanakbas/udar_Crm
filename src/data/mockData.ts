@@ -299,7 +299,7 @@ const makePricingRules = (): PricingRule[] => [
 ]
 
 const makeQuotes = (companies: Company[], products: Product[]): Quote[] => {
-  const statuses: Quote['status'][] = ['Draft', 'Sent', 'Under Review', 'Approved', 'Rejected', 'Converted']
+  const statuses: Quote['status'][] = ['Pending', 'Approved', 'Rejected']
   return Array.from({ length: 15 }, (_, i) => {
     const company = companies[i % companies.length]
     const lines: Quote['lines'] = [
@@ -332,7 +332,7 @@ const makeQuotes = (companies: Company[], products: Product[]): Quote[] => {
       { role: 'Finance', status: 'Waiting' },
     ]
     const history: QuoteHistoryItem[] = [
-      { id: nanoid(), field: 'status', oldValue: 'Draft', newValue: statuses[i % statuses.length], user: 'System', time: new Date().toISOString() },
+      { id: nanoid(), field: 'status', oldValue: 'Pending', newValue: statuses[i % statuses.length], user: 'System', time: new Date().toISOString() },
     ]
     return {
       id: `q-${i + 1}`,
@@ -429,4 +429,3 @@ export const buildSeed = (): MockDbSnapshot => {
     },
   }
 }
-

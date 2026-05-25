@@ -277,7 +277,7 @@ export function TemplateQuoteWizardTrigger({
       payment: odemeSekli || '—',
       delivery: teslimSekli || '—',
       notes: notesParts.join('\n'),
-      status: 'Draft' as const,
+      status: 'Pending' as const,
       currency: effectiveCurrency,
       contractConfig: {
         exchangeRate: effectiveCurrency === 'TRY' ? 1 : exchangeRate,

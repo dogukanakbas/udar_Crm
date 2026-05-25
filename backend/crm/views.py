@@ -227,12 +227,12 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         if document_type:
             qs = qs.filter(document_type=document_type)
         prepared_by = self.request.query_params.get('prepared_by')
-        if prepared_by and getattr(user, 'role', '') in ['Admin', 'Manager']:
+        if prepared_by and getattr(user, 'role', '') in ['Admin', 'Manager', 'Sales']:
             if prepared_by == '__empty__':
                 qs = qs.filter(prepared_by__isnull=True)
             else:
                 qs = qs.filter(prepared_by_id=prepared_by)
-        if getattr(user, 'role', '') not in ['Admin', 'Manager']:
+        if getattr(user, 'role', '') not in ['Admin', 'Manager', 'Sales']:
             qs = qs.filter(owner=user)
         return qs.order_by('-created_at', '-id')
 
@@ -254,10 +254,10 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def send(self, request, pk=None):
         quote = self._attach_audit_user(self.get_object())
-        quote.status = 'Sent'
+        quote.status = 'Pending'
         quote.save(update_fields=['status'])
         log_entity_action(quote, 'sent', user=request.user)
-        return Response({'status': 'sent', 'quote': QuoteSerializer(quote, context={'request': request}).data})
+        return Response({'status': 'pending', 'quote': QuoteSerializer(quote, context={'request': request}).data})
 
     @action(detail=True, methods=['post'])
     def convert(self, request, pk=None):
@@ -301,7 +301,7 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             owner=quote.owner or request.user,
             prepared_by=quote.prepared_by or request.user,
             seller_company_key=quote.seller_company_key,
-            status='Draft',
+            status='Pending',
             valid_until=quote.valid_until,
             currency=quote.currency,
             payment_terms=quote.payment_terms,
@@ -333,7 +333,7 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         source_config['converted_contract_id'] = contract.id
         source_config['converted_contract_number'] = contract.number
         quote.contract_config = source_config
-        quote.status = 'Converted'
+        quote.status = 'Approved'
         quote.save(update_fields=['status', 'contract_config'])
 
         log_entity_action(quote, 'converted', user=request.user, field='converted_contract_id', new_value=str(contract.id))
@@ -356,10 +356,10 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             ApprovalStep.objects.create(instance=approval, role=role, status='Waiting')
         approval.status = 'Waiting'
         approval.save(update_fields=['status'])
-        quote.status = 'Under Review'
+        quote.status = 'Pending'
         quote.save(update_fields=['status'])
         log_entity_action(quote, 'request_approval', user=request.user)
-        return Response({'status': 'under_review'})
+        return Response({'status': 'pending'})
 
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
@@ -390,7 +390,7 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             quote.status = 'Approved'
             approval.status = 'Approved'
         else:
-            quote.status = 'Under Review'
+            quote.status = 'Pending'
             approval.status = 'Waiting'
         quote.save(update_fields=['status'])
         approval.save(update_fields=['status'])
@@ -432,10 +432,10 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         approval.steps.all().update(status='Waiting', comment='', acted_by=None)
         approval.status = 'Waiting'
         approval.save(update_fields=['status'])
-        quote.status = 'Under Review'
+        quote.status = 'Pending'
         quote.save(update_fields=['status'])
         log_entity_action(quote, 'resubmitted', user=request.user)
-        return Response({'status': 'under_review'})
+        return Response({'status': 'pending'})
 
     @action(detail=False, methods=['post'])
     def apply_preview(self, request):

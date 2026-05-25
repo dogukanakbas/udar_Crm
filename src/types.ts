@@ -10,7 +10,7 @@ export type TicketPriority = 'Low' | 'Medium' | 'High' | 'Urgent'
 export type InvoiceStatus = 'Draft' | 'Sent' | 'Paid' | 'Overdue'
 export type SalesOrderStatus = 'Draft' | 'Confirmed' | 'Packing' | 'Shipped' | 'Delivered' | 'Cancelled'
 export type PurchaseStatus = 'Draft' | 'Ordered' | 'Receiving' | 'Closed'
-export type QuoteStatus = 'Draft' | 'Sent' | 'Under Review' | 'Approved' | 'Rejected' | 'Converted'
+export type QuoteStatus = 'Pending' | 'Approved' | 'Rejected'
 export type SalesDocumentType = 'Quote' | 'Contract'
 
 export interface TimelineItem {

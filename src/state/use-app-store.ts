@@ -1304,7 +1304,7 @@ export const useAppStore = create<AppState>()(
         data: {
           ...state.data,
           quotes: state.data.quotes.map((quote) =>
-            quote.id === id ? updatedQuote || { ...quote, status: 'Sent' as Quote['status'] } : quote
+            quote.id === id ? updatedQuote || { ...quote, status: 'Pending' as Quote['status'] } : quote
           ),
         },
       }))
@@ -1320,7 +1320,7 @@ export const useAppStore = create<AppState>()(
         data: {
           ...state.data,
           quotes: state.data.quotes.map((quote) =>
-            quote.id === id ? { ...quote, status: 'Under Review' as Quote['status'] } : quote
+            quote.id === id ? { ...quote, status: 'Pending' as Quote['status'] } : quote
           ),
         },
       }))
@@ -1350,7 +1350,7 @@ export const useAppStore = create<AppState>()(
       const contractQuote = response.data?.contract ? mapQuote(response.data.contract) : null
       set((state) => {
         const withoutSource: Quote[] = state.data.quotes.map((quote) =>
-          quote.id === id ? (sourceQuote || { ...quote, status: 'Converted' as Quote['status'] }) : quote
+          quote.id === id ? (sourceQuote || { ...quote, status: 'Approved' as Quote['status'] }) : quote
         )
         const mergedQuotes = contractQuote
           ? [contractQuote, ...withoutSource.filter((quote) => quote.id !== contractQuote.id)]

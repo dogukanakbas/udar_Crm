@@ -5,7 +5,7 @@ import { type ColumnDef } from '@tanstack/react-table'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
-import { Check, Download, Pencil, Plus, Send, Shield, Trash2 } from 'lucide-react'
+import { Check, Download, Eye, FileCheck2, Pencil, Plus, Trash2 } from 'lucide-react'
 
 import { PageHeader } from '@/components/app-shell'
 import { CompanyModal } from '@/components/company-modal'
@@ -38,12 +38,20 @@ import { mapQuote, useAppStore } from '@/state/use-app-store'
 import type { Product, Quote, SalesDocumentType, SellerCompanyProfile } from '@/types'
 
 const QUOTE_STATUS_TR = {
-  Draft: 'Taslak',
-  Sent: 'Gönderildi',
-  'Under Review': 'İncelemede',
+  Pending: 'Beklemede',
   Approved: 'Onaylandı',
-  Rejected: 'Reddedildi',
-  Converted: 'Siparişe Dönüştü',
+  Rejected: 'Ret',
+}
+
+const QUOTE_WORKFLOW_STATUSES = [
+  { value: 'Rejected', label: 'Ret', activeClassName: 'border-red-500 bg-red-600 text-white hover:bg-red-600', idleClassName: 'text-red-700 hover:bg-red-500/10 dark:text-red-300' },
+  { value: 'Pending', label: 'Beklemede', activeClassName: 'border-amber-500 bg-amber-500 text-amber-950 hover:bg-amber-500', idleClassName: 'text-amber-700 hover:bg-amber-500/10 dark:text-amber-300' },
+  { value: 'Approved', label: 'Onaylandı', activeClassName: 'border-emerald-500 bg-emerald-600 text-white hover:bg-emerald-600', idleClassName: 'text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300' },
+]
+
+const normalizeQuoteWorkflowStatus = (status?: string) => {
+  if (status === 'Approved' || status === 'Rejected') return status
+  return 'Pending'
 }
 
 const DOCUMENT_TYPE_TR = {
@@ -242,7 +250,7 @@ const documentSchema = z.object({
   serviceExpenses: z.array(serviceExpenseSchema).optional().default([]),
 })
 
-const quoteStatusTr = (status: string) => QUOTE_STATUS_TR[status] ?? status
+const quoteStatusTr = (status: string) => QUOTE_STATUS_TR[normalizeQuoteWorkflowStatus(status)] ?? status
 const sectionLabel = (sectionKey?: string) => SECTION_OPTIONS.find((item) => item.value === sectionKey)?.label ?? sectionKey ?? 'Genel'
 const templateLabel = (documentType: SalesDocumentType, templateKey?: string) => TEMPLATE_OPTIONS[documentType].find((item) => item.value === (templateKey || ''))?.label ?? 'Otomatik'
 const getResolvedSchema = (product?: Product) => product?.resolvedAttributeSchema || product?.categoryAttributeSchema || []
@@ -518,13 +526,13 @@ const getInitialValues = (
 const resolveValidityDaysFromValues = (values: any) =>
   normalizeValidityDays(values.validityPreset === CUSTOM_OPTION ? values.validityCustomDays : values.validityPreset, 7)
 
-const buildDocumentPayload = (values: any, mode: SalesDocumentType, status = 'Draft', serviceExpenseTaxRate = 20) => ({
+const buildDocumentPayload = (values: any, mode: SalesDocumentType, status = 'Pending', serviceExpenseTaxRate = 20) => ({
   documentType: mode,
   customerId: values.customerId,
   preparedById: values.preparedById,
   sellerCompanyKey: values.sellerCompanyKey,
   currency: getDocumentCurrency(values.currency),
-  status,
+  status: normalizeQuoteWorkflowStatus(status),
   validUntil: values.validUntil || '',
   payment: values.payment || '',
   delivery: values.delivery || '',
@@ -834,10 +842,10 @@ const getAuditActionMeta = (action: string) => {
   if (action === 'created') return { label: 'Belge oluşturuldu', variant: 'success', description: 'Belge ilk kez oluşturuldu.' }
   if (action === 'updated') return { label: 'Belge güncellendi', variant: 'outline', description: 'Belge üzerinde alan bazlı değişiklik yapıldı.' }
   if (action === 'deleted') return { label: 'Belge silindi', variant: 'destructive', description: 'Belge kalıcı olarak silindi.' }
-  if (action === 'sent') return { label: 'Gönderildi', variant: 'secondary', description: 'Belge gönderildi olarak işaretlendi.' }
-  if (action === 'converted') return { label: 'Satış siparişine dönüştürüldü', variant: 'warning', description: 'Belge satış siparişine çevrildi.' }
-  if (action === 'request_approval') return { label: 'Onaya gönderildi', variant: 'warning', description: 'Belge onay sürecine alındı.' }
-  if (action === 'resubmitted') return { label: 'Yeniden gönderildi', variant: 'warning', description: 'Belge onay sürecine yeniden gönderildi.' }
+  if (action === 'sent') return { label: 'Beklemede yapıldı', variant: 'warning', description: 'Belge beklemede durumuna alındı.' }
+  if (action === 'converted') return { label: 'Sözleşmeye dönüştürüldü', variant: 'success', description: 'Tekliften sözleşme kaydı oluşturuldu.' }
+  if (action === 'request_approval') return { label: 'Beklemede yapıldı', variant: 'warning', description: 'Belge beklemede durumuna alındı.' }
+  if (action === 'resubmitted') return { label: 'Beklemede yapıldı', variant: 'warning', description: 'Belge beklemede durumuna alındı.' }
   if (action.startsWith('approved_')) return { label: `${action.replace('approved_', '')} onayı verildi`, variant: 'success', description: 'Belge için onay adımı tamamlandı.' }
   if (action.startsWith('rejected_')) return { label: `${action.replace('rejected_', '')} tarafından reddedildi`, variant: 'destructive', description: 'Belge onay sürecinde reddedildi.' }
   return { label: action.replaceAll('_', ' '), variant: 'muted', description: 'Bu kayıt için audit girdisi oluşturuldu.' }
@@ -857,9 +865,10 @@ const getAuditSummaryText = (details: AuditChangeDetail[], companies: any[], use
 }
 
 const getQuoteStatusBadgeVariant = (status: string) => {
-  if (status === 'Approved' || status === 'Converted') return 'success'
-  if (status === 'Rejected') return 'destructive'
-  if (status === 'Under Review') return 'warning'
+  const normalizedStatus = normalizeQuoteWorkflowStatus(status)
+  if (normalizedStatus === 'Approved') return 'success'
+  if (normalizedStatus === 'Rejected') return 'destructive'
+  if (normalizedStatus === 'Pending') return 'warning'
   return 'secondary'
 }
 
@@ -1076,8 +1085,47 @@ function NumericEditor({ value, onValueChange, min = 0, max }: { value?: number;
   )
 }
 
+function QuoteStatusButtons({
+  value,
+  disabled,
+  onChange,
+}: {
+  value?: string
+  disabled?: boolean
+  onChange: (nextStatus: string) => void
+}) {
+  const current = normalizeQuoteWorkflowStatus(value)
+
+  return (
+    <div className="inline-flex min-w-max overflow-hidden rounded-md border border-border/70 bg-background/70">
+      {QUOTE_WORKFLOW_STATUSES.map((item) => {
+        const selected = current === item.value
+        return (
+          <Button
+            key={item.value}
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={disabled}
+            className={cn(
+              'h-8 rounded-none border-0 px-2.5 text-xs font-semibold shadow-none first:rounded-l-md last:rounded-r-md',
+              selected ? item.activeClassName : item.idleClassName
+            )}
+            onClick={() => {
+              if (!selected) onChange(item.value)
+            }}
+            title={`Durumu ${item.label} yap`}
+          >
+            {item.label}
+          </Button>
+        )
+      })}
+    </div>
+  )
+}
+
 export function QuotesPage() {
-  const { data, deleteQuotes, convertQuote } = useAppStore()
+  const { data, updateQuote, deleteQuotes, convertQuote } = useAppStore()
   const { toast } = useToast()
   const [status, setStatus] = useState('all')
   const [customer, setCustomer] = useState('all')
@@ -1088,6 +1136,7 @@ export function QuotesPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [editingQuote, setEditingQuote] = useState<Quote | null>(null)
   const [loadingQuoteId, setLoadingQuoteId] = useState<string | null>(null)
+  const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null)
 
   const quotes = data.quotes ?? []
   const companies = data.companies
@@ -1123,7 +1172,7 @@ export function QuotesPage() {
   const filtered = useMemo(
     () =>
       quotes.filter((quote) => {
-        const matchesStatus = status === 'all' || quote.status === status
+        const matchesStatus = status === 'all' || normalizeQuoteWorkflowStatus(quote.status) === status
         const matchesCustomer = customer === 'all' || quote.customerId === customer
         const matchesPreparer =
           !canFilterByPreparer ||
@@ -1171,6 +1220,19 @@ export function QuotesPage() {
     }
   }
 
+  const handleStatusChange = async (quote: Quote, nextStatus: string) => {
+    const normalizedStatus = normalizeQuoteWorkflowStatus(nextStatus)
+    setStatusUpdatingId(quote.id)
+    try {
+      await updateQuote(quote.id, { status: normalizedStatus as Quote['status'] })
+      toast({ title: `${DOCUMENT_TYPE_TR[quote.documentType]} durumu ${quoteStatusTr(normalizedStatus)} yapıldı` })
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Durum güncellenemedi', variant: 'destructive' })
+    } finally {
+      setStatusUpdatingId(null)
+    }
+  }
+
   const openQuoteEditor = async (quote: Quote) => {
     setLoadingQuoteId(quote.id)
     try {
@@ -1191,51 +1253,68 @@ export function QuotesPage() {
       { accessorKey: 'customerId', header: 'Müşteri', cell: ({ row }) => row.original.customerName || companyNameById.get(row.original.customerId) || '' },
       { accessorKey: 'preparedByName', header: 'Hazırlayan', cell: ({ row }) => row.original.preparedByName || row.original.owner },
       { accessorKey: 'total', header: 'Tutar', cell: ({ row }) => formatCurrency(row.original.total, row.original.currency) },
-      { accessorKey: 'status', header: 'Durum', cell: ({ row }) => <Badge variant="secondary">{quoteStatusTr(row.original.status)}</Badge> },
+      {
+        accessorKey: 'status',
+        header: 'Durum',
+        cell: ({ row }) => (
+          <RbacGuard
+            perm="quotes.edit"
+            fallback={<Badge variant={getQuoteStatusBadgeVariant(row.original.status) as any}>{quoteStatusTr(row.original.status)}</Badge>}
+          >
+            <QuoteStatusButtons
+              value={row.original.status}
+              disabled={statusUpdatingId === row.original.id}
+              onChange={(nextStatus) => handleStatusChange(row.original, nextStatus)}
+            />
+          </RbacGuard>
+        ),
+      },
       { accessorKey: 'validUntil', header: 'Geçerlilik', cell: ({ row }) => formatDate(row.original.validUntil) },
       {
         id: 'actions',
         header: '',
         cell: ({ row }) => (
-          <div className="flex items-center justify-end gap-2">
-            <Link to="/crm/quotes/$quoteId" params={{ quoteId: row.original.id }} className="text-xs text-primary underline">
-              Görüntüle
+          <div className="flex items-center justify-end gap-1">
+            <Link
+              to="/crm/quotes/$quoteId"
+              params={{ quoteId: row.original.id }}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              title="Görüntüle"
+            >
+              <Eye className="h-4 w-4" />
             </Link>
             <RbacGuard perm="quotes.edit">
-              <Button variant="ghost" size="sm" disabled={loadingQuoteId === row.original.id} onClick={() => openQuoteEditor(row.original)}>
-                <Pencil className="mr-2 h-4 w-4" />
-                {loadingQuoteId === row.original.id ? 'Açılıyor...' : 'Düzenle'}
+              <Button variant="ghost" size="icon" disabled={loadingQuoteId === row.original.id} onClick={() => openQuoteEditor(row.original)} title="Düzenle">
+                <Pencil className="h-4 w-4" />
               </Button>
             </RbacGuard>
-            <Button variant="ghost" size="sm" onClick={() => handleDownload(row.original)}>
-              <Download className="mr-2 h-4 w-4" />
-              İndir
+            <Button variant="ghost" size="icon" onClick={() => handleDownload(row.original)} title="İndir">
+              <Download className="h-4 w-4" />
             </Button>
             {row.original.documentType === 'Quote' ? (
               <RbacGuard perm="quotes.edit">
-                <Button variant="ghost" size="sm" onClick={() => handleConvert(row.original)}>
-                  <Check className="mr-2 h-4 w-4" />
-                  Sözleşmeye dönüştür
+                <Button variant="ghost" size="icon" onClick={() => handleConvert(row.original)} title="Sözleşmeye dönüştür">
+                  <FileCheck2 className="h-4 w-4" />
                 </Button>
               </RbacGuard>
             ) : null}
             <RbacGuard perm="quotes.edit">
               <Button
                 variant="ghost"
-                size="sm"
+                size="icon"
                 className="text-destructive hover:text-destructive"
                 disabled={deletingId === row.original.id}
                 onClick={() => handleDelete(row.original)}
+                title="Sil"
               >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Sil
+                <Trash2 className="h-4 w-4" />
               </Button>
             </RbacGuard>
           </div>
         ),
       },
     ],
-    [companyNameById, deletingId, loadingQuoteId]
+    [companyNameById, deletingId, loadingQuoteId, statusUpdatingId]
   )
 
   const tableColumns = useMemo(
@@ -1325,7 +1404,7 @@ export function QuotesPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Tüm durumlar</SelectItem>
-              {['Draft', 'Sent', 'Under Review', 'Approved', 'Rejected', 'Converted'].map((item) => <SelectItem key={item} value={item}>{quoteStatusTr(item)}</SelectItem>)}
+              {QUOTE_WORKFLOW_STATUSES.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
@@ -1686,7 +1765,7 @@ function DocumentWizardTrigger({
 
     setSaving(true)
     try {
-      const payload = buildDocumentPayload(values, documentMode, quote?.status || 'Draft', serviceExpenseTaxRate)
+      const payload = buildDocumentPayload(values, documentMode, quote?.status || 'Pending', serviceExpenseTaxRate)
       if (quote) {
         await updateQuote(quote.id, payload as any)
       } else {
@@ -2077,11 +2156,10 @@ function DocumentWizardTrigger({
 export function QuoteDetailPage() {
   const params = useParams({ from: '/crm/quotes/$quoteId' })
   const navigate = useNavigate()
-  const { data, sendQuote, requestQuoteApproval, convertQuote, deleteQuotes } = useAppStore()
+  const { data, updateQuote, convertQuote, deleteQuotes } = useAppStore()
   const { toast } = useToast()
   const [auditLogs, setAuditLogs] = useState<QuoteAuditLogItem[]>([])
-  const [approvalSteps, setApprovalSteps] = useState<{ id: string; role: string; status: string; comment?: string; acted_by?: string; updated_at?: string }[]>([])
-  const [busyStep, setBusyStep] = useState<string | null>(null)
+  const [statusUpdating, setStatusUpdating] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [fullQuote, setFullQuote] = useState<Quote | null>(null)
   const storeQuote = data.quotes.find((item) => item.id === params.quoteId) ?? data.quotes[0]
@@ -2108,7 +2186,6 @@ export function QuoteDetailPage() {
   useEffect(() => {
     if (!quote) return
     api.get('/audit/', { params: { entity: 'Quote', entity_id: quote.id } }).then((res) => setAuditLogs(res.data || [])).catch(() => setAuditLogs([]))
-    api.get('/approvals/', { params: { quote_id: quote.id } }).then((res) => setApprovalSteps(res.data?.[0]?.steps || [])).catch(() => setApprovalSteps([]))
   }, [quote?.id])
 
   if (!quote) return <p className="text-muted-foreground">Belge bulunamadı</p>
@@ -2116,26 +2193,6 @@ export function QuoteDetailPage() {
   const customerSnapshot = quote.contractConfig?.customerSnapshot || quote.contractConfig?.customer_snapshot || {}
   const termsLines = getTermsText(quote.contractConfig).split('\n').map((line) => line.trim()).filter(Boolean)
   const contractNotesLines = getContractNotesText(quote.contractConfig).split('\n').map((line) => line.trim()).filter(Boolean)
-
-  const handleSend = async () => {
-    try {
-      await sendQuote(quote.id)
-      toast({ title: 'Belge gönderildi olarak işaretlendi' })
-    } catch (error: any) {
-      toast({ title: error?.response?.data?.detail || 'Gönderim durumu güncellenemedi', variant: 'destructive' })
-    }
-  }
-
-  const handleRequestApproval = async () => {
-    try {
-      await requestQuoteApproval(quote.id)
-      const refreshed = await api.get('/approvals/', { params: { quote_id: quote.id } })
-      setApprovalSteps(refreshed.data?.[0]?.steps || [])
-      toast({ title: 'Belge onay sürecine gönderildi' })
-    } catch (error: any) {
-      toast({ title: error?.response?.data?.detail || 'Onay süreci başlatılamadı', variant: 'destructive' })
-    }
-  }
 
   const handleConvert = async () => {
     try {
@@ -2146,6 +2203,20 @@ export function QuoteDetailPage() {
       }
     } catch (error: any) {
       toast({ title: error?.response?.data?.detail || 'Sözleşmeye dönüştürme sırasında hata oluştu', variant: 'destructive' })
+    }
+  }
+
+  const handleDetailStatusChange = async (nextStatus: string) => {
+    const normalizedStatus = normalizeQuoteWorkflowStatus(nextStatus)
+    setStatusUpdating(true)
+    try {
+      await updateQuote(quote.id, { status: normalizedStatus as Quote['status'] })
+      setFullQuote((current) => (current ? { ...current, status: normalizedStatus as Quote['status'] } : current))
+      toast({ title: `Belge durumu ${quoteStatusTr(normalizedStatus)} yapıldı` })
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Durum güncellenemedi', variant: 'destructive' })
+    } finally {
+      setStatusUpdating(false)
     }
   }
 
@@ -2179,7 +2250,10 @@ export function QuoteDetailPage() {
         title={`${quote.number} - ${quote.customerName || company?.name || ''}`}
         description={`${DOCUMENT_TYPE_TR[quote.documentType]} - ${quoteStatusTr(quote.status)} - ${formatCurrency(quote.total, quote.currency)}`}
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <RbacGuard perm="quotes.edit">
+              <QuoteStatusButtons value={quote.status} disabled={statusUpdating} onChange={handleDetailStatusChange} />
+            </RbacGuard>
             <RbacGuard perm="quotes.edit">
               <DocumentWizardTrigger
                 quote={quote}
@@ -2191,9 +2265,7 @@ export function QuoteDetailPage() {
                 }
               />
             </RbacGuard>
-            <RbacGuard perm="quotes.edit"><Button size="sm" variant="outline" onClick={handleSend}><Send className="mr-2 h-4 w-4" />Gönderildi işaretle</Button></RbacGuard>
             <Button onClick={handleDownload}><Download className="mr-2 h-4 w-4" />İndir</Button>
-            <RbacGuard perm="quotes.edit"><Button size="sm" variant="outline" onClick={handleRequestApproval}><Shield className="mr-2 h-4 w-4" />Onay iste</Button></RbacGuard>
             {quote.documentType === 'Quote' ? <RbacGuard perm="quotes.edit"><Button size="sm" onClick={handleConvert}><Check className="mr-2 h-4 w-4" />Sözleşmeye dönüştür</Button></RbacGuard> : null}
             <RbacGuard perm="quotes.edit"><Button size="sm" variant="destructive" disabled={deleting} onClick={handleDelete}><Trash2 className="mr-2 h-4 w-4" />Sil</Button></RbacGuard>
           </div>
@@ -2206,7 +2278,6 @@ export function QuoteDetailPage() {
           <TabsTrigger value="lines">Ürün Grupları</TabsTrigger>
           <TabsTrigger value="document">Belge</TabsTrigger>
           <TabsTrigger value="pricing">Fiyatlama</TabsTrigger>
-          <TabsTrigger value="approval">Onay</TabsTrigger>
           <TabsTrigger value="history">Geçmiş</TabsTrigger>
         </TabsList>
 
@@ -2214,7 +2285,6 @@ export function QuoteDetailPage() {
         <TabsContent value="lines"><Card><CardContent className="space-y-3 pt-4">{quote.lines.map((line, index) => <div key={`${line.name}-${index}`} className="rounded-md border p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold">{line.name}</p><p className="text-muted-foreground">{sectionLabel(line.sectionKey)} - Kod: {line.details?.code || line.sku || '-'}</p></div><p>{formatCurrency(line.unitPrice, quote.currency)} / {line.unit || 'Adet'}</p></div><div className="mt-2 grid gap-1 md:grid-cols-3"><span>Detay 1: {line.details?.primary || '-'}</span><span>Detay 2: {line.details?.secondary || '-'}</span><span>Miktar: {line.qty}</span><span>İskonto 1: %{line.discount || 0}</span><span>İskonto 2: %{line.discountSecondary || 0}</span><span>KDV: %{line.tax || 0}</span><span>Etkin iskonto: %{getEffectiveDiscountRate(line).toFixed(2)}</span><span>Net tutar: {formatCurrency(getLineDiscountedBase(line), quote.currency)}</span><span>Tutar: {formatCurrency(getLineBase(line), quote.currency)}</span></div>{line.details?.attributes && Object.keys(line.details.attributes).length > 0 && <div className="mt-3 grid gap-2 rounded-md bg-muted/30 p-3 md:grid-cols-2">{Object.entries(line.details.attributes).map(([key, value]) => <span key={key}>{key}: {String(value)}</span>)}</div>}</div>)}</CardContent></Card></TabsContent>
         <TabsContent value="document"><Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Satıcı firma: {getSellerCompanyLabel(sellerCompanies, quote.sellerCompanyKey)}</p><p>Şablon: {templateLabel(quote.documentType, quote.contractConfig?.templateKey || quote.contractConfig?.template_key)}</p><p>Cari ünvanı: {customerSnapshot.name || quote.customerName || company?.name || '-'}</p><p>Vergi bilgisi: {[customerSnapshot.tax_office || customerSnapshot.taxOffice, customerSnapshot.tax_number || customerSnapshot.taxNumber].filter(Boolean).join(' / ') || '-'}</p><p>Yetkili: {customerSnapshot.authorized_person || customerSnapshot.authorizedPerson || '-'}</p><p>Telefon / mail: {[customerSnapshot.phone, customerSnapshot.email].filter(Boolean).join(' / ') || '-'}</p><p>Adres: {customerSnapshot.address || '-'}</p>{termsLines.length > 0 && <div className="space-y-2 pt-2"><p className="font-medium">Maddeler</p>{termsLines.map((term, index) => <p key={`term-${index}`}>{term}</p>)}</div>}{contractNotesLines.length > 0 && <div className="space-y-2 pt-2"><p className="font-medium">Sözleşme notları</p>{contractNotesLines.map((term, index) => <p key={`contract-note-${index}`}>{term}</p>)}</div>}</CardContent></Card></TabsContent>
         <TabsContent value="pricing"><Card><CardContent className="pt-4 space-y-2 text-sm"><p>Fiyatlama kuralları müşteri, ürün kategorisi ve hacim bazlı uygulanır.</p><div className="flex gap-2"><Badge>VIP müşteri %8</Badge><Badge>Donanım %5</Badge><Badge>50k+ %3</Badge></div></CardContent></Card></TabsContent>
-        <TabsContent value="approval"><Card><CardContent className="pt-4 space-y-2"><CardDescription>Satır içi onay akışı</CardDescription>{approvalSteps.length === 0 && <p className="text-sm text-muted-foreground">Onay kaydı yok</p>}{approvalSteps.map((step) => <div key={step.id} className="flex items-center justify-between rounded-md border p-2"><div><p className="font-semibold">{step.role}</p><p className="text-xs text-muted-foreground">Durum: {step.status}</p>{step.comment && <p className="text-xs text-muted-foreground">Not: {step.comment}</p>}</div>{step.status === 'Waiting' && <div className="flex gap-2"><RbacGuard perm="quotes.approve"><Button size="sm" disabled={busyStep === step.id} onClick={async () => { setBusyStep(step.id); await api.post(`/approvals/step/${step.id}/action/`, { action: 'approve' }); const refreshed = await api.get('/approvals/', { params: { quote_id: quote.id } }); setApprovalSteps(refreshed.data?.[0]?.steps || []); setBusyStep(null) }}>Onayla</Button></RbacGuard><RbacGuard perm="quotes.approve"><Button size="sm" variant="outline" disabled={busyStep === step.id} onClick={async () => { const reason = prompt('Ret nedeni:'); setBusyStep(step.id); await api.post(`/approvals/step/${step.id}/action/`, { action: 'reject', comment: reason || '' }); const refreshed = await api.get('/approvals/', { params: { quote_id: quote.id } }); setApprovalSteps(refreshed.data?.[0]?.steps || []); setBusyStep(null) }}>Reddet</Button></RbacGuard></div>}</div>)}<RbacGuard perm="quotes.edit"><Button size="sm" variant="ghost" disabled={busyStep !== null} onClick={async () => { setBusyStep('resubmit'); if (approvalSteps[0]) { await api.post(`/approvals/step/${approvalSteps[0].id}/action/`, { action: 'resubmit' }); const refreshed = await api.get('/approvals/', { params: { quote_id: quote.id } }); setApprovalSteps(refreshed.data?.[0]?.steps || []) } setBusyStep(null) }}>Yeniden gönder</Button></RbacGuard></CardContent></Card></TabsContent>
         <TabsContent value="history"><AuditHistoryList logs={auditLogs} companies={data.companies} users={data.users} currency={quote.currency} /></TabsContent>
       </Tabs>
     </div>

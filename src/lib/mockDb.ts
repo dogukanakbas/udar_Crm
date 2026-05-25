@@ -111,7 +111,7 @@ export const mockDb = {
       }
       persist({
         ...snapshot,
-        quotes: snapshot.quotes.map((qq) => (qq.id === id ? { ...qq, status: 'Converted' } : qq)),
+        quotes: snapshot.quotes.map((qq) => (qq.id === id ? { ...qq, status: 'Approved' } : qq)),
         salesOrders: [so, ...snapshot.salesOrders],
       })
       return so
@@ -280,4 +280,3 @@ export const mockDb = {
   },
   snapshot: () => clone(snapshot),
 }
-
