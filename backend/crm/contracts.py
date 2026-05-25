@@ -473,12 +473,13 @@ def resolve_product_document_defaults(product=None, fallback_section_key='', lin
     category = getattr(product, 'category', None) if product else None
     category_defaults = dict(getattr(category, 'template_defaults', {}) or {}) if category else {}
     special_group = _special_product_document_group(product, line_name)
-    source_defaults = special_group or product_defaults or category_defaults
+    group_defaults = special_group or category_defaults or product_defaults
+    detail_defaults = special_group or product_defaults or category_defaults
     section_key = (
         (special_group or {}).get('section_key')
-        or fallback_section_key
-        or product_defaults.get('section_key')
         or category_defaults.get('section_key')
+        or product_defaults.get('section_key')
+        or fallback_section_key
         or 'service'
     )
     section_key = _canonical_section_key(section_key) or 'service'
@@ -489,15 +490,15 @@ def resolve_product_document_defaults(product=None, fallback_section_key='', lin
         or section_key
     )
     try:
-        order = int(source_defaults.get('document_order', category_defaults.get('document_order', 999)) or 999)
+        order = int(group_defaults.get('document_order', category_defaults.get('document_order', 999)) or 999)
     except Exception:
         order = 999
     if order == 999:
         order = _document_group_order_fallback(section_key, label)
-    columns = source_defaults.get('document_columns') or product_defaults.get('document_columns') or category_defaults.get('document_columns')
+    columns = group_defaults.get('document_columns') or category_defaults.get('document_columns') or product_defaults.get('document_columns')
     if not isinstance(columns, list) or not columns:
         columns = DEFAULT_DYNAMIC_DOCUMENT_COLUMNS
-    technical_items = source_defaults.get('technical_items') or product_defaults.get('technical_items') or category_defaults.get('technical_items')
+    technical_items = detail_defaults.get('technical_items') or product_defaults.get('technical_items') or category_defaults.get('technical_items')
     if not isinstance(technical_items, list):
         technical_items = []
     return {
@@ -506,7 +507,7 @@ def resolve_product_document_defaults(product=None, fallback_section_key='', lin
         'order': order,
         'columns': [str(column or '').strip() for column in columns if str(column or '').strip()] or DEFAULT_DYNAMIC_DOCUMENT_COLUMNS,
         'technical_items': [str(item or '').strip() for item in technical_items if str(item or '').strip()],
-        'template_family': source_defaults.get('template_family') or product_defaults.get('template_family') or category_defaults.get('template_family') or '',
+        'template_family': group_defaults.get('template_family') or category_defaults.get('template_family') or product_defaults.get('template_family') or '',
     }
 
 
@@ -2496,7 +2497,7 @@ def _select_templates(quote, template_key: str | None = None):
 def _quote_families(quote):
     families = set()
     for line in quote.lines.select_related('product__category').all():
-        section_key = _canonical_section_key(line.section_key or _category_section_key(line))
+        section_key = _canonical_section_key(_category_section_key(line) or line.section_key)
         family = SECTION_FAMILY_MAP.get(section_key) or _category_template_family(line)
         if family:
             families.add(family)
@@ -2511,15 +2512,15 @@ def _category_template_family(line):
     if family in {'steel', 'interior', 'furniture', 'service'}:
         return family
     normalized_family = _normalize_document_group_text(family)
-    if normalized_family in {'celik kapi', 'steel door', 'celik'}:
+    if normalized_family in {'celik kapi', 'steel door', 'celik'} or 'celik' in normalized_family or 'steel' in normalized_family:
         return 'steel'
-    if normalized_family in {'ic oda', 'ic oda kapi', 'interior door'}:
+    if normalized_family in {'ic oda', 'ic oda kapi', 'interior door'} or 'ic oda' in normalized_family or 'interior' in normalized_family:
         return 'interior'
-    if normalized_family in {'mobilya', 'furniture', 'mutfak', 'portmanto', 'banyo'}:
+    if normalized_family in {'mobilya', 'furniture', 'mutfak', 'portmanto', 'banyo'} or any(term in normalized_family for term in ['mobilya', 'furniture', 'mutfak', 'portmanto', 'banyo']):
         return 'furniture'
-    if normalized_family in {'montaj', 'hizmet', 'service'}:
+    if normalized_family in {'montaj', 'hizmet', 'service'} or any(term in normalized_family for term in ['montaj', 'hizmet', 'service']):
         return 'service'
-    section_key = _canonical_section_key(line.section_key or defaults.get('section_key'))
+    section_key = _canonical_section_key(defaults.get('section_key') or line.section_key)
     return SECTION_FAMILY_MAP.get(section_key, 'service' if section_key else '')
 
 
@@ -2712,7 +2713,7 @@ def _select_lines_for_block(ordered_lines, block):
         for line in ordered_lines
         if _line_is_meaningful(line)
         and (
-            _canonical_section_key(line.section_key or _category_section_key(line)) in allowed_keys
+            _canonical_section_key(_category_section_key(line) or line.section_key) in allowed_keys
             or ('service' in allowed_keys and _category_template_family(line) == 'service')
         )
     ]
