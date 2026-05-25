@@ -27,6 +27,41 @@ def _ensure_org(request):
     return org
 
 
+def _normalize_reorder_payload(model, org, new_positions, item_label):
+    if not isinstance(new_positions, list) or not new_positions:
+        return None, Response({'detail': 'new_positions listesi gerekli'}, status=status.HTTP_400_BAD_REQUEST)
+
+    normalized = []
+    for index, position in enumerate(new_positions):
+        if not isinstance(position, dict) or position.get('id') in [None, '']:
+            return None, Response({'detail': f'{item_label} ID bilgisi eksik.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            item_id = int(position.get('id'))
+        except (TypeError, ValueError):
+            return None, Response({'detail': f'{item_label} ID bilgisi geçersiz.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            order = int(position.get('order', index))
+        except (TypeError, ValueError):
+            order = index
+        normalized.append((item_id, max(order, 0)))
+
+    ids = [item_id for item_id, _ in normalized]
+    if len(ids) != len(set(ids)):
+        return None, Response({'detail': f'Aynı {item_label.lower()} birden fazla kez gönderilemez.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    instances_by_id = {
+        instance.id: instance
+        for instance in model.objects.filter(organization=org, id__in=ids)
+    }
+    if set(ids) != set(instances_by_id):
+        return None, Response(
+            {'detail': f'Bazı {item_label.lower()} ID bilgileri geçersiz veya bu organizasyona ait değil.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    return [(instances_by_id[item_id], order) for item_id, order in normalized], None
+
+
 class OrgScopedMixin:
     def get_queryset(self):
         qs = super().get_queryset()
@@ -146,29 +181,18 @@ class ProductViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         org = _ensure_org(request)
         new_positions = data.get('new_positions') or []
 
-        if not isinstance(new_positions, list) or not new_positions:
-            return Response({'detail': 'new_positions listesi gerekli'}, status=status.HTTP_400_BAD_REQUEST)
+        normalized_positions, error = _normalize_reorder_payload(Product, org, new_positions, 'Ürün')
+        if error is not None:
+            return error
 
-        # Verify all products belong to this organization
-        product_ids = [pos.get('id') for pos in new_positions if isinstance(pos, dict)]
-        existing_products = set(Product.objects.filter(organization=org, id__in=product_ids).values_list('id', flat=True))
-        provided_ids = set(product_ids)
-
-        if provided_ids != existing_products:
-            return Response({'detail': 'Bazı ürün ID\'leri geçersiz veya bu organizasyona ait değil.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Update order field for each product
         with transaction.atomic():
-            for pos in new_positions:
-                if isinstance(pos, dict) and 'id' in pos and 'order' in pos:
-                    try:
-                        product = Product.objects.get(organization=org, id=pos['id'])
-                        product.order = pos['order']
-                        product.save(update_fields=['order'])
-                    except Product.DoesNotExist:
-                        pass
+            products = []
+            for product, order in normalized_positions:
+                product.order = order
+                products.append(product)
+            Product.objects.bulk_update(products, ['order'])
 
-        return Response({'detail': 'Ürünler başarıyla sıralandı.', 'count': len([p for p in new_positions if 'id' in p])})
+        return Response({'detail': 'Ürünler başarıyla sıralandı.', 'count': len(normalized_positions)})
 
 
 class CategoryViewSet(OrgScopedMixin, viewsets.ModelViewSet):
@@ -194,29 +218,18 @@ class CategoryViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         org = _ensure_org(request)
         new_positions = data.get('new_positions') or []
 
-        if not isinstance(new_positions, list) or not new_positions:
-            return Response({'detail': 'new_positions listesi gerekli'}, status=status.HTTP_400_BAD_REQUEST)
+        normalized_positions, error = _normalize_reorder_payload(Category, org, new_positions, 'Kategori')
+        if error is not None:
+            return error
 
-        # Verify all categories belong to this organization
-        category_ids = [pos.get('id') for pos in new_positions if isinstance(pos, dict)]
-        existing_categories = set(Category.objects.filter(organization=org, id__in=category_ids).values_list('id', flat=True))
-        provided_ids = set(category_ids)
-
-        if provided_ids != existing_categories:
-            return Response({'detail': 'Bazı kategori ID\'leri geçersiz veya bu organizasyona ait değil.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Update order field for each category
         with transaction.atomic():
-            for pos in new_positions:
-                if isinstance(pos, dict) and 'id' in pos and 'order' in pos:
-                    try:
-                        category = Category.objects.get(organization=org, id=pos['id'])
-                        category.order = pos['order']
-                        category.save(update_fields=['order'])
-                    except Category.DoesNotExist:
-                        pass
+            categories = []
+            for category, order in normalized_positions:
+                category.order = order
+                categories.append(category)
+            Category.objects.bulk_update(categories, ['order'])
 
-        return Response({'detail': 'Kategoriler başarıyla sıralandı.', 'count': len([p for p in new_positions if 'id' in p])})
+        return Response({'detail': 'Kategoriler başarıyla sıralandı.', 'count': len(normalized_positions)})
 
 
 class SalesOrderViewSet(OrgScopedMixin, viewsets.ModelViewSet):

@@ -166,6 +166,7 @@ export function InventoryPanel() {
         description: 'Ürün sıralama işlemi başarısız oldu, lütfen tekrar deneyin.',
         variant: 'destructive',
       })
+      throw error
     } finally {
       setReorderingProducts(false)
     }
@@ -189,6 +190,7 @@ export function InventoryPanel() {
         description: 'Kategori sıralama işlemi başarısız oldu, lütfen tekrar deneyin.',
         variant: 'destructive',
       })
+      throw error
     } finally {
       setReorderingCategories(false)
     }

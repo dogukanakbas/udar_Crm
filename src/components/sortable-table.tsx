@@ -70,6 +70,7 @@ function DraggableTableRow({
         <TableCell className="w-10 cursor-grab text-muted-foreground hover:text-foreground">
           <button
             type="button"
+            aria-label="Satırı sırala"
             className="rounded p-2"
             {...attributes}
             {...listeners}
@@ -149,10 +150,8 @@ export function SortableTable<TData extends Record<string, any>>({
     columnResizeMode: 'onChange',
   })
 
-  const rowIds = React.useMemo(
-    () => table.getRowModel().rows.map((row) => getRowId(row.original, table.getRowModel().rows.indexOf(row))),
-    [table.getRowModel().rows, getRowId]
-  )
+  const visibleRows = table.getRowModel().rows
+  const rowIds = visibleRows.map((row, index) => getRowId(row.original, index))
 
   const handleDragEnd = async (event: DragEndEvent) => {
     if (isReordering) return
@@ -160,10 +159,11 @@ export function SortableTable<TData extends Record<string, any>>({
     const { active, over } = event
     if (!over || active.id === over.id) return
 
-    const oldIndex = rowIds.indexOf(String(active.id))
-    const newIndex = rowIds.indexOf(String(over.id))
+    const oldIndex = data.findIndex((item, index) => getRowId(item, index) === String(active.id))
+    const newIndex = data.findIndex((item, index) => getRowId(item, index) === String(over.id))
     if (oldIndex === -1 || newIndex === -1) return
 
+    const previousData = data
     const newData = arrayMove(data, oldIndex, newIndex)
     setData(newData)
 
@@ -171,6 +171,8 @@ export function SortableTable<TData extends Record<string, any>>({
       setIsReordering(true)
       try {
         await onReorder(newData)
+      } catch {
+        setData(previousData)
       } finally {
         setIsReordering(false)
       }
@@ -268,8 +270,8 @@ export function SortableTable<TData extends Record<string, any>>({
             ))}
           </TableHeader>
           <TableBody>
-            {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row, index) => (
+            {visibleRows?.length ? (
+              visibleRows.map((row, index) => (
                 <DraggableTableRow
                   key={rowIds[index]}
                   id={rowIds[index]}

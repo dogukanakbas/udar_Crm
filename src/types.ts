@@ -84,6 +84,7 @@ export interface CategoryTemplateField {
 export interface Category {
   id: string
   name: string
+  order?: number
   templateDefaults?: Record<string, any>
   attributeSchema?: CategoryTemplateField[]
 }
@@ -126,6 +127,7 @@ export interface Product {
   id: string
   sku: string
   name: string
+  order?: number
   category: string
   categoryId?: string
   categoryName?: string

@@ -359,6 +359,7 @@ export const useAppStore = create<AppState>()(
       const categories = (categoriesRes.data || []).map((category: any, idx: number) => ({
         id: String(category.id ?? idx),
         name: category.name || '',
+        order: Number(category.order ?? idx),
         templateDefaults: category.template_defaults || {},
         attributeSchema: category.attribute_schema || [],
       }))
@@ -372,6 +373,7 @@ export const useAppStore = create<AppState>()(
         stock: Number(p.stock ?? 0),
         reserved: Number(p.reserved ?? 0),
         reorderPoint: Number(p.reorder_point ?? 0),
+        order: Number(p.order ?? idx),
         warehouse: '',
         price: Number(p.price ?? 0),
         priceLists: p.price_lists || {},

@@ -26,6 +26,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AlterModelOptions(
             name='product',
-            options={'ordering': ['order', 'id'], 'unique_together': {('organization', 'sku')}},
+            options={'ordering': ['order', 'id']},
         ),
     ]
