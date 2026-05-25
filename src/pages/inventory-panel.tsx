@@ -366,7 +366,7 @@ export function InventoryPanel() {
             <TabsContent value="products" className="space-y-3">
               <div className="flex flex-wrap justify-end gap-2">
                 <RbacGuard perm="products.edit">
-                  <Button size="sm" variant="outline" onClick={() => downloadInventoryTemplateWorkbook(priceLists)}>
+                  <Button size="sm" variant="outline" onClick={() => downloadInventoryTemplateWorkbook(priceLists, categories)}>
                     Şablon indir
                   </Button>
                 </RbacGuard>

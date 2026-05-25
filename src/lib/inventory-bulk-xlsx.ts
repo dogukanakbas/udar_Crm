@@ -259,8 +259,21 @@ function buildTemplateProductRows(priceLists: PriceListOption[] = []) {
   ]
 }
 
+function categoryDocumentOrder(category: Category, fallback: number) {
+  const order = Number(category.templateDefaults?.document_order ?? category.order ?? fallback)
+  return Number.isFinite(order) ? order : fallback
+}
+
+function categoriesByDocumentGroupOrder(categories: Category[]) {
+  return [...categories].sort(
+    (left, right) =>
+      categoryDocumentOrder(left, 999) - categoryDocumentOrder(right, 999) ||
+      String(left.name || '').localeCompare(String(right.name || ''), 'tr')
+  )
+}
+
 function categoryRowsFromState(categories: Category[]) {
-  return categories.map((category) => ({
+  return categoriesByDocumentGroupOrder(categories).map((category) => ({
     Kategori: category.name || '',
     'Belge Grubu': category.templateDefaults?.section_key || '',
     'Belge Sırası': numberValue(category.templateDefaults?.document_order),
@@ -313,11 +326,17 @@ function appendSizedSheet(
   XLSX.utils.book_append_sheet(workbook, sheet, sheetName)
 }
 
-export function downloadInventoryTemplateWorkbook(priceLists: PriceListOption[] = []) {
+export function downloadInventoryTemplateWorkbook(priceLists: PriceListOption[] = [], categories: Category[] = []) {
   const workbook = XLSX.utils.book_new()
   const headers = productHeaders(priceLists)
   appendSizedSheet(workbook, buildTemplateProductRows(priceLists), PRODUCT_SHEET, headers, productWidths(headers))
-  appendSizedSheet(workbook, buildTemplateCategoryRows(), CATEGORY_SHEET, CATEGORY_HEADERS, categoryWidths([...CATEGORY_HEADERS]))
+  appendSizedSheet(
+    workbook,
+    categories.length ? categoryRowsFromState(categories) : buildTemplateCategoryRows(),
+    CATEGORY_SHEET,
+    CATEGORY_HEADERS,
+    categoryWidths([...CATEGORY_HEADERS])
+  )
   XLSX.utils.book_append_sheet(workbook, buildGuideSheet(), GUIDE_SHEET)
   XLSX.writeFile(workbook, 'stok_tum_urun_detayli_sablon.xlsx')
 }
