@@ -77,11 +77,13 @@ export function LoginPage() {
           <div className="absolute inset-x-0 bottom-0 h-40 bg-[linear-gradient(0deg,rgba(199,151,67,0.28),rgba(199,151,67,0))]" />
           <div className="relative flex min-h-[260px] w-full flex-col justify-between gap-8 px-6 py-7 sm:px-10 lg:min-h-dvh lg:px-16 lg:py-14 xl:px-20">
             <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-md bg-white text-lg font-bold text-[#173f38] shadow-[0_18px_45px_rgba(0,0,0,0.22)] overflow-hidden">
+              <div className="flex h-12 w-12 items-center justify-center rounded-md font-semibold overflow-hidden">
                 {branding?.logo_url ? (
-                  <img src={branding.logo_url} alt="Logo" className="h-full w-full object-contain p-1" />
+                  <img src={branding.logo_url} alt="Logo" className="h-full w-full object-contain" />
                 ) : (
-                  (branding?.brand_name || branding?.name || 'U')[0].toUpperCase()
+                  <div className="flex h-10 w-10 items-center justify-center rounded-md bg-white text-lg font-bold text-[#173f38] shadow-[0_18px_45px_rgba(0,0,0,0.22)]">
+                    {(branding?.brand_name || branding?.name || 'U')[0].toUpperCase()}
+                  </div>
                 )}
               </div>
               <div>
