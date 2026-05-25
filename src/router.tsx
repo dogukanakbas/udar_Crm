@@ -27,6 +27,8 @@ import { getTokens } from '@/lib/auth'
 import { useAppStore } from '@/state/use-app-store'
 import { hasPermission } from '@/lib/permissions'
 
+const defaultLandingForRole = (role?: string) => (role === 'Admin' ? '/' : role === 'Worker' ? '/task-history' : '/crm/quotes')
+
 const rootRoute = new RootRoute({
   component: AppShell,
   beforeLoad: async ({ location }) => {
@@ -76,13 +78,20 @@ function adminOnly(Component: ComponentType) {
 const dashboardRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/',
+  beforeLoad: () => {
+    const storedRole = typeof window !== 'undefined' ? localStorage.getItem('current-user-role') : ''
+    const role = storedRole || ''
+    if (role && role !== 'Admin') {
+      throw redirect({ to: defaultLandingForRole(role) as any })
+    }
+  },
   component: DashboardPage,
 })
 
 const opportunitiesRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/crm/opportunities',
-  component: secured(OpportunitiesPage, 'opportunities.view'),
+  component: adminOnly(OpportunitiesPage),
 })
 
 const companiesRoute = new Route({

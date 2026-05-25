@@ -765,12 +765,12 @@ class LeadViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 class OpportunityViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = OpportunitySerializer
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
-    required_perm = 'opportunities.view'
+    required_perm = 'opportunities.admin'
     permission_map = {
-        'create': 'opportunities.edit',
-        'update': 'opportunities.edit',
-        'partial_update': 'opportunities.edit',
-        'destroy': 'opportunities.edit',
+        'create': 'opportunities.admin',
+        'update': 'opportunities.admin',
+        'partial_update': 'opportunities.admin',
+        'destroy': 'opportunities.admin',
     }
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name', 'stage']

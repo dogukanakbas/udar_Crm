@@ -3,17 +3,19 @@ from accounts.permissions_map import DEFAULT_ROLE_PERMS
 
 DEPRECATED_PERMISSIONS = {"leads.view", "leads.edit"}
 ROLE_PERMISSION_REVOKES = {
-    "Manager": {"contacts.view", "contacts.edit"},
+    "Manager": {"contacts.view", "contacts.edit", "opportunities.view", "opportunities.edit"},
     "Sales": {
         "contacts.view",
         "contacts.edit",
+        "opportunities.view",
+        "opportunities.edit",
         "orders.view",
         "orders.edit",
         "orders.receive",
         "tasks.view",
         "tasks.edit",
     },
-    "Worker": {"contacts.view", "contacts.edit"},
+    "Worker": {"contacts.view", "contacts.edit", "opportunities.view", "opportunities.edit"},
 }
 
 

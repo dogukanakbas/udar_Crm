@@ -63,7 +63,7 @@ const nav: Array<{
   perm?: string
   children?: Array<{ label: string; to: string; perm?: string; roles?: string[] }>
 }> = [
-  { label: 'Kontrol Paneli', to: '/', icon: Home, roles: ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse'] },
+  { label: 'Kontrol Paneli', to: '/', icon: Home, roles: ['Admin'] },
   { label: 'Görevlerim', to: '/', icon: Home, roles: ['Worker'] },
   { label: 'Geçmiş görevler', to: '/task-history', icon: CalendarClock, roles: ['Worker'], perm: 'tasks.view' },
   { label: 'Şifre değiştir', to: '/change-password', icon: KeyRound, roles: ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse', 'Worker'] },
@@ -72,7 +72,7 @@ const nav: Array<{
     icon: Gauge,
     roles: ['Admin', 'Manager', 'Sales', 'Finance'],
     children: [
-      { label: 'Fırsatlar', to: '/crm/opportunities', perm: 'opportunities.view' },
+      { label: 'Fırsatlar', to: '/crm/opportunities', perm: 'opportunities.view', roles: ['Admin'] },
       { label: 'Cari Kartı', to: '/crm/companies', perm: 'partners.view' },
       { label: 'Kişiler', to: '/crm/contacts', perm: 'contacts.view', roles: ['Admin'] },
       { label: 'Teklif & Sözleşmeler', to: '/crm/quotes', perm: 'quotes.view' },

@@ -10,6 +10,7 @@ import type { Role } from '@/types'
 
 const KNOWN_ROLES: Role[] = ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse', 'Worker']
 const isKnownRole = (v: unknown): v is Role => typeof v === 'string' && KNOWN_ROLES.includes(v as Role)
+const defaultLandingForRole = (role?: Role) => (role === 'Admin' ? '/' : role === 'Worker' ? '/task-history' : '/crm/quotes')
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -28,6 +29,7 @@ export function LoginPage() {
     setError(null)
     try {
       await login(username, password)
+      let nextPath = '/crm/quotes'
       
       // CRITICAL: Role bilgisi gelene kadar bekle
       setHydrating(true)
@@ -36,6 +38,7 @@ export function LoginPage() {
         if (isKnownRole(me?.data?.role)) {
           setRole(me.data.role)
           localStorage.setItem('current-user-role', me.data.role)
+          nextPath = defaultLandingForRole(me.data.role)
         }
       } catch {
         /* ignore */
@@ -45,7 +48,7 @@ export function LoginPage() {
       await hydrate()
       setHydrating(false)
       
-      navigate({ to: '/' })
+      navigate({ to: nextPath as any })
     } catch (err: any) {
       const detail = err?.response?.data?.detail
       setError(

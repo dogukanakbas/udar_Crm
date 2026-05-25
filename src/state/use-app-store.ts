@@ -333,7 +333,7 @@ export const useAppStore = create<AppState>()(
         fetchIf('quotes.view', '/seller-companies/'),
         fetchIf('partners.view', '/partners/'),
         fetchIfAdmin('/contacts/'),
-        fetchIf('opportunities.view', '/opportunities/'),
+        fetchIfAdmin('/opportunities/'),
         fetchIf('tickets.view', '/tickets/'),
         fetchIf('logistics.view', '/vehicles/'),
         fetchIfAdmin('/sales-orders/'),
