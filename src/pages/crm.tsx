@@ -1,6 +1,5 @@
 // @ts-nocheck
 import { useEffect, useMemo, useState } from 'react'
-import { useParams } from '@tanstack/react-router'
 import { type ColumnDef } from '@tanstack/react-table'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
@@ -15,29 +14,14 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogT
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Separator } from '@/components/ui/separator'
-import { Textarea } from '@/components/ui/textarea'
 import { PageHeader } from '@/components/app-shell'
 import { useToast } from '@/components/ui/use-toast'
-import { Checkbox } from '@/components/ui/checkbox'
 import { normalizeCompanySize, normalizeCountryLabel } from '@/lib/location-data'
 import { downloadCompaniesAsXlsx } from '@/lib/company-export-xlsx'
 import { useAppStore } from '@/state/use-app-store'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import type { Lead, Opportunity, Contact as ContactType, Company as CompanyType } from '@/types'
+import type { Opportunity, Contact as ContactType, Company as CompanyType } from '@/types'
 import { BadgeCheck, Download, HandCoins, Plus, Timer } from 'lucide-react'
-
-const leadSchema = z.object({
-  name: z.string().min(2),
-  title: z.string().min(2),
-  companyId: z.string(),
-  email: z.string().email(),
-  phone: z.string(),
-  owner: z.string(),
-  status: z.string(),
-  source: z.string(),
-  score: z.coerce.number().min(0).max(100),
-})
 
 const contactSchema = z.object({
   companyId: z.string(),
@@ -66,394 +50,6 @@ const OPPORTUNITY_STAGE_LABELS: Record<string, string> = {
   'Closed Lost': 'Kaybedildi',
 }
 const opportunityStageTr = (s: string) => OPPORTUNITY_STAGE_LABELS[s] ?? s
-
-export function LeadsPage() {
-  const { data, deleteLead, createLead, updateLead, createCompany, createContact } = useAppStore()
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [ownerFilter, setOwnerFilter] = useState('all')
-  const [sourceFilter, setSourceFilter] = useState('all')
-  const { toast } = useToast()
-
-  const filtered = useMemo(
-    () =>
-      data.leads.filter(
-        (lead) =>
-          (statusFilter === 'all' || lead.status === statusFilter) &&
-          (ownerFilter === 'all' || lead.owner === ownerFilter) &&
-          (sourceFilter === 'all' || lead.source === sourceFilter)
-      ),
-    [data.leads, statusFilter, ownerFilter, sourceFilter]
-  )
-
-  const columns: ColumnDef<Lead>[] = [
-    {
-      id: 'select',
-      header: ({ table }) => (
-        <Checkbox
-          checked={table.getIsAllPageRowsSelected()}
-          onCheckedChange={(v) => table.toggleAllPageRowsSelected(!!v)}
-          aria-label="Tümünü seç"
-        />
-      ),
-      cell: ({ row }) => (
-        <Checkbox checked={row.getIsSelected()} onCheckedChange={(v) => row.toggleSelected(!!v)} aria-label="Satırı seç" />
-      ),
-      size: 40,
-    },
-    { accessorKey: 'name', header: 'Aday' },
-    {
-      accessorKey: 'companyId',
-      header: 'Şirket',
-      cell: ({ row }) => data.companies.find((c) => c.id === row.original.companyId)?.name ?? '—',
-    },
-    {
-      accessorKey: 'status',
-      header: 'Durum',
-      cell: ({ row }) => <Badge variant="secondary">{row.original.status}</Badge>,
-    },
-    { accessorKey: 'source', header: 'Kaynak' },
-    { accessorKey: 'owner', header: 'Sahip' },
-    {
-      accessorKey: 'score',
-      header: 'Skor',
-      cell: ({ row }) => <Badge variant={row.original.score > 75 ? 'success' : 'outline'}>{row.original.score}</Badge>,
-    },
-    {
-      accessorKey: 'createdAt',
-      header: 'Oluşturulma',
-      cell: ({ row }) => formatDate(row.original.createdAt),
-    },
-    {
-      id: 'actions',
-      header: '',
-      cell: ({ row }) => (
-        <div className="flex items-center gap-2">
-          <LeadModal
-            lead={row.original}
-            companies={data.companies}
-            owners={Array.from(new Set(data.leads.map((l) => l.owner)))}
-            onSubmit={(values) => updateLead(row.original.id, values as any)}
-          >
-            <Button variant="ghost" size="sm">
-              Düzenle
-            </Button>
-          </LeadModal>
-          <Button variant="ghost" size="sm" onClick={() => deleteLead(row.original.id)}>
-            Sil
-          </Button>
-        </div>
-      ),
-    },
-  ]
-
-  const onExport = () => {
-    const csv = filtered.map((lead) => ({
-      name: lead.name,
-      company: data.companies.find((c) => c.id === lead.companyId)?.name ?? '',
-      status: lead.status,
-      owner: lead.owner,
-      score: lead.score,
-    }))
-    const blob = new Blob([csv.map((row) => Object.values(row).join(',')).join('\n')], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'aday_musteriler.csv'
-    a.click()
-  }
-
-  return (
-    <div>
-      <PageHeader
-        title="Aday müşteri listesi"
-        description="Filtreler, kayıtlı görünümler, satır içi işlemler"
-        actions={
-          <div className="flex items-center gap-2">
-            {data.savedViews.leads?.map((view) => (
-              <Button
-                key={view.name}
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setStatusFilter(view.filters.status ?? 'all')
-                  setOwnerFilter(view.filters.owner ?? 'all')
-                  setSourceFilter(view.filters.source ?? 'all')
-                }}
-              >
-                {view.name}
-              </Button>
-            ))}
-            <CompanyModal
-              onSubmit={(values) => {
-                createCompany(values as any)
-                toast({ title: 'Şirket oluşturuldu' })
-              }}
-            >
-              <Button variant="outline" size="sm">
-                <Plus className="mr-2 h-4 w-4" />
-                Yeni şirket
-              </Button>
-            </CompanyModal>
-            <ContactModal
-              companies={data.companies}
-              onSubmit={(values) => {
-                createContact(values as any)
-                toast({ title: 'Kişi oluşturuldu' })
-              }}
-            >
-              <Button variant="outline" size="sm">
-                <Plus className="mr-2 h-4 w-4" />
-                Yeni kişi
-              </Button>
-            </ContactModal>
-            <LeadModal
-              companies={data.companies}
-              owners={Array.from(new Set(data.leads.map((l) => l.owner)))}
-              onSubmit={(values) => {
-                createLead(values as any)
-                toast({ title: 'Aday müşteri oluşturuldu' })
-              }}
-            >
-              <Button size="sm">
-                <Plus className="mr-2 h-4 w-4" />
-                Yeni lead
-              </Button>
-            </LeadModal>
-          </div>
-        }
-      />
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Durum" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Tüm durumlar</SelectItem>
-            {Array.from(new Set(data.leads.map((l) => l.status))).map((status) => (
-              <SelectItem key={status} value={status}>
-                {status}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={ownerFilter} onValueChange={setOwnerFilter}>
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Sahip" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Tüm sahipler</SelectItem>
-            {Array.from(new Set(data.leads.map((l) => l.owner))).map((owner) => (
-              <SelectItem key={owner} value={owner}>
-                {owner}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={sourceFilter} onValueChange={setSourceFilter}>
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Kaynak" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Tüm kaynaklar</SelectItem>
-            {Array.from(new Set(data.leads.map((l) => l.source))).map((source) => (
-              <SelectItem key={source} value={source}>
-                {source}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <DataTable columns={columns} data={filtered} searchKey="name" onExport={onExport} />
-    </div>
-  )
-}
-
-function LeadModal({
-  children,
-  companies,
-  owners,
-  onSubmit,
-  lead,
-}: {
-  children: React.ReactNode
-  companies: { id: string; name: string }[]
-  owners: string[]
-  onSubmit: (values: z.infer<typeof leadSchema>) => void
-  lead?: Lead
-}) {
-  const form = useForm<z.infer<typeof leadSchema>>({
-    resolver: zodResolver(leadSchema) as any,
-    defaultValues: {
-      name: lead?.name ?? '',
-      title: lead?.title ?? '',
-      companyId: lead?.companyId ?? companies[0]?.id ?? '',
-      email: lead?.email ?? '',
-      phone: lead?.phone ?? '',
-      owner: lead?.owner ?? owners[0] ?? '',
-      status: lead?.status ?? 'New',
-      source: lead?.source ?? 'Website',
-      score: lead?.score ?? 50,
-    },
-  })
-
-  useEffect(() => {
-    form.reset({
-      name: lead?.name ?? '',
-      title: lead?.title ?? '',
-      companyId: lead?.companyId ?? companies[0]?.id ?? '',
-      email: lead?.email ?? '',
-      phone: lead?.phone ?? '',
-      owner: lead?.owner ?? owners[0] ?? '',
-      status: lead?.status ?? 'New',
-      source: lead?.source ?? 'Website',
-      score: lead?.score ?? 50,
-    })
-  }, [lead, form, companies, owners])
-
-  return (
-    <Dialog>
-      <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Aday müşteri oluştur</DialogTitle>
-        </DialogHeader>
-        <form
-          onSubmit={form.handleSubmit((values) => {
-            onSubmit(values as z.infer<typeof leadSchema>)
-          })}
-          className="space-y-3"
-        >
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>İsim</Label>
-              <Input {...form.register('name')} />
-            </div>
-            <div>
-              <Label>Unvan</Label>
-              <Input {...form.register('title')} />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Şirket</Label>
-              <Select value={form.watch('companyId')} onValueChange={(v) => form.setValue('companyId', v)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {companies.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Sahip</Label>
-              <Select value={form.watch('owner')} onValueChange={(v) => form.setValue('owner', v)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {owners.map((owner) => (
-                    <SelectItem key={owner} value={owner}>
-                      {owner}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>E-posta</Label>
-              <Input {...form.register('email')} type="email" />
-            </div>
-            <div>
-              <Label>Telefon</Label>
-              <Input {...form.register('phone')} />
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <Label>Durum</Label>
-              <Input {...form.register('status')} />
-            </div>
-            <div>
-              <Label>Kaynak</Label>
-              <Input {...form.register('source')} />
-            </div>
-            <div>
-              <Label>Skor</Label>
-              <Input type="number" {...form.register('score', { valueAsNumber: true })} />
-            </div>
-          </div>
-          <DialogFooter className="pt-2">
-            <Button type="submit">Kaydet</Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-export function LeadDetailPage() {
-  const params = useParams({ from: '/crm/leads/$leadId' })
-  const { data } = useAppStore()
-  const lead = data.leads.find((l) => l.id === params.leadId)
-  const company = data.companies.find((c) => c.id === lead?.companyId)
-
-  if (!lead) return <p className="text-muted-foreground">Kayıt bulunamadı</p>
-
-  return (
-    <div className="space-y-4">
-      <PageHeader
-        title={lead.name}
-        description={company?.name}
-        actions={<Badge variant="secondary">{lead.status}</Badge>}
-      />
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Zaman çizelgesi</CardTitle>
-            <CardDescription>Son notlar ve e-postalar</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {lead.timeline.map((item) => (
-              <div key={item.id} className="flex items-start gap-3 rounded-lg border border-border/70 p-3">
-                <Badge variant="outline">{item.type}</Badge>
-                <div>
-                  <p className="text-sm font-semibold">{item.summary}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {item.author} • {formatDate(item.date)}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Detaylar</CardTitle>
-            <CardDescription>Sahip, kaynak, skor</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <DetailRow label="Sahip" value={lead.owner} />
-            <DetailRow label="Ünvan" value={lead.title} />
-            <DetailRow label="Kaynak" value={lead.source} />
-            <DetailRow label="Skor" value={lead.score.toString()} />
-            <Separator />
-            <DetailRow label="E-posta" value={lead.email} />
-            <DetailRow label="Telefon" value={lead.phone} />
-            <Separator />
-            <DetailRow label="Oluşturulma" value={formatDate(lead.createdAt)} />
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  )
-}
 
 function ContactModal({
   children,
@@ -491,7 +87,7 @@ function ContactModal({
             <Input {...form.register('name')} />
           </div>
           <div>
-            <Label>Şirket</Label>
+            <Label>Cari</Label>
             <Select value={form.watch('companyId')} onValueChange={(v) => form.setValue('companyId', v)}>
               <SelectTrigger>
                 <SelectValue />
@@ -555,12 +151,10 @@ function ContactModal({
 function OpportunityModal({
   children,
   companies,
-  leads,
   onSubmit,
 }: {
   children: React.ReactNode
   companies: CompanyType[]
-  leads: Lead[]
   onSubmit: (values: z.infer<typeof opportunitySchema>) => void
 }) {
   const form = useForm<z.infer<typeof opportunitySchema>>({
@@ -568,7 +162,6 @@ function OpportunityModal({
     defaultValues: {
       name: '',
       companyId: companies[0]?.id ?? '',
-      leadId: leads[0]?.id ?? '',
       stage: 'Qualification',
       value: 0,
     },
@@ -585,38 +178,20 @@ function OpportunityModal({
             <Label>Ad</Label>
             <Input {...form.register('name')} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Şirket</Label>
-              <Select value={form.watch('companyId')} onValueChange={(v) => form.setValue('companyId', v)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {companies.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Aday müşteri</Label>
-              <Select value={form.watch('leadId') ?? 'none'} onValueChange={(v) => form.setValue('leadId', v === 'none' ? undefined : v)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">—</SelectItem>
-                  {leads.map((l) => (
-                    <SelectItem key={l.id} value={l.id}>
-                      {l.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          <div>
+            <Label>Cari</Label>
+            <Select value={form.watch('companyId')} onValueChange={(v) => form.setValue('companyId', v)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {companies.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -680,7 +255,6 @@ export function OpportunitiesPage() {
           <div className="flex items-center gap-2">
             <OpportunityModal
               companies={data.companies}
-              leads={data.leads}
               onSubmit={(values) => {
                 createOpportunity(values as any)
                 toast({ title: 'Fırsat oluşturuldu' })
@@ -832,7 +406,7 @@ export function CompaniesPage() {
 
   const columns: ColumnDef<(typeof data.companies)[number]>[] = useMemo(
     () => [
-      { accessorKey: 'name', header: 'Şirket' },
+      { accessorKey: 'name', header: 'Cari' },
       { accessorKey: 'industry', header: 'Sektör' },
       { accessorKey: 'authorizedPerson', header: 'Yetkili' },
       {
@@ -883,13 +457,13 @@ export function CompaniesPage() {
           }}
           onSubmit={async (values) => {
             await updateCompany(editingCompany.id, values as any)
-            toast({ title: 'Şirket güncellendi' })
+            toast({ title: 'Cari güncellendi' })
             setEditingCompany(null)
           }}
         />
       ) : null}
       <PageHeader
-        title="Şirketler"
+        title="Cari Kartı"
         description="Cari bilgiler, vergi detayları ve sözleşmede kullanılacak alıcı alanları"
         actions={
           <div className="flex items-center gap-2">
@@ -899,7 +473,7 @@ export function CompaniesPage() {
               disabled={filteredCompanies.length === 0}
               onClick={() => {
                 downloadCompaniesAsXlsx(filteredCompanies)
-                toast({ title: 'Dışa aktarma hazır', description: `${filteredCompanies.length} şirket dışa aktarıldı.` })
+                toast({ title: 'Dışa aktarma hazır', description: `${filteredCompanies.length} cari dışa aktarıldı.` })
               }}
             >
               <Download className="mr-2 h-4 w-4" />
@@ -908,12 +482,12 @@ export function CompaniesPage() {
             <CompanyModal
               onSubmit={async (values) => {
                 await createCompany(values as any)
-                toast({ title: 'Şirket oluşturuldu' })
+                toast({ title: 'Cari oluşturuldu' })
               }}
             >
               <Button size="sm">
                 <Plus className="mr-2 h-4 w-4" />
-                Yeni şirket
+                Yeni cari
               </Button>
             </CompanyModal>
           </div>
@@ -922,7 +496,7 @@ export function CompaniesPage() {
       <div className="grid gap-3 md:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Toplam şirket</CardTitle>
+            <CardTitle className="text-sm">Toplam cari</CardTitle>
           </CardHeader>
           <CardContent className="text-2xl font-semibold">{companyStats.total}</CardContent>
         </Card>
@@ -946,13 +520,13 @@ export function CompaniesPage() {
       <div className="rounded-2xl border border-border/70 bg-card/40 p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
-            <h3 className="text-sm font-semibold">Firma filtreleri</h3>
+            <h3 className="text-sm font-semibold">Cari filtreleri</h3>
             <p className="text-sm text-muted-foreground">
               Sektör, ülke, şehir ve ölçek alanlarını seçimle daralt. Şehir seçenekleri seçilen ülkeye göre otomatik daralır.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline">{filteredCompanies.length} şirket gösteriliyor</Badge>
+            <Badge variant="outline">{filteredCompanies.length} cari gösteriliyor</Badge>
             {hasActiveFilters ? (
               <Button variant="ghost" size="sm" onClick={resetFilters}>
                 Filtreleri temizle
@@ -1024,7 +598,7 @@ export function ContactsPage() {
     { accessorKey: 'role', header: 'Rol' },
     {
       accessorKey: 'companyId',
-      header: 'Şirket',
+      header: 'Cari',
       cell: ({ row }) => data.companies.find((c) => c.id === row.original.companyId)?.name ?? '',
     },
     { accessorKey: 'email', header: 'E-posta' },

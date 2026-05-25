@@ -6,6 +6,7 @@ from xml.etree import ElementTree
 
 from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 import mimetypes
@@ -745,17 +746,20 @@ class BusinessPartnerViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 class LeadViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = LeadSerializer
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
-    required_perm = 'leads.view'
+    required_perm = 'leads.disabled'
     permission_map = {
-        'create': 'leads.edit',
-        'update': 'leads.edit',
-        'partial_update': 'leads.edit',
-        'destroy': 'leads.edit',
+        'create': 'leads.disabled',
+        'update': 'leads.disabled',
+        'partial_update': 'leads.disabled',
+        'destroy': 'leads.disabled',
     }
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name', 'status', 'source']
     ordering_fields = ['created_at', 'score']
     queryset = Lead.objects.all().select_related('company')
+
+    def initial(self, request, *args, **kwargs):
+        raise PermissionDenied("Lead modülü devre dışı bırakıldı.")
 
 
 class OpportunityViewSet(OrgScopedMixin, viewsets.ModelViewSet):

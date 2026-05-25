@@ -64,7 +64,6 @@ export function ReportsPage() {
   const role = data.settings.role
   const canReports = role === 'Admin' || role === 'Manager' || role === 'Finance'
 
-  const [dataset, setDataset] = useState('invoices')
   const [groupBy, setGroupBy] = useState('status')
   const [filter, setFilter] = useState('all')
   const [name, setName] = useState('Yeni rapor')
@@ -167,7 +166,7 @@ export function ReportsPage() {
     }
   }
 
-  const rows = dataset === 'invoices' ? data.invoices : data.leads
+  const rows = data.invoices
   const grouped = rows.reduce<Record<string, number>>((acc, row: any) => {
     const key = row[groupBy] ?? 'Unknown'
     acc[key] = (acc[key] ?? 0) + 1
@@ -618,22 +617,10 @@ export function ReportsPage() {
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="min-w-0">
           <CardHeader>
-            <CardTitle>Rapor oluşturucu (CRM)</CardTitle>
-            <CardDescription>Fatura ve aday müşteri — grupla, önizle</CardDescription>
+            <CardTitle>Rapor oluşturucu</CardTitle>
+            <CardDescription>Faturaları grupla ve önizle</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div>
-              <Label>Veri seti</Label>
-              <Select value={dataset} onValueChange={setDataset}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="invoices">Faturalar</SelectItem>
-                  <SelectItem value="leads">Aday müşteriler</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
             <div>
               <Label>Grupla</Label>
               <Select value={groupBy} onValueChange={setGroupBy}>

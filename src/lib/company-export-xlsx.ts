@@ -18,7 +18,7 @@ export function downloadCompaniesAsXlsx(companies: Company[]) {
 
   const companyRows = companies.map((company) => ({
     ID: company.id,
-    Şirket: company.name || '',
+    Cari: company.name || '',
     Sektör: company.industry || '',
     Yetkili: company.authorizedPerson || '',
     Sahip: company.owner || '',
@@ -54,10 +54,10 @@ export function downloadCompaniesAsXlsx(companies: Company[]) {
     { wch: 16 },
     { wch: 10 },
   ]
-  XLSX.utils.book_append_sheet(workbook, companySheet, 'Şirketler')
+  XLSX.utils.book_append_sheet(workbook, companySheet, 'Cari Kartı')
 
   const breakdownSheet = XLSX.utils.aoa_to_sheet([
-    ['Şirket kırılımları'],
+    ['Cari kırılımları'],
     [],
     ...buildCountRows(
       'Sektöre göre dağılım',

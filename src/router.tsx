@@ -3,7 +3,7 @@ import type { ComponentType } from 'react'
 
 import { AppShell } from '@/components/app-shell'
 import { DashboardPage } from '@/pages/dashboard'
-import { CompaniesPage, ContactsPage, LeadDetailPage, LeadsPage, OpportunitiesPage } from '@/pages/crm'
+import { CompaniesPage, ContactsPage, OpportunitiesPage } from '@/pages/crm'
 import { AccountingPage, InventoryPage, InvoicingPage, PurchasesPage, SalesOrdersPage } from '@/pages/erp'
 import { LogisticsTrackingPage } from '@/pages/logistics'
 import { ReportsPage } from '@/pages/reports'
@@ -69,18 +69,6 @@ const dashboardRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/',
   component: DashboardPage,
-})
-
-const leadsRoute = new Route({
-  getParentRoute: () => rootRoute,
-  path: '/crm/leads',
-  component: secured(LeadsPage, 'leads.view'),
-})
-
-const leadDetailRoute = new Route({
-  getParentRoute: () => rootRoute,
-  path: '/crm/leads/$leadId',
-  component: secured(LeadDetailPage, 'leads.view'),
 })
 
 const opportunitiesRoute = new Route({
@@ -261,8 +249,6 @@ const routeTree = rootRoute.addChildren([
   dashboardRoute,
   loginRoute,
   activateRoute,
-  leadsRoute,
-  leadDetailRoute,
   opportunitiesRoute,
   companiesRoute,
   contactsRoute,

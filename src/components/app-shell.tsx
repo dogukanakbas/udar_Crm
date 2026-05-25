@@ -72,9 +72,8 @@ const nav: Array<{
     icon: Gauge,
     roles: ['Admin', 'Manager', 'Sales', 'Finance'],
     children: [
-      { label: 'Leadler', to: '/crm/leads', perm: 'leads.view' },
       { label: 'Fırsatlar', to: '/crm/opportunities', perm: 'opportunities.view' },
-      { label: 'Şirketler', to: '/crm/companies', perm: 'partners.view' },
+      { label: 'Cari Kartı', to: '/crm/companies', perm: 'partners.view' },
       { label: 'Kişiler', to: '/crm/contacts', perm: 'contacts.view' },
       { label: 'Teklifler', to: '/crm/quotes', perm: 'quotes.view' },
       { label: 'Satıcı Firmalar', to: '/crm/seller-companies', perm: 'pricing.manage', roles: ['Admin', 'Manager'] },

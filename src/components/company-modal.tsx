@@ -224,7 +224,7 @@ export function CompanyModal({ children, company, onSubmit, open, onOpenChange }
       {children ? <DialogTrigger asChild>{children}</DialogTrigger> : null}
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{company ? 'Şirketi Düzenle' : 'Yeni Şirket'}</DialogTitle>
+          <DialogTitle>{company ? 'Cari Kartı Düzenle' : 'Yeni Cari Kartı'}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-3">

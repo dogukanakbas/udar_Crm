@@ -331,7 +331,6 @@ export const useAppStore = create<AppState>()(
         fetchIf('quotes.view', '/seller-companies/'),
         fetchIf('partners.view', '/partners/'),
         fetchIf('contacts.view', '/contacts/'),
-        fetchIf('leads.view', '/leads/'),
         fetchIf('opportunities.view', '/opportunities/'),
         fetchIf('tickets.view', '/tickets/'),
         fetchIf('logistics.view', '/vehicles/'),
@@ -347,7 +346,6 @@ export const useAppStore = create<AppState>()(
         sellerCompaniesRes,
         partnersRes,
         contactsRes,
-        leadsRes,
         oppRes,
         ticketsRes,
         vehiclesRes,
@@ -404,21 +402,6 @@ export const useAppStore = create<AppState>()(
       }))
       const sellerCompanies = (sellerCompaniesRes.data || []).map((profile: any, idx: number) => mapSellerCompany(profile, idx))
       const quotes = (quotesRes.data || []).map((q: any, idx: number) => mapQuote(q, idx))
-      const leads = (leadsRes.data || []).map((l: any, idx: number) => ({
-        id: String(l.id ?? idx),
-        name: l.name,
-        title: l.title || '',
-        companyId: String(l.company ?? ''),
-        email: l.email || '',
-        phone: l.phone || '',
-        owner: l.owner_name || '',
-        status: l.status || 'New',
-        source: l.source || '',
-        score: Number(l.score ?? 0),
-        createdAt: l.created_at || new Date().toISOString(),
-        tags: [],
-        timeline: [],
-      }))
       const opportunities = (oppRes.data || []).map((o: any, idx: number) => ({
         id: String(o.id ?? idx),
         name: o.name,
@@ -659,7 +642,7 @@ export const useAppStore = create<AppState>()(
           contacts,
           categories,
           quotes,
-          leads,
+          leads: [],
           opportunities,
           tickets,
           vehicles,

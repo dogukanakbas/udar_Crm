@@ -104,7 +104,6 @@ const [limit, setLimit] = useState(10)
   }, [query, tags, types, limit, page, open])
 
   const quickActions: QuickAction[] = [
-    { label: 'Aday müşteri oluştur', to: '/crm/leads', action: () => toast({ title: 'Form hazır', description: 'Aday müşteri bilgilerini girin' }) },
     { label: 'Yeni fatura', to: '/erp/invoicing', action: () => toast({ title: 'Form hazır', description: 'Fatura bilgilerini girin' }) },
     { label: 'Destek talebi aç', to: '/support/tickets', action: () => toast({ title: 'Form hazır', description: 'Talep bilgilerini girin' }) },
   ]
@@ -114,7 +113,7 @@ const [limit, setLimit] = useState(10)
       <DialogContent className="p-0">
         <Command>
           <div className="p-3 space-y-2">
-            <CommandInput placeholder="Görev, şirket, teklif, ekip ara..." value={query} onValueChange={setQuery} />
+            <CommandInput placeholder="Görev, cari, teklif, ekip ara..." value={query} onValueChange={setQuery} />
             <div className="flex items-center gap-2">
               <Input
                 value={tags}
@@ -151,7 +150,7 @@ const [limit, setLimit] = useState(10)
                   <SelectItem value="tasks">Görev</SelectItem>
                   <SelectItem value="comments">Yorum</SelectItem>
                   <SelectItem value="teams">Ekip</SelectItem>
-                  <SelectItem value="partners">Şirket</SelectItem>
+                  <SelectItem value="partners">Cari</SelectItem>
                   <SelectItem value="quotes">Teklif</SelectItem>
                   <SelectItem value="products">Ürün</SelectItem>
                 </SelectContent>
@@ -249,7 +248,7 @@ const [limit, setLimit] = useState(10)
                 </CommandItem>
               ))}
             </CommandGroup>
-            <CommandGroup heading={`Şirketler (${results.partners_count ?? 0})`}>
+            <CommandGroup heading={`Cari Kartı (${results.partners_count ?? 0})`}>
               {results.partners?.map((p: any) => (
                 <CommandItem key={`partner-${p.id}`}>
                   <FileText className="mr-2 h-4 w-4" />
@@ -323,4 +322,3 @@ function hasNext(results: any, limit: number, page: number) {
   )
   return maxCount > page * limit
 }
-
