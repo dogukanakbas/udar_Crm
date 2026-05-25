@@ -29,5 +29,5 @@ export function hasPermission(role: string | Role | undefined, dynamicPerms: str
 }
 
 export function canSeeAllQuotes(role?: string | Role) {
-  return ['Admin', 'Manager', 'Sales'].includes(String(role || ''))
+  return ['Admin', 'Manager', 'Finance'].includes(String(role || ''))
 }

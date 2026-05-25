@@ -12,7 +12,6 @@ import {
   Menu,
   Moon,
   Package,
-  Palette,
   Search,
   Settings,
   Shield,
@@ -22,7 +21,14 @@ import {
 
 import { Button } from '@/components/ui/button'
 import type { Role } from '@/types'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
@@ -134,7 +140,7 @@ function CalendarIconMini(props: React.ComponentProps<'svg'>) {
 }
 
 export function AppShell() {
-  const { data } = useAppStore()
+  const { data, resetDemo, setRole } = useAppStore()
   const { theme, setTheme } = useTheme()
   const [searchOpen, setSearchOpen] = useState(false)
   const routerState = useRouterState()
@@ -250,18 +256,41 @@ export function AppShell() {
               />
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             </div>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-                    {theme === 'dark' ? <SunMedium className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Tema değiştir</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-            <NotificationMenu />
-            <UserMenu />
+            <div className="ml-auto flex items-center gap-2">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+                      {theme === 'dark' ? <SunMedium className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Tema değiştir</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <NotificationMenu />
+              <UserMenu />
+              
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      onClick={() => {
+                        clearTokens()
+                        resetDemo()
+                        setRole('Worker' as Role)
+                        window.location.href = '/login'
+                      }}
+                    >
+                      <LogOut className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Çıkış Yap</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
           </header>
 
           <div className={cn('w-full p-4 md:p-6 xl:p-7', isWideWorkspace ? 'max-w-none' : 'max-w-[1680px]')}>
@@ -374,61 +403,71 @@ function NotificationMenu() {
 
 function UserMenu() {
   const { data, resetDemo, setRole } = useAppStore()
-  const { setTheme, theme } = useTheme()
   const currentUserId = typeof window !== 'undefined' ? localStorage.getItem('current-user-id') : null
   const currentUser = data.users.find((u) => currentUserId && String(u.id) === String(currentUserId))
   const currentTeamName =
     data.teams.find((t) => t.memberIds?.includes(String(currentUserId)) || String(t.leaderId || '') === String(currentUserId))
       ?.name || '—'
 
+  const userDisplayName = currentUser
+    ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.username || currentUser.email
+    : data.settings.role
+
+  const canViewSettings = ['Admin', 'Manager'].includes(data.settings.role)
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="rounded-full border">
+        <Button variant="ghost" size="icon" className="rounded-full border hover:bg-muted">
           <Shield className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64 space-y-2 bg-card shadow-xl border border-border/70">
-        <div className="px-3 pt-2 space-y-1">
-          <p className="text-sm font-semibold">Oturum</p>
-          <p className="text-xs text-muted-foreground">
-            Rol: {ROLE_LABEL_TR[data.settings.role] ?? data.settings.role}
-          </p>
-          {data.settings.role === 'Worker' && (
-            <>
-              <p className="text-xs text-muted-foreground">
-                İsim Soyisim: {currentUser ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.username : '—'}
+      <DropdownMenuContent align="end" className="w-56 bg-card border border-border/70 p-1 shadow-lg">
+        <DropdownMenuLabel className="font-normal">
+          <div className="flex flex-col space-y-1 py-1">
+            <p className="text-sm font-semibold leading-none text-foreground">{userDisplayName}</p>
+            <p className="text-xs leading-none text-muted-foreground">
+              {ROLE_LABEL_TR[data.settings.role] ?? data.settings.role}
+            </p>
+            {data.settings.role === 'Worker' && (
+              <p className="text-xs leading-none text-muted-foreground/80 mt-0.5">
+                Bölüm: {currentTeamName}
               </p>
-              <p className="text-xs text-muted-foreground">Bölüm: {currentTeamName}</p>
-            </>
-          )}
-        </div>
-        <Separator />
-        <div className="px-3 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-sm">Tema</span>
-            <Button variant="ghost" size="sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-              <Palette className="mr-2 h-4 w-4" />
-              {theme === 'dark' ? 'Koyu' : 'Açık'}
-            </Button>
+            )}
           </div>
-          <div className="flex justify-between text-xs text-muted-foreground">
-            <span>Dil tercihi için Ayarlar sayfasını kullanın.</span>
-          </div>
-          <Button
-            variant="ghost"
-            className="w-full justify-start gap-2 text-sm"
-            onClick={() => {
-              clearTokens()
-              resetDemo()
-              setRole('Worker' as Role)
-              window.location.href = '/login'
-            }}
-          >
-            <LogOut className="h-4 w-4" />
-            Çıkış yap
-          </Button>
-        </div>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        
+        <DropdownMenuItem asChild>
+          <Link to="/change-password" className="flex w-full items-center gap-2 cursor-pointer">
+            <KeyRound className="h-4 w-4" />
+            <span>Şifre Değiştir</span>
+          </Link>
+        </DropdownMenuItem>
+
+        {canViewSettings && (
+          <DropdownMenuItem asChild>
+            <Link to="/settings" className="flex w-full items-center gap-2 cursor-pointer">
+              <Settings className="h-4 w-4" />
+              <span>Sistem Ayarları</span>
+            </Link>
+          </DropdownMenuItem>
+        )}
+        
+        <DropdownMenuSeparator />
+        
+        <DropdownMenuItem
+          className="text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer flex items-center gap-2"
+          onClick={() => {
+            clearTokens()
+            resetDemo()
+            setRole('Worker' as Role)
+            window.location.href = '/login'
+          }}
+        >
+          <LogOut className="h-4 w-4" />
+          <span>Çıkış Yap</span>
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )
