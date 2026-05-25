@@ -1161,6 +1161,32 @@ export function QuotesPage() {
     [quotes]
   )
 
+  const customerOptions = useMemo(() => {
+    return [
+      { value: 'all', label: 'Tüm cariler', searchText: 'tüm cariler' },
+      ...companies.map((company) => ({
+        value: company.id,
+        label: company.name,
+        searchText: company.name,
+      })),
+    ]
+  }, [companies])
+
+  const preparerComboboxOptions = useMemo(() => {
+    const list = [
+      { value: 'all', label: 'Tüm hazırlayanlar', searchText: 'tüm hazırlayanlar' },
+      ...preparerOptions.map((preparer) => ({
+        value: preparer.id,
+        label: preparer.label,
+        searchText: preparer.label,
+      })),
+    ]
+    if (hasUnassignedPreparer) {
+      list.push({ value: '__empty__', label: 'Hazırlayan yok', searchText: 'hazırlayan yok' })
+    }
+    return list
+  }, [preparerOptions, hasUnassignedPreparer])
+
   const filtered = useMemo(
     () =>
       quotes.filter((quote) => {
@@ -1401,32 +1427,27 @@ export function QuotesPage() {
 
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">Cari</Label>
-          <Select value={customer} onValueChange={setCustomer}>
-            <SelectTrigger>
-              <SelectValue placeholder="Tüm cariler" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Tüm cariler</SelectItem>
-              {companies.map((company) => <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <SearchableCombobox
+            value={customer}
+            options={customerOptions}
+            placeholder="Tüm cariler"
+            searchPlaceholder="Cari ara..."
+            emptyMessage="Cari bulunamadı."
+            onValueChange={setCustomer}
+          />
         </div>
 
         {canFilterByPreparer ? (
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">Hazırlayan</Label>
-            <Select value={preparedBy} onValueChange={setPreparedBy}>
-              <SelectTrigger>
-                <SelectValue placeholder="Tüm hazırlayanlar" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tüm hazırlayanlar</SelectItem>
-                {preparerOptions.map((preparer) => (
-                  <SelectItem key={preparer.id} value={preparer.id}>{preparer.label}</SelectItem>
-                ))}
-                {hasUnassignedPreparer ? <SelectItem value="__empty__">Hazırlayan yok</SelectItem> : null}
-              </SelectContent>
-            </Select>
+            <SearchableCombobox
+              value={preparedBy}
+              options={preparerComboboxOptions}
+              placeholder="Tüm hazırlayanlar"
+              searchPlaceholder="Hazırlayan ara..."
+              emptyMessage="Hazırlayan bulunamadı."
+              onValueChange={setPreparedBy}
+            />
           </div>
         ) : null}
 
@@ -1510,6 +1531,16 @@ function DocumentWizardTrigger({
     onOpenChange?.(nextOpen)
   }
   const companies = data.companies
+  const wizardCustomerOptions = useMemo(() => {
+    return [
+      { value: ADD_CUSTOMER_OPTION, label: 'Yeni cari / firma ekle', searchText: 'yeni cari firma ekle' },
+      ...companies.map((company) => ({
+        value: company.id,
+        label: company.name,
+        searchText: company.name,
+      })),
+    ]
+  }, [companies])
   const sellerCompanies = data.sellerCompanies || []
   const products = data.products
   const preparers = useMemo(() => data.users, [data.users])
@@ -1850,8 +1881,12 @@ function DocumentWizardTrigger({
                   Cari ekle
                 </Button>
               </div>
-              <Select
-                value={form.watch('customerId')}
+              <SearchableCombobox
+                value={form.watch('customerId') || ''}
+                options={wizardCustomerOptions}
+                placeholder="Cari seçiniz"
+                searchPlaceholder="Cari ara..."
+                emptyMessage="Cari bulunamadı."
                 onValueChange={(value) => {
                   if (value === ADD_CUSTOMER_OPTION) {
                     setCustomerModalOpen(true)
@@ -1859,13 +1894,7 @@ function DocumentWizardTrigger({
                   }
                   form.setValue('customerId', value, { shouldDirty: true, shouldValidate: true })
                 }}
-              >
-                <SelectTrigger><SelectValue placeholder="Cari seçiniz" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ADD_CUSTOMER_OPTION}>Yeni cari / firma ekle</SelectItem>
-                  {companies.map((company) => <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              />
               <p className="text-xs text-muted-foreground">Listeden ayrılmadan yeni cari ekleyebilir ve eklediğiniz firmayı anında seçebilirsiniz.</p>
               {selectedCustomer ? (
                 <p className="text-xs text-muted-foreground">
