@@ -1,4 +1,5 @@
 import { RouterProvider, RootRoute, Route, createRouter, redirect } from '@tanstack/react-router'
+import type { ComponentType } from 'react'
 
 import { AppShell } from '@/components/app-shell'
 import { DashboardPage } from '@/pages/dashboard'
@@ -24,6 +25,7 @@ import { MdfHistoryPage } from '@/pages/mdf-history'
 import { MdfManagementPage } from '@/pages/mdf-management'
 import { getTokens } from '@/lib/auth'
 import { useAppStore } from '@/state/use-app-store'
+import { hasPermission } from '@/lib/permissions'
 
 const rootRoute = new RootRoute({
   component: AppShell,
@@ -45,6 +47,24 @@ const rootRoute = new RootRoute({
   },
 })
 
+function AccessDeniedPage() {
+  return (
+    <div className="rounded-lg border border-border/70 bg-card/80 p-6">
+      <h1 className="text-xl font-semibold">Yetkiniz yok</h1>
+      <p className="mt-2 text-sm text-muted-foreground">Bu sayfayı görüntülemek için gerekli yetkiye sahip değilsiniz.</p>
+    </div>
+  )
+}
+
+function secured(Component: ComponentType, perm?: string) {
+  return function SecuredRouteComponent() {
+    const role = useAppStore((state) => state.data.settings.role)
+    const permissions = useAppStore((state) => state.data.rolePermissions || [])
+    if (!hasPermission(role, permissions, perm)) return <AccessDeniedPage />
+    return <Component />
+  }
+}
+
 const dashboardRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/',
@@ -54,133 +74,133 @@ const dashboardRoute = new Route({
 const leadsRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/crm/leads',
-  component: LeadsPage,
+  component: secured(LeadsPage, 'leads.view'),
 })
 
 const leadDetailRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/crm/leads/$leadId',
-  component: LeadDetailPage,
+  component: secured(LeadDetailPage, 'leads.view'),
 })
 
 const opportunitiesRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/crm/opportunities',
-  component: OpportunitiesPage,
+  component: secured(OpportunitiesPage, 'opportunities.view'),
 })
 
 const companiesRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/crm/companies',
-  component: CompaniesPage,
+  component: secured(CompaniesPage, 'partners.view'),
 })
 
 const contactsRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/crm/contacts',
-  component: ContactsPage,
+  component: secured(ContactsPage, 'contacts.view'),
 })
 
 const quotesRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/crm/quotes',
-  component: QuotesPage,
+  component: secured(QuotesPage, 'quotes.view'),
 })
 
 const quoteNewRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/crm/quotes/new',
-  component: QuotesPage,
+  component: secured(QuotesPage, 'quotes.edit'),
 })
 
 const quoteDetailRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/crm/quotes/$quoteId',
-  component: QuoteDetailPage,
+  component: secured(QuoteDetailPage, 'quotes.view'),
 })
 
 const quoteTemplatesRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/crm/quote-templates',
-  component: QuoteTemplatesPage,
+  component: secured(QuoteTemplatesPage, 'pricing.manage'),
 })
 
 const sellerCompaniesRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/crm/seller-companies',
-  component: SellerCompaniesPage,
+  component: secured(SellerCompaniesPage, 'pricing.manage'),
 })
 
 const salesOrdersRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/erp/sales-orders',
-  component: SalesOrdersPage,
+  component: secured(SalesOrdersPage, 'orders.view'),
 })
 
 const purchasesRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/erp/purchases',
-  component: PurchasesPage,
+  component: secured(PurchasesPage, 'orders.view'),
 })
 
 const inventoryRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/erp/inventory',
-  component: InventoryPage,
+  component: secured(InventoryPage, 'inventory.view'),
 })
 
 const invoicingRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/erp/invoicing',
-  component: InvoicingPage,
+  component: secured(InvoicingPage, 'invoices.view'),
 })
 
 const accountingRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/erp/accounting',
-  component: AccountingPage,
+  component: secured(AccountingPage, 'invoices.view'),
 })
 
 const ticketsRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/support/tickets',
-  component: TicketsPage,
+  component: secured(TicketsPage, 'tickets.view'),
 })
 
 const logisticsRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/logistics/tracking',
-  component: LogisticsTrackingPage,
+  component: secured(LogisticsTrackingPage, 'logistics.view'),
 })
 
 const tasksRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/tasks',
-  component: TasksPage,
+  component: secured(TasksPage, 'tasks.view'),
 })
 
 const taskDetailRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/tasks/$taskId',
-  component: TaskDetailPage,
+  component: secured(TaskDetailPage, 'tasks.view'),
 })
 
 const calendarRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/calendar',
-  component: CalendarPage,
+  component: secured(CalendarPage, 'tasks.view'),
 })
 
 const workerTrackingRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/worker-tracking',
-  component: WorkerTrackingPage,
+  component: secured(WorkerTrackingPage, 'teams.view'),
 })
 
 const workerDetailRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/worker-tracking/$workerId',
-  component: WorkerDetailPage,
+  component: secured(WorkerDetailPage, 'teams.view'),
 })
 
 const loginRoute = new Route({
@@ -198,13 +218,13 @@ const activateRoute = new Route({
 const reportsRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/reports',
-  component: ReportsPage,
+  component: secured(ReportsPage, 'audit.view'),
 })
 
 const settingsRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/settings',
-  component: SettingsPage,
+  component: secured(SettingsPage, 'teams.edit'),
 })
 
 const changePasswordRoute = new Route({
@@ -216,25 +236,25 @@ const changePasswordRoute = new Route({
 const taskHistoryRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/task-history',
-  component: TaskHistoryPage,
+  component: secured(TaskHistoryPage, 'tasks.view'),
 })
 
 const accessLogsRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/access-logs',
-  component: AccessLogsPage,
+  component: secured(AccessLogsPage, 'audit.view'),
 })
 
 const mdfManagementRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/mdf',
-  component: MdfManagementPage,
+  component: secured(MdfManagementPage, 'inventory.view'),
 })
 
 const mdfHistoryRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/mdf/history',
-  component: MdfHistoryPage,
+  component: secured(MdfHistoryPage, 'inventory.view'),
 })
 
 const routeTree = rootRoute.addChildren([

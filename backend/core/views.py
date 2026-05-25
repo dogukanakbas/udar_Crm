@@ -20,6 +20,7 @@ import time
 import queue
 
 from core.events import subscribe, unsubscribe
+from accounts.utils import user_has_perm
 
 
 class DashboardKPIView(APIView):
@@ -27,13 +28,17 @@ class DashboardKPIView(APIView):
 
     def get(self, request):
         org = request.user.organization
-        quotes = Quote.objects.filter(organization=org)
-        partners = BusinessPartner.objects.filter(organization=org)
-        products = Product.objects.filter(organization=org)
-        invoices = Invoice.objects.filter(organization=org)
-        opportunities = Opportunity.objects.filter(organization=org)
-        tickets = Ticket.objects.filter(organization=org)
-        tasks = Task.objects.filter(organization=org)
+        role = getattr(request.user, 'role', '')
+        can = lambda code: user_has_perm(request.user, code)
+        quotes = Quote.objects.filter(organization=org) if can('quotes.view') else Quote.objects.none()
+        if role not in ['Admin', 'Manager']:
+            quotes = quotes.filter(owner=request.user)
+        partners = BusinessPartner.objects.filter(organization=org) if can('partners.view') else BusinessPartner.objects.none()
+        products = Product.objects.filter(organization=org) if can('products.view') else Product.objects.none()
+        invoices = Invoice.objects.filter(organization=org) if can('invoices.view') else Invoice.objects.none()
+        opportunities = Opportunity.objects.filter(organization=org) if can('opportunities.view') else Opportunity.objects.none()
+        tickets = Ticket.objects.filter(organization=org) if can('tickets.view') else Ticket.objects.none()
+        tasks = Task.objects.filter(organization=org) if can('tasks.view') else Task.objects.none()
         # __date lookup için gerçek tarih kullan (TruncDate(Now) rhs bazı DB/sürümlerde hata üretebiliyor)
         today_d = timezone.localdate()
         meetings = [
@@ -264,4 +269,3 @@ class SSEView(APIView):
         resp["Cache-Control"] = "no-cache"
         resp["X-Accel-Buffering"] = "no"
         return resp
-

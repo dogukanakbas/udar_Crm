@@ -56,7 +56,23 @@ DEFAULT_ROLE_PERMS = {
         "vehicles.view",
         "vehicles.edit",
     ],
-    "Sales": ["quotes.view", "quotes.edit", "quotes.prepare", "products.view", "partners.view", "orders.view", "tasks.view", "tasks.edit"],
+    "Sales": [
+        "quotes.view",
+        "quotes.edit",
+        "quotes.prepare",
+        "products.view",
+        "partners.view",
+        "partners.edit",
+        "contacts.view",
+        "contacts.edit",
+        "leads.view",
+        "leads.edit",
+        "opportunities.view",
+        "opportunities.edit",
+        "orders.view",
+        "tasks.view",
+        "tasks.edit",
+    ],
     "Finance": [
         "quotes.view",
         "quotes.approve",
@@ -65,9 +81,10 @@ DEFAULT_ROLE_PERMS = {
         "invoices.pay",
         "approvals.view",
         "audit.view",
+        "orders.view",
     ],
-    "Support": ["tickets.view", "tickets.edit", "tasks.view", "tasks.edit"],
-    "Warehouse": ["products.view", "orders.view", "orders.receive", "inventory.view", "inventory.edit", "logistics.view", "logistics.edit"],
+    "Support": ["tickets.view", "tickets.edit", "tasks.view", "tasks.edit", "teams.view"],
+    "Warehouse": ["products.view", "orders.view", "orders.receive", "inventory.view", "inventory.edit", "logistics.view", "logistics.edit", "tasks.view", "tasks.edit", "teams.view"],
     # Worker: saha/operasyon kullanıcıları için genişletilmiş salt-okuma + görev düzenleme + devir (görev atama YOK)
     "Worker": [
         "tasks.view",
@@ -84,4 +101,3 @@ DEFAULT_ROLE_PERMS = {
         "quotes.view",
     ],
 }
-

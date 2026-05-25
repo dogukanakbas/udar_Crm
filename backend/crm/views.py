@@ -201,7 +201,7 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         'approve': 'quotes.approve',
         'reject': 'quotes.approve',
         'apply_preview': 'quotes.edit',
-        'template_library_upload': 'quotes.edit',
+        'template_library_upload': 'pricing.manage',
     }
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['number', 'customer__name', 'status', 'document_type']
@@ -226,7 +226,7 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         if document_type:
             qs = qs.filter(document_type=document_type)
         prepared_by = self.request.query_params.get('prepared_by')
-        if prepared_by:
+        if prepared_by and getattr(user, 'role', '') in ['Admin', 'Manager']:
             if prepared_by == '__empty__':
                 qs = qs.filter(prepared_by__isnull=True)
             else:
@@ -585,10 +585,10 @@ class SellerCompanyViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
     required_perm = 'quotes.view'
     permission_map = {
-        'create': 'quotes.edit',
-        'partial_update': 'quotes.edit',
-        'destroy': 'quotes.edit',
-        'upload_logo': 'quotes.edit',
+        'create': 'pricing.manage',
+        'partial_update': 'pricing.manage',
+        'destroy': 'pricing.manage',
+        'upload_logo': 'pricing.manage',
     }
 
     def _organization(self, request):
@@ -777,12 +777,12 @@ class OpportunityViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 class ContactViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = ContactSerializer
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
-    required_perm = 'partners.view'
+    required_perm = 'contacts.view'
     permission_map = {
-        'create': 'partners.edit',
-        'update': 'partners.edit',
-        'partial_update': 'partners.edit',
-        'destroy': 'partners.edit',
+        'create': 'contacts.edit',
+        'update': 'contacts.edit',
+        'partial_update': 'contacts.edit',
+        'destroy': 'contacts.edit',
     }
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name', 'email', 'phone']

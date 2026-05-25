@@ -58,7 +58,7 @@ api.interceptors.response.use(
     const original = error.config
     
     // 403: Yetki yok - Kullanıcıyı bilgilendir
-    if (error.response?.status === 403) {
+    if (error.response?.status === 403 && !(original as any)?.suppressAuthToast) {
       // Toast dinamik import (circular dependency önlemek için)
       import('@/components/ui/use-toast').then(({ toast }) => {
         toast({
@@ -108,4 +108,3 @@ export function logout() {
 }
 
 export default api
-

@@ -27,6 +27,7 @@ import type {
 } from '@/types'
 import { startSse as startSseClient } from '@/lib/sse'
 import { mapApiProductLineToTask, taskProductLinesToApiPayload } from '@/lib/task-product-lines-helpers'
+import { hasPermission } from '@/lib/permissions'
 
 type AppState = {
   data: MockDbSnapshot
@@ -316,26 +317,28 @@ export const useAppStore = create<AppState>()(
         console.warn('hydrateFromApi: backend unknown/empty role döndürdü, mevcut rol korunuyor:', userRoleRaw)
       }
 
-      // Worker: gereksiz endpointlere gitme (403). Sıra ASLA değişmemeli — aşağıdaki dizi,
-      // products → … → salesOrders → teams → users → tasks eşlemesiyle aynı olmalı.
+      // Rolün görmeyeceği endpointlere gitme; arka plan tazeleme yetki toast'ı üretmemeli.
       const effectiveRole = userRole ?? get().data.settings.role
-      const isWorkerRole = effectiveRole === 'Worker'
       const emptyList = Promise.resolve({ data: [] })
+      const quiet = { suppressAuthToast: true } as any
+      const canRead = (perm: string) => hasPermission(effectiveRole, [], perm)
+      const fetchIf = (perm: string, url: string, config: Record<string, any> = {}) =>
+        canRead(perm) ? api.get(url, { ...config, ...quiet }) : emptyList
       const settled = await Promise.allSettled([
-        isWorkerRole ? emptyList : api.get('/products/'),
-        isWorkerRole ? emptyList : api.get('/categories/'),
-        isWorkerRole ? emptyList : api.get('/quotes/', { params: { summary: 1 } }),
-        isWorkerRole ? emptyList : api.get('/seller-companies/'),
-        isWorkerRole ? emptyList : api.get('/partners/'),
-        isWorkerRole ? emptyList : api.get('/contacts/'),
-        isWorkerRole ? emptyList : api.get('/leads/'),
-        isWorkerRole ? emptyList : api.get('/opportunities/'),
-        isWorkerRole ? emptyList : api.get('/tickets/'),
-        isWorkerRole ? emptyList : api.get('/vehicles/'),
-        isWorkerRole ? emptyList : api.get('/sales-orders/'),
-        api.get('/teams/'),
-        api.get('/auth/users/'),
-        api.get('/tasks/'),
+        fetchIf('products.view', '/products/'),
+        fetchIf('products.view', '/categories/'),
+        fetchIf('quotes.view', '/quotes/', { params: { summary: 1 } }),
+        fetchIf('quotes.view', '/seller-companies/'),
+        fetchIf('partners.view', '/partners/'),
+        fetchIf('contacts.view', '/contacts/'),
+        fetchIf('leads.view', '/leads/'),
+        fetchIf('opportunities.view', '/opportunities/'),
+        fetchIf('tickets.view', '/tickets/'),
+        fetchIf('logistics.view', '/vehicles/'),
+        fetchIf('orders.view', '/sales-orders/'),
+        fetchIf('teams.view', '/teams/'),
+        api.get('/auth/users/', quiet),
+        fetchIf('tasks.view', '/tasks/'),
       ])
       const [
         productsRes,

@@ -33,6 +33,7 @@ import { useAppStore } from '@/state/use-app-store'
 import { ROLE_LABEL_TR } from '@/lib/role-labels'
 import { cn } from '@/lib/utils'
 import { getTokens, clearTokens } from '@/lib/auth'
+import { hasPermission } from '@/lib/permissions'
 
 type PageHeaderProps = {
   title: string
@@ -54,52 +55,72 @@ export const PageHeader = ({ title, description, actions, breadcrumb }: PageHead
   </div>
 )
 
-const nav = [
+const nav: Array<{
+  label: string
+  to?: string
+  icon: React.ComponentType<any>
+  roles: string[]
+  perm?: string
+  children?: Array<{ label: string; to: string; perm?: string; roles?: string[] }>
+}> = [
   { label: 'Kontrol Paneli', to: '/', icon: Home, roles: ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse'] },
   { label: 'Görevlerim', to: '/', icon: Home, roles: ['Worker'] },
-  { label: 'Geçmiş görevler', to: '/task-history', icon: CalendarClock, roles: ['Worker'] },
+  { label: 'Geçmiş görevler', to: '/task-history', icon: CalendarClock, roles: ['Worker'], perm: 'tasks.view' },
   { label: 'Şifre değiştir', to: '/change-password', icon: KeyRound, roles: ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse', 'Worker'] },
   {
     label: 'CRM',
     icon: Gauge,
-    roles: ['Admin', 'Manager', 'Sales'],
+    roles: ['Admin', 'Manager', 'Sales', 'Finance'],
     children: [
-      { label: 'Leadler', to: '/crm/leads' },
-      { label: 'Fırsatlar', to: '/crm/opportunities' },
-      { label: 'Şirketler', to: '/crm/companies' },
-      { label: 'Kişiler', to: '/crm/contacts' },
-      { label: 'Teklifler', to: '/crm/quotes' },
-      { label: 'Satıcı Firmalar', to: '/crm/seller-companies' },
-      { label: 'Şablon Yönetimi', to: '/crm/quote-templates' },
+      { label: 'Leadler', to: '/crm/leads', perm: 'leads.view' },
+      { label: 'Fırsatlar', to: '/crm/opportunities', perm: 'opportunities.view' },
+      { label: 'Şirketler', to: '/crm/companies', perm: 'partners.view' },
+      { label: 'Kişiler', to: '/crm/contacts', perm: 'contacts.view' },
+      { label: 'Teklifler', to: '/crm/quotes', perm: 'quotes.view' },
+      { label: 'Satıcı Firmalar', to: '/crm/seller-companies', perm: 'pricing.manage', roles: ['Admin', 'Manager'] },
+      { label: 'Şablon Yönetimi', to: '/crm/quote-templates', perm: 'pricing.manage', roles: ['Admin', 'Manager'] },
     ],
   },
   {
     label: 'ERP',
     icon: Package,
-    roles: ['Admin', 'Manager', 'Finance', 'Warehouse'],
+    roles: ['Admin', 'Manager', 'Finance', 'Warehouse', 'Sales'],
     children: [
-      { label: 'Satış Siparişleri', to: '/erp/sales-orders' },
-      { label: 'Satınalma', to: '/erp/purchases' },
-      { label: 'Stok', to: '/erp/inventory' },
-      { label: 'Faturalama', to: '/erp/invoicing' },
-      { label: 'Muhasebe', to: '/erp/accounting' },
-      { label: 'Lojistik Takip', to: '/logistics/tracking' },
-      { label: 'MDF Yönetimi', to: '/mdf' },
-      { label: 'MDF Giriş / Çıkış', to: '/mdf/history' },
+      { label: 'Satış Siparişleri', to: '/erp/sales-orders', perm: 'orders.view' },
+      { label: 'Satınalma', to: '/erp/purchases', perm: 'orders.view', roles: ['Admin', 'Manager', 'Finance', 'Warehouse'] },
+      { label: 'Stok', to: '/erp/inventory', perm: 'inventory.view' },
+      { label: 'Faturalama', to: '/erp/invoicing', perm: 'invoices.view' },
+      { label: 'Muhasebe', to: '/erp/accounting', perm: 'invoices.view' },
+      { label: 'Lojistik Takip', to: '/logistics/tracking', perm: 'logistics.view' },
+      { label: 'MDF Yönetimi', to: '/mdf', perm: 'inventory.view' },
+      { label: 'MDF Giriş / Çıkış', to: '/mdf/history', perm: 'inventory.view' },
     ],
   },
   {
     label: 'Destek',
     icon: HeadsetIcon,
     roles: ['Admin', 'Support', 'Manager'],
-    children: [{ label: 'Destek talepleri', to: '/support/tickets' }],
+    children: [{ label: 'Destek talepleri', to: '/support/tickets', perm: 'tickets.view' }],
   },
-  { label: 'Görevler', to: '/tasks', icon: ClipboardCheckIcon, roles: ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse'] },
-  { label: 'Çalışan Takibi', to: '/worker-tracking', icon: Activity, roles: ['Admin', 'Manager'] },
-  { label: 'Takvim', to: '/calendar', icon: CalendarIconMini, roles: ['Admin', 'Manager', 'Sales', 'Support'] },
-  { label: 'Raporlar', to: '/reports', icon: BarChart3, roles: ['Admin', 'Manager', 'Finance'] },
-  { label: 'Ayarlar', to: '/settings', icon: Settings, roles: ['Admin', 'Manager'] },
+  { label: 'Görevler', to: '/tasks', icon: ClipboardCheckIcon, roles: ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse'], perm: 'tasks.view' },
+  { label: 'Çalışan Takibi', to: '/worker-tracking', icon: Activity, roles: ['Admin', 'Manager'], perm: 'teams.view' },
+  { label: 'Takvim', to: '/calendar', icon: CalendarIconMini, roles: ['Admin', 'Manager', 'Sales', 'Support', 'Warehouse'], perm: 'tasks.view' },
+  { label: 'Raporlar', to: '/reports', icon: BarChart3, roles: ['Admin', 'Manager', 'Finance'], perm: 'audit.view' },
+  { label: 'Ayarlar', to: '/settings', icon: Settings, roles: ['Admin', 'Manager'], perm: 'teams.edit' },
 ]
+
+const isNavItemVisible = (item: (typeof nav)[number], role: string, permissions: string[]) => {
+  if (!item.roles.includes(role)) return false
+  if (item.children) {
+    return item.children.some((child) => isNavChildVisible(child, role, permissions))
+  }
+  return hasPermission(role, permissions, item.perm)
+}
+
+const isNavChildVisible = (child: NonNullable<(typeof nav)[number]['children']>[number], role: string, permissions: string[]) => {
+  if (child.roles && !child.roles.includes(role)) return false
+  return hasPermission(role, permissions, child.perm)
+}
 
 function HeadsetIcon(props: React.ComponentProps<'svg'>) {
   return <Activity {...props} />
@@ -169,10 +190,11 @@ export function AppShell() {
           <ScrollArea className="h-[calc(100vh-116px)] pr-2">
             <nav className="space-y-6 text-sm">
               {nav
-                .filter((group) => group.roles.includes(data.settings.role))
+                .filter((group) => isNavItemVisible(group, data.settings.role, data.rolePermissions || []))
                 .map((item) => {
                   const Icon = item.icon ?? FolderKanban
                   if (item.children) {
+                    const visibleChildren = item.children.filter((child) => isNavChildVisible(child, data.settings.role, data.rolePermissions || []))
                     return (
                       <div key={item.label} className="space-y-2">
                         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-white/45">
@@ -180,7 +202,7 @@ export function AppShell() {
                           {item.label}
                         </div>
                         <div className="space-y-1">
-                          {item.children.map((child) => (
+                          {visibleChildren.map((child) => (
                             <Link
                               key={child.to}
                               to={child.to}
@@ -262,7 +284,7 @@ function MobileMenu() {
   const { data } = useAppStore()
   const routerState = useRouterState()
   const activePath = routerState.location.pathname
-  const filtered = nav.filter((group) => group.roles.includes(data.settings.role))
+  const filtered = nav.filter((group) => isNavItemVisible(group, data.settings.role, data.rolePermissions || []))
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -276,7 +298,7 @@ function MobileMenu() {
           item.children ? (
             <div key={item.label} className="space-y-1">
               <p className="px-2 py-1 text-xs font-semibold uppercase text-muted-foreground">{item.label}</p>
-              {item.children.map((child) => (
+              {item.children.filter((child) => isNavChildVisible(child, data.settings.role, data.rolePermissions || [])).map((child) => (
                 <DropdownMenuItem key={child.to} asChild>
                   <Link
                     to={child.to}

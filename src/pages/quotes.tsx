@@ -24,6 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
 import api from '@/lib/api'
+import { canSeeAllQuotes } from '@/lib/permissions'
 import {
   DEFAULT_COMPANY_COUNTRY_LABEL,
   getAllowedCurrencyCodesForCountry,
@@ -1073,6 +1074,7 @@ export function QuotesPage() {
   const quotes = data.quotes ?? []
   const companies = data.companies
   const users = data.users ?? []
+  const canFilterByPreparer = canSeeAllQuotes(data.settings.role)
   const companyNameById = useMemo(
     () => new Map(companies.map((company) => [company.id, company.name])),
     [companies]
@@ -1106,6 +1108,7 @@ export function QuotesPage() {
         const matchesStatus = status === 'all' || quote.status === status
         const matchesCustomer = customer === 'all' || quote.customerId === customer
         const matchesPreparer =
+          !canFilterByPreparer ||
           preparedBy === 'all' ||
           (preparedBy === '__empty__' ? !quote.preparedById && !quote.preparedByName : quote.preparedById === preparedBy)
         const matchesType = documentType === 'all' || quote.documentType === documentType
@@ -1113,10 +1116,10 @@ export function QuotesPage() {
         const matchesMax = !maxAmount || quote.total <= Number(maxAmount)
         return matchesStatus && matchesCustomer && matchesPreparer && matchesType && matchesMin && matchesMax
       }),
-    [quotes, status, customer, preparedBy, documentType, minAmount, maxAmount]
+    [quotes, status, customer, preparedBy, documentType, minAmount, maxAmount, canFilterByPreparer]
   )
 
-  const hasActiveFilters = documentType !== 'all' || status !== 'all' || customer !== 'all' || preparedBy !== 'all' || Boolean(minAmount) || Boolean(maxAmount)
+  const hasActiveFilters = documentType !== 'all' || status !== 'all' || customer !== 'all' || (canFilterByPreparer && preparedBy !== 'all') || Boolean(minAmount) || Boolean(maxAmount)
 
   const handleDownload = async (quote: Quote) => {
     try {
@@ -1274,7 +1277,14 @@ export function QuotesPage() {
       ) : null}
 
 
-      <div className="grid gap-3 rounded-xl border border-border/70 bg-card/40 p-4 md:grid-cols-2 xl:grid-cols-[200px_200px_minmax(240px,1fr)_minmax(220px,280px)_140px_140px_auto]">
+      <div
+        className={cn(
+          'grid gap-3 rounded-xl border border-border/70 bg-card/40 p-4 md:grid-cols-2',
+          canFilterByPreparer
+            ? 'xl:grid-cols-[200px_200px_minmax(240px,1fr)_minmax(220px,280px)_140px_140px_auto]'
+            : 'xl:grid-cols-[200px_200px_minmax(280px,1fr)_140px_140px_auto]'
+        )}
+      >
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">Belge tipi</Label>
           <Select value={documentType} onValueChange={(value) => setDocumentType(value as any)}>
@@ -1315,21 +1325,23 @@ export function QuotesPage() {
           </Select>
         </div>
 
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Hazırlayan</Label>
-          <Select value={preparedBy} onValueChange={setPreparedBy}>
-            <SelectTrigger>
-              <SelectValue placeholder="Tüm hazırlayanlar" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Tüm hazırlayanlar</SelectItem>
-              {preparerOptions.map((preparer) => (
-                <SelectItem key={preparer.id} value={preparer.id}>{preparer.label}</SelectItem>
-              ))}
-              {hasUnassignedPreparer ? <SelectItem value="__empty__">Hazırlayan yok</SelectItem> : null}
-            </SelectContent>
-          </Select>
-        </div>
+        {canFilterByPreparer ? (
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Hazırlayan</Label>
+            <Select value={preparedBy} onValueChange={setPreparedBy}>
+              <SelectTrigger>
+                <SelectValue placeholder="Tüm hazırlayanlar" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tüm hazırlayanlar</SelectItem>
+                {preparerOptions.map((preparer) => (
+                  <SelectItem key={preparer.id} value={preparer.id}>{preparer.label}</SelectItem>
+                ))}
+                {hasUnassignedPreparer ? <SelectItem value="__empty__">Hazırlayan yok</SelectItem> : null}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
 
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">Min. tutar</Label>

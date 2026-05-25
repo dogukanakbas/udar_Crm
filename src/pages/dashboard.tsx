@@ -17,6 +17,7 @@ import type { Task } from '@/types'
 import { workflowTargetFallbackQty } from '@/lib/task-product-lines-helpers'
 import { taskStatusLabelTR } from '@/lib/task-labels'
 import { taskVisibleToWorkerTeamMember, workerMayClaimTask } from '@/lib/task-worker-visibility'
+import { hasPermission } from '@/lib/permissions'
 
 function mapTaskFromApi(t: any): Task {
   return {
@@ -43,6 +44,7 @@ export function DashboardPage() {
   const updateTask = useAppStore((s) => s.updateTask)
   const hydrateFromApi = useAppStore((s) => s.hydrateFromApi)
   const isWorker = data.settings.role === 'Worker'
+  const canViewApprovals = hasPermission(data.settings.role, data.rolePermissions || [], 'approvals.view')
   const currentUserId = typeof window !== 'undefined' ? localStorage.getItem('current-user-id') : null
   const myTasks = (data.tasks || []).filter((t) => {
     if (t.status === 'done') return false
@@ -89,7 +91,7 @@ export function DashboardPage() {
 
   useEffect(() => {
     api
-      .get('/dashboard/kpis/')
+      .get('/dashboard/kpis/', { suppressAuthToast: true } as any)
       .then((res) => {
         const d = res.data || {}
         setKpiTotals({
@@ -108,17 +110,18 @@ export function DashboardPage() {
       .catch(() => {
         // 429 dahil durumlarda dashboard UI kırılmasın.
       })
-    const role = typeof window !== 'undefined' ? localStorage.getItem('current-user-role') : null
-    if (role !== 'Worker') {
-      api.get('/approvals/pending/').then((res) => setPendingApprovals(res.data || [])).catch(() => setPendingApprovals([]))
+    if (canViewApprovals) {
+      api.get('/approvals/pending/', { suppressAuthToast: true } as any).then((res) => setPendingApprovals(res.data || [])).catch(() => setPendingApprovals([]))
+    } else {
+      setPendingApprovals([])
     }
 
     // Sağlık ucu Django'da /api/health/ altında (baseURL zaten .../api)
     api
-      .get('/health/')
+      .get('/health/', { suppressAuthToast: true } as any)
       .then((res) => setHealth(res.data || null))
       .catch(() => setHealth(null))
-  }, [])
+  }, [canViewApprovals])
 
   useEffect(() => {
     // meetings still mock
@@ -715,4 +718,3 @@ function BarSpark() {
     </div>
   )
 }
-
