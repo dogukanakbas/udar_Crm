@@ -49,7 +49,7 @@ function DraggableTableRow({
   id: string
   enableDragAndDrop?: boolean
 }) {
-  const { setNodeRef, transform, transition, isDragging } = useSortable({
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id,
     disabled: !enableDragAndDrop,
   })
@@ -68,7 +68,14 @@ function DraggableTableRow({
     >
       {enableDragAndDrop && (
         <TableCell className="w-10 cursor-grab text-muted-foreground hover:text-foreground">
-          <GripVertical className="h-4 w-4" />
+          <button
+            type="button"
+            className="rounded p-2"
+            {...attributes}
+            {...listeners}
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
         </TableCell>
       )}
       {row.getVisibleCells().map((cell: any) => (
