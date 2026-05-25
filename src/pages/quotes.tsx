@@ -437,7 +437,8 @@ const getInitialValues = (
   products: Product[],
   sellerCompanies: SellerCompanyProfile[],
   quote?: Quote,
-  priceLists: PriceListOption[] = normalizePriceLists()
+  priceLists: PriceListOption[] = normalizePriceLists(),
+  serviceExpenseTaxRate = 20
 ) => {
   const customerSnapshot = quote?.contractConfig?.customerSnapshot || quote?.contractConfig?.customer_snapshot || {}
   const company = companies.find((item) => item.id === quote?.customerId) || companies[0]
@@ -510,14 +511,14 @@ const getInitialValues = (
     termsText: getTermsText(quote?.contractConfig) || DEFAULT_TERMS_TEXT,
     contractNotesText: getContractNotesText(quote?.contractConfig) || DEFAULT_CONTRACT_NOTES_TEXT,
     lines: initialLines,
-    serviceExpenses: buildServiceExpenseRows(initialLines, products, getSectionOptionsFromCategories([]), storedServiceExpenses),
+    serviceExpenses: buildServiceExpenseRows(initialLines, products, getSectionOptionsFromCategories([]), storedServiceExpenses, serviceExpenseTaxRate),
   }
 }
 
 const resolveValidityDaysFromValues = (values: any) =>
   normalizeValidityDays(values.validityPreset === CUSTOM_OPTION ? values.validityCustomDays : values.validityPreset, 7)
 
-const buildDocumentPayload = (values: any, mode: SalesDocumentType, status = 'Draft') => ({
+const buildDocumentPayload = (values: any, mode: SalesDocumentType, status = 'Draft', serviceExpenseTaxRate = 20) => ({
   documentType: mode,
   customerId: values.customerId,
   preparedById: values.preparedById,
@@ -552,18 +553,21 @@ const buildDocumentPayload = (values: any, mode: SalesDocumentType, status = 'Dr
     },
     termsText: values.termsText || '',
     contractNotesText: values.contractNotesText || '',
-    serviceExpenses: (values.serviceExpenses || []).map((item: any) => {
-      const quantity = Math.max(0, Number(item.quantity ?? 1) || 0)
-      const unitAmount = Math.max(0, Number(item.unitAmount ?? item.unit_amount ?? 0) || 0)
-      return {
-        categoryKey: item.categoryKey,
-        categoryLabel: item.categoryLabel,
-        quantity,
-        unitAmount,
-        amount: unitAmount * quantity,
-        tax: Number(item.tax || 0),
-      }
-    }),
+    serviceExpenseTaxRate: normalizeServiceExpenseTaxRate(serviceExpenseTaxRate),
+    serviceExpenses: (values.serviceExpenses || [])
+      .map((item: any) => {
+        const quantity = Math.max(0, Number(item.quantity ?? 1) || 0)
+        const unitAmount = Math.max(0, Number(item.unitAmount ?? item.unit_amount ?? 0) || 0)
+        return {
+          categoryKey: item.categoryKey,
+          categoryLabel: item.categoryLabel,
+          quantity,
+          unitAmount,
+          amount: unitAmount * quantity,
+          tax: normalizeServiceExpenseTaxRate(serviceExpenseTaxRate),
+        }
+      })
+      .filter((item: any) => Number(item.amount || 0) > 0),
   },
   lines: values.lines.map((line: any, index: number) => ({
     productId: line.mode === 'product' ? line.productId : undefined,
@@ -900,6 +904,11 @@ const getServiceExpenseAmount = (item: any) => {
   if (Number.isFinite(unitAmount)) return quantity * Math.max(0, unitAmount)
   return Math.max(0, Number(item?.amount || 0))
 }
+const normalizeServiceExpenseTaxRate = (value: unknown) => {
+  const parsed = Number(value ?? 20)
+  if (!Number.isFinite(parsed)) return 20
+  return Math.min(100, Math.max(0, parsed))
+}
 const getServiceExpenseSubtotal = (expenses: any[] = []) => expenses.reduce((sum, item) => sum + getServiceExpenseAmount(item), 0)
 const getServiceExpenseTaxTotal = (expenses: any[] = []) =>
   expenses.reduce((sum, item) => sum + getServiceExpenseAmount(item) * (Number(item.tax || 0) / 100), 0)
@@ -932,9 +941,10 @@ const getLineServiceLabel = (line: any, products: Product[]) => {
 
 const getExpenseCategoryKey = (row: any) => String(row?.categoryKey || row?.category_key || '').trim()
 
-const buildServiceExpenseRows = (lines: any[], products: Product[], sectionOptions = SECTION_OPTIONS, previousRows: any[] = []) => {
+const buildServiceExpenseRows = (lines: any[], products: Product[], sectionOptions = SECTION_OPTIONS, previousRows: any[] = [], serviceExpenseTaxRate = 20) => {
   const previousByKey = new Map(previousRows.map((row) => [getExpenseCategoryKey(row), row]).filter(([key]) => key))
   const groups = new Map<string, { categoryKey: string; categoryLabel: string; quantity: number; tax: number }>()
+  const taxRate = normalizeServiceExpenseTaxRate(serviceExpenseTaxRate)
 
   lines.forEach((line, index) => {
     if (line.sectionKey === 'service') return
@@ -949,7 +959,7 @@ const buildServiceExpenseRows = (lines: any[], products: Product[], sectionOptio
       categoryKey: key,
       categoryLabel: getLineServiceLabel(line, products),
       quantity: Math.max(0, Number(line.qty || 0)),
-      tax: Number(line.tax ?? 20),
+      tax: taxRate,
     })
   })
 
@@ -963,7 +973,7 @@ const buildServiceExpenseRows = (lines: any[], products: Product[], sectionOptio
       ...row,
       unitAmount,
       amount: unitAmount * quantity,
-      tax: Number(previous?.tax ?? row.tax ?? 20),
+      tax: taxRate,
     }
   })
 }
@@ -1422,6 +1432,7 @@ function DocumentWizardTrigger({
   const [activeTab, setActiveTab] = useState<DocumentWizardTab>('customer')
   const [priceLists, setPriceLists] = useState<PriceListOption[]>(normalizePriceLists())
   const [paymentOptions, setPaymentOptions] = useState<string[]>(normalizePaymentOptions())
+  const [serviceExpenseTaxRate, setServiceExpenseTaxRate] = useState(20)
   const [showProductCodesInPicker, setShowProductCodesInPicker] = useState(false)
   const isControlled = controlledOpen !== undefined
   const modalOpen = isControlled ? controlledOpen : open
@@ -1456,7 +1467,7 @@ function DocumentWizardTrigger({
   )
   const documentMode = quote?.documentType ?? mode
   const isEditing = Boolean(quote)
-  const getFormDefaults = () => getInitialValues(documentMode, companies, preparers, products, sellerCompanies, quote, priceLists)
+  const getFormDefaults = () => getInitialValues(documentMode, companies, preparers, products, sellerCompanies, quote, priceLists, serviceExpenseTaxRate)
   const form = useForm({ resolver: zodResolver(documentSchema) as any, defaultValues: getFormDefaults() })
   const preparedById = form.watch('preparedById')
   const preparedByDisplayName = getPreparerDisplayName(preparers, preparedById, quote?.preparedByName || quote?.owner)
@@ -1467,10 +1478,12 @@ function DocumentWizardTrigger({
       .then((response) => {
         setPriceLists(normalizePriceLists(response.data?.price_lists))
         setPaymentOptions(normalizePaymentOptions(response.data?.payment_options))
+        setServiceExpenseTaxRate(normalizeServiceExpenseTaxRate(response.data?.service_expense_tax_rate))
       })
       .catch(() => {
         setPriceLists(normalizePriceLists())
         setPaymentOptions(normalizePaymentOptions())
+        setServiceExpenseTaxRate(20)
       })
   }, [])
 
@@ -1517,7 +1530,7 @@ function DocumentWizardTrigger({
   }
 
   const syncServiceExpensesFromLines = () => {
-    const nextExpenses = buildServiceExpenseRows(form.getValues('lines') || [], products, sectionOptions, form.getValues('serviceExpenses') || [])
+    const nextExpenses = buildServiceExpenseRows(form.getValues('lines') || [], products, sectionOptions, form.getValues('serviceExpenses') || [], serviceExpenseTaxRate)
     form.setValue('serviceExpenses', nextExpenses, { shouldDirty: true, shouldValidate: false })
   }
 
@@ -1604,7 +1617,7 @@ function DocumentWizardTrigger({
 
   useEffect(() => {
     syncServiceExpensesFromLines()
-  }, [selectedExpenseGroupKey, products, sectionOptions])
+  }, [selectedExpenseGroupKey, products, sectionOptions, serviceExpenseTaxRate])
 
   const subtotal = lines.reduce((sum, line) => sum + getLineBase(line), 0)
   const discountTotal = lines.reduce((sum, line) => sum + getLineDiscountTotal(line), 0)
@@ -1673,7 +1686,7 @@ function DocumentWizardTrigger({
 
     setSaving(true)
     try {
-      const payload = buildDocumentPayload(values, documentMode, quote?.status || 'Draft')
+      const payload = buildDocumentPayload(values, documentMode, quote?.status || 'Draft', serviceExpenseTaxRate)
       if (quote) {
         await updateQuote(quote.id, payload as any)
       } else {
@@ -1983,7 +1996,7 @@ function DocumentWizardTrigger({
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Ürün bazlı hizmetler</CardTitle>
-                <CardDescription>Ürün kalemlerine göre PDF&apos;teki HİZMETLER bölümüne yazılacak ürün bazlı hizmet tutarlarını girin.</CardDescription>
+                <CardDescription>Ürün kalemlerine göre PDF&apos;teki HİZMETLER bölümüne yazılacak ürün bazlı hizmet tutarlarını girin. Masrafı 0 kalan ürünler çıktıya basılmaz.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 {serviceExpenses.length === 0 ? (
@@ -2015,10 +2028,7 @@ function DocumentWizardTrigger({
                         </div>
                         <div>
                           <Label>KDV %</Label>
-                          <NumericEditor
-                            value={Number(expense.tax ?? 20)}
-                            onValueChange={(value) => form.setValue(`serviceExpenses.${index}.tax`, value, { shouldDirty: true, shouldValidate: true })}
-                          />
+                          <Input value={normalizeServiceExpenseTaxRate(expense.tax ?? serviceExpenseTaxRate)} readOnly />
                         </div>
                         <div className="text-sm">
                           <p className="text-muted-foreground">Yekün</p>

@@ -58,6 +58,12 @@ const DEFAULT_MASTER_TEMPLATE_ITEM: DocumentTemplateLibraryItem = {
   source_type: 'default',
 }
 
+const normalizeServiceExpenseTaxRate = (value: unknown) => {
+  const parsed = Number(value ?? 20)
+  if (!Number.isFinite(parsed)) return 20
+  return Math.min(100, Math.max(0, parsed))
+}
+
 const normalizeDocumentGroup = (category: any, index: number) => {
   const defaults = category.templateDefaults || {}
   const columns = Array.isArray(defaults.document_columns) && defaults.document_columns.length
@@ -362,6 +368,7 @@ export function DocumentTemplateLibrary() {
   const [pendingTemplate, setPendingTemplate] = useState<{ templateKey: string; sellerCompanyKey: string } | null>(null)
   const [priceLists, setPriceLists] = useState<PriceListOption[]>(normalizePriceLists())
   const [paymentOptions, setPaymentOptions] = useState<string[]>(normalizePaymentOptions())
+  const [serviceExpenseTaxRate, setServiceExpenseTaxRate] = useState(20)
   const [savingSettings, setSavingSettings] = useState(false)
   const [placeholderGroups, setPlaceholderGroups] = useState<TemplatePlaceholderGroup[]>([])
 
@@ -391,10 +398,12 @@ export function DocumentTemplateLibrary() {
       .then((response) => {
         setPriceLists(normalizePriceLists(response.data?.price_lists))
         setPaymentOptions(normalizePaymentOptions(response.data?.payment_options))
+        setServiceExpenseTaxRate(normalizeServiceExpenseTaxRate(response.data?.service_expense_tax_rate))
       })
       .catch(() => {
         setPriceLists(normalizePriceLists())
         setPaymentOptions(normalizePaymentOptions())
+        setServiceExpenseTaxRate(20)
       })
   }, [])
 
@@ -565,6 +574,23 @@ export function DocumentTemplateLibrary() {
             </div>
             <div className="space-y-3 border-t pt-4">
               <div className="space-y-1">
+                <p className="text-sm font-semibold">Hizmet KDV oranı</p>
+                <p className="text-xs text-muted-foreground">Teklif ve sözleşme çıktılarındaki HİZMETLER tablosunda kullanılacak genel KDV oranı.</p>
+              </div>
+              <div className="max-w-xs space-y-2">
+                <Label>Hizmet KDV %</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={serviceExpenseTaxRate}
+                  onChange={(event) => setServiceExpenseTaxRate(normalizeServiceExpenseTaxRate(event.target.value))}
+                  disabled={data.settings.role !== 'Admin' || savingSettings}
+                />
+              </div>
+            </div>
+            <div className="space-y-3 border-t pt-4">
+              <div className="space-y-1">
                 <p className="text-sm font-semibold">Ödeme tipleri</p>
                 <p className="text-xs text-muted-foreground">Teklif oluşturma ekranında seçim olarak görünür; manuel giriş seçeneği ayrıca kalır.</p>
               </div>
@@ -603,9 +629,11 @@ export function DocumentTemplateLibrary() {
                     const response = await api.patch('/auth/organization-settings/', {
                       price_lists: priceLists,
                       payment_options: paymentOptions,
+                      service_expense_tax_rate: serviceExpenseTaxRate,
                     })
                     setPriceLists(normalizePriceLists(response.data?.price_lists))
                     setPaymentOptions(normalizePaymentOptions(response.data?.payment_options))
+                    setServiceExpenseTaxRate(normalizeServiceExpenseTaxRate(response.data?.service_expense_tax_rate))
                     toast({
                       title: 'Belge sabitleri güncellendi',
                       description: `${getDefaultPriceList(response.data?.price_lists).label} ve ödeme tipleri yeni belgelerde kullanılacak.`,

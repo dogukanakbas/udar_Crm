@@ -682,18 +682,19 @@ class OrganizationSettingsView(APIView):
       "price_list_label": default_price_list.get("label") or DEFAULT_PRICE_LIST_LABEL,
       "price_lists": price_lists,
       "payment_options": normalize_payment_options(settings_row.payment_options),
+      "service_expense_tax_rate": float(settings_row.service_expense_tax_rate or 20),
     }
 
   def get(self, request):
     # Mesai ayarları tüm org üyeleri tarafından okunabilir (görev zamanlaması için)
     org = request.user.organization
     if not org:
-      return Response({"working_hours_start": "08:00", "working_hours_end": "18:00", "working_days": [0, 1, 2, 3, 4], "price_list_label": DEFAULT_PRICE_LIST_LABEL, "price_lists": normalize_price_lists(None), "payment_options": normalize_payment_options(None)})
+      return Response({"working_hours_start": "08:00", "working_hours_end": "18:00", "working_days": [0, 1, 2, 3, 4], "price_list_label": DEFAULT_PRICE_LIST_LABEL, "price_lists": normalize_price_lists(None), "payment_options": normalize_payment_options(None), "service_expense_tax_rate": 20})
     try:
       s = OrganizationSettings.objects.get(organization=org)
       return Response(self._serialize(s))
     except OrganizationSettings.DoesNotExist:
-      return Response({"working_hours_start": "08:00", "working_hours_end": "18:00", "working_days": [0, 1, 2, 3, 4], "price_list_label": DEFAULT_PRICE_LIST_LABEL, "price_lists": normalize_price_lists(None), "payment_options": normalize_payment_options(None)})
+      return Response({"working_hours_start": "08:00", "working_hours_end": "18:00", "working_days": [0, 1, 2, 3, 4], "price_list_label": DEFAULT_PRICE_LIST_LABEL, "price_lists": normalize_price_lists(None), "payment_options": normalize_payment_options(None), "service_expense_tax_rate": 20})
 
   def patch(self, request):
     if getattr(request.user, "role", "") != "Admin":
@@ -708,6 +709,7 @@ class OrganizationSettingsView(APIView):
     price_list_label = request.data.get("price_list_label")
     price_lists = request.data.get("price_lists")
     payment_options = request.data.get("payment_options")
+    service_expense_tax_rate = request.data.get("service_expense_tax_rate")
     if start:
       from datetime import datetime
       try:
@@ -734,5 +736,10 @@ class OrganizationSettingsView(APIView):
       s.payment_options = normalize_payment_options(payment_options)
     elif not s.payment_options:
       s.payment_options = normalize_payment_options(None)
+    if service_expense_tax_rate is not None:
+      try:
+        s.service_expense_tax_rate = max(0, min(100, float(service_expense_tax_rate)))
+      except (TypeError, ValueError):
+        pass
     s.save()
     return Response(self._serialize(s))

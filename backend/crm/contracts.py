@@ -1381,28 +1381,27 @@ def _build_reportlab_document_pdf_export(quote):
         story.append(basic_table(rows, widths=[28 * mm, 78 * mm, 22 * mm, 20 * mm, 33 * mm, 33 * mm, 33 * mm], header_rows=1))
         story.append(Spacer(1, 6))
 
-    service_rows = [[p('Kod', heading), p('Ürün Adı', heading), p('Miktar', heading), p('Ara Toplam', heading), p('K.D.V. %', heading), p('K.D.V.', heading), p('Yekün', heading)]]
-    subtotal_total = Decimal('0')
-    tax_total = Decimal('0')
-    grand_total = Decimal('0')
-    qty_total = Decimal('0')
-    for group in groups:
-        for line in group['lines']:
-            details = dict(line.details or {})
-            product = getattr(line, 'product', None)
-            subtotal = _line_subtotal(line)
-            tax = _line_tax(line)
-            tax_rate = Decimal(getattr(line, 'tax', 0) or 0)
-            qty = Decimal(line.qty or 0)
+    service_items = _service_expense_rows(quote, groups)
+    if service_items:
+        service_rows = [[p('Ürün Adı', heading), p('Miktar', heading), p('Ara Toplam', heading), p('K.D.V. %', heading), p('K.D.V.', heading), p('Yekün', heading)]]
+        subtotal_total = Decimal('0')
+        tax_total = Decimal('0')
+        grand_total = Decimal('0')
+        qty_total = Decimal('0')
+        for item in service_items:
+            subtotal = item['amount']
+            tax = item['tax']
+            tax_rate = Decimal(item.get('tax_rate') or 0)
+            qty = Decimal(item.get('quantity') or 0)
             subtotal_total += subtotal
             tax_total += tax
             grand_total += subtotal + tax
             qty_total += qty
-            service_rows.append([p(details.get('code') or getattr(product, 'sku', '') or '', small), p(line.name or '', small), p(f'{qty:,.2f}', small), p(money(subtotal), small), p(f'%{tax_rate:,.2f}', small), p(money(tax), small), p(money(subtotal + tax), small)])
-    service_rows.append([p('TOPLAM', small), '', p(f'{qty_total:,.2f}', small), p(money(subtotal_total), small), '', p(money(tax_total), small), p(money(grand_total), small)])
-    story.append(p('HİZMETLER', heading))
-    story.append(basic_table(service_rows, widths=[26 * mm, 78 * mm, 22 * mm, 32 * mm, 22 * mm, 30 * mm, 32 * mm], header_rows=1))
-    story.append(Spacer(1, 8))
+            service_rows.append([p(item['label'], small), p(f'{qty:,.2f}', small), p(money(subtotal), small), p(f'%{tax_rate:,.2f}', small), p(money(tax), small), p(money(subtotal + tax), small)])
+        service_rows.append([p('TOPLAM', small), p(f'{qty_total:,.2f}', small), p(money(subtotal_total), small), '', p(money(tax_total), small), p(money(grand_total), small)])
+        story.append(p('HİZMETLER', heading))
+        story.append(basic_table(service_rows, widths=[88 * mm, 24 * mm, 38 * mm, 24 * mm, 34 * mm, 38 * mm], header_rows=1))
+        story.append(Spacer(1, 8))
 
     config = quote.contract_config or {}
     story.append(p('ÖDEME VE TESLİM', heading))
@@ -1602,7 +1601,9 @@ def _render_dynamic_product_group_tables(ws, quote):
     for group in groups:
         current_row = _write_dynamic_product_group(ws, quote, group, current_row, start_column, table_width)
         current_row += 1
-    current_row = _write_service_summary_group(ws, quote, groups, current_row, start_column, table_width)
+    service_rows = _service_expense_rows(quote, groups)
+    if service_rows:
+        current_row = _write_service_summary_group(ws, quote, groups, current_row, start_column, table_width, service_rows)
     return current_row + 1
 
 
@@ -1619,7 +1620,10 @@ def _dynamic_tables_row_count(quote, groups):
 def _service_summary_row_count(quote, groups):
     if not groups:
         return 0
-    return len(_service_expense_rows(quote, groups)) + 3
+    service_rows = _service_expense_rows(quote, groups)
+    if not service_rows:
+        return 0
+    return len(service_rows) + 3
 
 
 def _dynamic_table_physical_width(groups):
@@ -1915,8 +1919,10 @@ def _service_expense_rows(quote, groups=None):
             if key and key not in line_labels_by_key:
                 line_labels_by_key[key] = line_service_label(line)
 
+    tax_rate = _service_expense_tax_rate(quote)
     configured = []
-    for item in (quote.contract_config or {}).get('service_expenses') or []:
+    configured_source = (quote.contract_config or {}).get('service_expenses') or []
+    for item in configured_source:
         if not isinstance(item, dict):
             continue
         category_key = str(item.get('category_key') or item.get('categoryKey') or '').strip()
@@ -1941,32 +1947,33 @@ def _service_expense_rows(quote, groups=None):
         amount = max(amount, Decimal('0'))
         if unit_amount >= Decimal('0'):
             amount = max(unit_amount, Decimal('0')) * quantity
-        try:
-            tax_rate = Decimal(str(item.get('tax') or item.get('tax_rate') or item.get('taxRate') or 0))
-        except (InvalidOperation, TypeError, ValueError):
-            tax_rate = Decimal('0')
-        tax_rate = max(tax_rate, Decimal('0'))
-        configured.append({'label': label, 'quantity': quantity, 'amount': amount, 'tax_rate': tax_rate, 'tax': amount * (tax_rate / Decimal('100'))})
-    if configured:
-        return configured
-
-    rows_by_key = {}
-    for group in groups or []:
-        if str(group.get('key') or '').strip() == 'service':
+        if amount <= Decimal('0'):
             continue
-        for line in group.get('lines') or []:
-            key = line_service_key(line)
-            if not key:
-                continue
-            label = line_service_label(line)
-            quantity = Decimal(getattr(line, 'qty', 0) or 0)
-            if key not in rows_by_key:
-                rows_by_key[key] = {'label': label, 'quantity': Decimal('0'), 'amount': Decimal('0'), 'tax_rate': Decimal('0'), 'tax': Decimal('0')}
-            rows_by_key[key]['quantity'] += quantity
-    return list(rows_by_key.values())
+        configured.append({'label': label, 'quantity': quantity, 'amount': amount, 'tax_rate': tax_rate, 'tax': amount * (tax_rate / Decimal('100'))})
+    return configured
 
 
-def _write_service_summary_group(ws, quote, groups, row, column, physical_width):
+def _service_expense_tax_rate(quote):
+    settings_row = None
+    organization = getattr(quote, 'organization', None)
+    if organization is not None:
+        try:
+            settings_row = organization.settings
+        except Exception:
+            settings_row = None
+    if settings_row is not None:
+        try:
+            return max(Decimal('0'), Decimal(str(settings_row.service_expense_tax_rate or 20)))
+        except (InvalidOperation, TypeError, ValueError):
+            pass
+    config = quote.contract_config or {}
+    try:
+        return max(Decimal('0'), Decimal(str(config.get('serviceExpenseTaxRate') or config.get('service_expense_tax_rate') or 20)))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal('20')
+
+
+def _write_service_summary_group(ws, quote, groups, row, column, physical_width, service_rows=None):
     column_count = max(physical_width, 6)
     last_column = column + column_count - 1
     currency_code = _quote_currency(quote)
@@ -2011,7 +2018,7 @@ def _write_service_summary_group(ws, quote, groups, row, column, physical_width)
     tax_total = Decimal('0')
     grand_total = Decimal('0')
     quantity_total = Decimal('0')
-    for item in _service_expense_rows(quote, groups):
+    for item in (service_rows if service_rows is not None else _service_expense_rows(quote, groups)):
         subtotal = item['amount']
         tax = item['tax']
         grand = subtotal + tax
@@ -2190,7 +2197,8 @@ def _build_yekun_summary_rows(quote):
         _add_yekun_summary_row(rows_by_key, group.get('key'), _yekun_summary_label(group), amount)
 
     service_expense_total = sum((item['amount'] + item['tax'] for item in _service_expense_rows(quote)), Decimal('0'))
-    _add_yekun_summary_row(rows_by_key, 'service', 'HİZMETLER', service_expense_total)
+    if service_expense_total > Decimal('0'):
+        _add_yekun_summary_row(rows_by_key, 'service', 'HİZMETLER', service_expense_total)
     return list(rows_by_key.values())
 
 
