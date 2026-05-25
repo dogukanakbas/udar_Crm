@@ -176,6 +176,9 @@ const DEFAULT_CONTRACT_NOTES_TEXT = [
   'Üretim öncesi teyit alınacaktır.',
 ].join('\n')
 
+const DOCUMENT_WIZARD_TABS = ['customer', 'document', 'lines', 'expenses', 'review'] as const
+type DocumentWizardTab = (typeof DOCUMENT_WIZARD_TABS)[number]
+
 const lineSchema = z.object({
   mode: z.enum(['product', 'manual']).default('product'),
   productId: z.string().optional(),
@@ -401,6 +404,14 @@ const resolveErrorTab = (fieldPath?: string) => {
   if (fieldPath.startsWith('serviceExpenses')) return 'expenses'
   if (fieldPath.startsWith('customer') || fieldPath === 'customerId') return 'customer'
   return 'document'
+}
+
+const wizardValidationFields = (tab: DocumentWizardTab) => {
+  if (tab === 'customer') return ['customerId']
+  if (tab === 'document') return ['validUntil', 'delivery', 'currency', 'exchangeRate', 'preparedById', 'sellerCompanyKey', 'templateKey']
+  if (tab === 'lines') return ['lines']
+  if (tab === 'expenses') return ['serviceExpenses']
+  return []
 }
 
 const collectFirstError = (errors: any, parentPath = ''): { path: string; message: string } | null => {
@@ -1408,7 +1419,7 @@ function DocumentWizardTrigger({
   const [open, setOpen] = useState(false)
   const [customerModalOpen, setCustomerModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [activeTab, setActiveTab] = useState('customer')
+  const [activeTab, setActiveTab] = useState<DocumentWizardTab>('customer')
   const [priceLists, setPriceLists] = useState<PriceListOption[]>(normalizePriceLists())
   const [paymentOptions, setPaymentOptions] = useState<string[]>(normalizePaymentOptions())
   const [showProductCodesInPicker, setShowProductCodesInPicker] = useState(false)
@@ -1692,6 +1703,32 @@ function DocumentWizardTrigger({
     handleSave()
   }
 
+  const activeTabIndex = DOCUMENT_WIZARD_TABS.indexOf(activeTab)
+  const isReviewTab = activeTab === 'review'
+  const goToTab = (nextTab: DocumentWizardTab) => {
+    if (nextTab === 'expenses') syncServiceExpensesFromLines()
+    setActiveTab(nextTab)
+  }
+  const handlePreviousStep = () => {
+    const previousTab = DOCUMENT_WIZARD_TABS[Math.max(activeTabIndex - 1, 0)]
+    goToTab(previousTab)
+  }
+  const handleNextStep = async () => {
+    const fields = wizardValidationFields(activeTab)
+    const isValid = fields.length ? await form.trigger(fields as any) : true
+    if (!isValid) {
+      const firstError = collectFirstError(form.formState.errors)
+      setActiveTab(resolveErrorTab(firstError?.path) as DocumentWizardTab)
+      toast({
+        title: firstError?.message || 'Lütfen bu adımdaki zorunlu alanları kontrol edin.',
+        variant: 'destructive',
+      })
+      return
+    }
+    const nextTab = DOCUMENT_WIZARD_TABS[Math.min(activeTabIndex + 1, DOCUMENT_WIZARD_TABS.length - 1)]
+    goToTab(nextTab)
+  }
+
   return (
     <>
       <CompanyModal open={customerModalOpen} onOpenChange={setCustomerModalOpen} onSubmit={handleCustomerCreate} />
@@ -1712,7 +1749,7 @@ function DocumentWizardTrigger({
           value={activeTab}
           onValueChange={(nextTab) => {
             if (nextTab === 'expenses') syncServiceExpensesFromLines()
-            setActiveTab(nextTab)
+            setActiveTab(nextTab as DocumentWizardTab)
           }}
         >
           <TabsList className="mb-3 grid grid-cols-5">
@@ -2007,7 +2044,20 @@ function DocumentWizardTrigger({
               <Card><CardContent className="grid gap-2 pt-4 text-sm"><p>Belge türü: {DOCUMENT_TYPE_TR[documentMode]}</p><p>Müşteri: {form.watch('customerName') || selectedCustomer?.name || '-'}</p><p>Hazırlayan: {preparedByDisplayName || '-'}</p><p>Satıcı firma: {getSellerCompanyLabel(sellerCompanies, form.watch('sellerCompanyKey'))}</p><p>Fiyat listesi: {selectedPriceList.label}</p><p>Para birimi: {getCurrencySymbol(form.watch('currency'))} {getCurrencyLabel(form.watch('currency'))}</p><p>Kur: {formatExchangeRate(form.watch('exchangeRate'), form.watch('currency'))}</p><p>Teslim tarihi: {form.watch('delivery') ? formatDate(form.watch('delivery')) : '-'}</p><p>Şablon: {templateLabel(documentMode, form.watch('templateKey'))}</p><p>Satır sayısı: {lines.length}</p><p>Ara toplam: {formatDocumentAmount(subtotal, form.watch('currency'))}</p><p>Toplam iskonto: {formatDocumentAmount(discountTotal, form.watch('currency'))}</p><p>Ürün KDV: {formatDocumentAmount(taxTotal, form.watch('currency'))}</p><p>Hizmetler yekün: {formatDocumentAmount(serviceExpenseGrandTotal, form.watch('currency'))}</p><p>Genel toplam: {formatDocumentAmount(total, form.watch('currency'))}</p></CardContent></Card>
           </TabsContent>
         </Tabs>
-        <DialogFooter><Button type="button" onClick={handleSaveClick} disabled={saving}>{saving ? 'Kaydediliyor...' : isEditing ? 'Değişiklikleri kaydet' : 'Kaydet'}</Button></DialogFooter>
+        <DialogFooter className="gap-2 sm:justify-between">
+          <Button type="button" variant="outline" onClick={handlePreviousStep} disabled={saving || activeTabIndex === 0}>
+            Geri
+          </Button>
+          {isReviewTab ? (
+            <Button type="button" onClick={handleSaveClick} disabled={saving}>
+              {saving ? 'Kaydediliyor...' : isEditing ? 'Değişiklikleri kaydet' : 'Kaydet'}
+            </Button>
+          ) : (
+            <Button type="button" onClick={handleNextStep} disabled={saving}>
+              İleri
+            </Button>
+          )}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
     </>
