@@ -75,7 +75,7 @@ const nav: Array<{
       { label: 'Fırsatlar', to: '/crm/opportunities', perm: 'opportunities.view' },
       { label: 'Cari Kartı', to: '/crm/companies', perm: 'partners.view' },
       { label: 'Kişiler', to: '/crm/contacts', perm: 'contacts.view', roles: ['Admin'] },
-      { label: 'Teklifler', to: '/crm/quotes', perm: 'quotes.view' },
+      { label: 'Teklif & Sözleşmeler', to: '/crm/quotes', perm: 'quotes.view' },
       { label: 'Satıcı Firmalar', to: '/crm/seller-companies', perm: 'pricing.manage', roles: ['Admin', 'Manager'] },
       { label: 'Şablon Yönetimi', to: '/crm/quote-templates', perm: 'pricing.manage', roles: ['Admin', 'Manager'] },
     ],

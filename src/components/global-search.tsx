@@ -256,7 +256,7 @@ const [limit, setLimit] = useState(10)
                 </CommandItem>
               ))}
             </CommandGroup>
-            <CommandGroup heading={`Teklifler (${results.quotes_count ?? 0})`}>
+            <CommandGroup heading={`Teklif & Sözleşmeler (${results.quotes_count ?? 0})`}>
               {results.quotes?.map((q: any) => (
                 <CommandItem key={`quote-${q.id}`} onSelect={() => go(`/crm/quotes/${q.id}`)}>
                   <FileText className="mr-2 h-4 w-4" />
