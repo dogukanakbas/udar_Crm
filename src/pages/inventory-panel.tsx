@@ -155,7 +155,7 @@ export function InventoryPanel() {
         id: product.id,
         order: index,
       }))
-      await api.post('/api/products/reorder/', { new_positions })
+      await api.post('/products/reorder/', { new_positions })
       toast({
         title: 'Ürün sıralaması güncellendi',
         description: `${reorderedProducts.length} ürün başarıyla sıralandı.`,
@@ -178,7 +178,7 @@ export function InventoryPanel() {
         id: category.id,
         order: index,
       }))
-      await api.post('/api/categories/reorder/', { new_positions })
+      await api.post('/categories/reorder/', { new_positions })
       toast({
         title: 'Kategori sıralaması güncellendi',
         description: `${reorderedCategories.length} kategori başarıyla sıralandı.`,
