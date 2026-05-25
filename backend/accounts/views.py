@@ -57,10 +57,34 @@ class MeView(APIView):
         "first_name": user.first_name or "",
         "last_name": user.last_name or "",
         "role": getattr(user, "role", None),
-        "organization": user.organization.id if user.organization else None,
+        "organization": {
+          "id": user.organization.id,
+          "name": user.organization.name,
+          "brand_name": getattr(user.organization, "brand_name", "") or user.organization.name,
+          "logo_url": getattr(user.organization, "logo_url", ""),
+        } if user.organization else None,
         "is_superadmin": getattr(user, "is_superadmin", False),  # NEW: for auth gateway
       }
     )
+
+
+class BrandingView(APIView):
+  permission_classes = [AllowAny]
+
+  def get(self, request):
+    from organizations.models import Organization
+    org = Organization.objects.first()
+    if org:
+      return Response({
+        "name": org.name,
+        "brand_name": getattr(org, "brand_name", "") or org.name,
+        "logo_url": getattr(org, "logo_url", ""),
+      })
+    return Response({
+      "name": "UDAR",
+      "brand_name": "Udar",
+      "logo_url": "",
+    })
 
 
 class UsersListView(APIView):
@@ -683,18 +707,43 @@ class OrganizationSettingsView(APIView):
       "price_lists": price_lists,
       "payment_options": normalize_payment_options(settings_row.payment_options),
       "service_expense_tax_rate": float(settings_row.service_expense_tax_rate or 20),
+      "organization_name": settings_row.organization.name,
+      "brand_name": getattr(settings_row.organization, "brand_name", "") or settings_row.organization.name,
+      "logo_url": getattr(settings_row.organization, "logo_url", ""),
     }
 
   def get(self, request):
     # Mesai ayarları tüm org üyeleri tarafından okunabilir (görev zamanlaması için)
     org = request.user.organization
     if not org:
-      return Response({"working_hours_start": "08:00", "working_hours_end": "18:00", "working_days": [0, 1, 2, 3, 4], "price_list_label": DEFAULT_PRICE_LIST_LABEL, "price_lists": normalize_price_lists(None), "payment_options": normalize_payment_options(None), "service_expense_tax_rate": 20})
+      return Response({
+        "working_hours_start": "08:00",
+        "working_hours_end": "18:00",
+        "working_days": [0, 1, 2, 3, 4],
+        "price_list_label": DEFAULT_PRICE_LIST_LABEL,
+        "price_lists": normalize_price_lists(None),
+        "payment_options": normalize_payment_options(None),
+        "service_expense_tax_rate": 20,
+        "organization_name": "",
+        "brand_name": "",
+        "logo_url": "",
+      })
     try:
       s = OrganizationSettings.objects.get(organization=org)
       return Response(self._serialize(s))
     except OrganizationSettings.DoesNotExist:
-      return Response({"working_hours_start": "08:00", "working_hours_end": "18:00", "working_days": [0, 1, 2, 3, 4], "price_list_label": DEFAULT_PRICE_LIST_LABEL, "price_lists": normalize_price_lists(None), "payment_options": normalize_payment_options(None), "service_expense_tax_rate": 20})
+      return Response({
+        "working_hours_start": "08:00",
+        "working_hours_end": "18:00",
+        "working_days": [0, 1, 2, 3, 4],
+        "price_list_label": DEFAULT_PRICE_LIST_LABEL,
+        "price_lists": normalize_price_lists(None),
+        "payment_options": normalize_payment_options(None),
+        "service_expense_tax_rate": 20,
+        "organization_name": org.name,
+        "brand_name": getattr(org, "brand_name", "") or org.name,
+        "logo_url": getattr(org, "logo_url", ""),
+      })
 
   def patch(self, request):
     if getattr(request.user, "role", "") != "Admin":
@@ -702,6 +751,24 @@ class OrganizationSettingsView(APIView):
     org = request.user.organization
     if not org:
       return Response({"detail": "Organizasyon bulunamadı"}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Handle org fields
+    org_name = request.data.get("organization_name")
+    brand_name = request.data.get("brand_name")
+    logo_url = request.data.get("logo_url")
+    org_update_fields = []
+    if org_name is not None:
+      org.name = str(org_name).strip()
+      org_update_fields.append("name")
+    if brand_name is not None:
+      org.brand_name = str(brand_name).strip()
+      org_update_fields.append("brand_name")
+    if logo_url is not None:
+      org.logo_url = str(logo_url).strip()
+      org_update_fields.append("logo_url")
+    if org_update_fields:
+      org.save(update_fields=org_update_fields)
+
     s, _ = OrganizationSettings.objects.get_or_create(organization=org)
     start = request.data.get("working_hours_start")
     end = request.data.get("working_hours_end")

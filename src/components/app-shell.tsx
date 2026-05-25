@@ -184,11 +184,17 @@ export function AppShell() {
         {loggedIn && (
           <aside className="sticky top-0 hidden h-screen w-[276px] shrink-0 border-r border-white/10 bg-[#102d29] p-4 text-white lg:block">
           <div className="mb-6 flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.06] p-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-white text-[#173f38] font-semibold shadow-[0_16px_38px_-22px_rgba(0,0,0,0.8)]">
-              U
+            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-white text-[#173f38] font-semibold shadow-[0_16px_38px_-22px_rgba(0,0,0,0.8)] overflow-hidden">
+              {data.organization?.logo_url ? (
+                <img src={data.organization.logo_url} alt="Logo" className="h-full w-full object-contain p-1" />
+              ) : (
+                (data.organization?.brand_name || data.organization?.name || 'U')[0].toUpperCase()
+              )}
             </div>
-            <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-white/45">Udar</p>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs uppercase tracking-[0.2em] text-white/45 truncate">
+                {data.organization?.brand_name || data.organization?.name || 'Udar'}
+              </p>
               <p className="text-base font-semibold">CRM + ERP</p>
             </div>
           </div>

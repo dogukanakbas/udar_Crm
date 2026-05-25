@@ -19,9 +19,11 @@ from .views import (
     InviteUserView,
     ActivateUserView,
     OrganizationSettingsView,
+    BrandingView,
 )
 
 urlpatterns = [
+    path('branding/', BrandingView.as_view(), name='branding'),
     path('login/', RateLimitedTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('me/', MeView.as_view(), name='me'),

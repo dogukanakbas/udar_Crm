@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { ArrowRight, Eye, EyeOff, Lock, Mail, ShieldCheck } from 'lucide-react'
 import { login } from '@/lib/api'
@@ -20,8 +20,17 @@ export function LoginPage() {
   const [hydrating, setHydrating] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [branding, setBranding] = useState<{ name: string; brand_name: string; logo_url: string } | null>(null)
   const setRole = useAppStore((s) => s.setRole)
   const hydrate = useAppStore((s) => s.hydrateFromApi)
+
+  useEffect(() => {
+    api.get('/auth/branding/')
+      .then((res) => {
+        if (res.data) setBranding(res.data)
+      })
+      .catch(() => null)
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -68,11 +77,17 @@ export function LoginPage() {
           <div className="absolute inset-x-0 bottom-0 h-40 bg-[linear-gradient(0deg,rgba(199,151,67,0.28),rgba(199,151,67,0))]" />
           <div className="relative flex min-h-[260px] w-full flex-col justify-between gap-8 px-6 py-7 sm:px-10 lg:min-h-dvh lg:px-16 lg:py-14 xl:px-20">
             <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-md bg-white text-lg font-bold text-[#173f38] shadow-[0_18px_45px_rgba(0,0,0,0.22)] lg:h-12 lg:w-12">
-                U
+              <div className="flex h-11 w-11 items-center justify-center rounded-md bg-white text-lg font-bold text-[#173f38] shadow-[0_18px_45px_rgba(0,0,0,0.22)] overflow-hidden">
+                {branding?.logo_url ? (
+                  <img src={branding.logo_url} alt="Logo" className="h-full w-full object-contain p-1" />
+                ) : (
+                  (branding?.brand_name || branding?.name || 'U')[0].toUpperCase()
+                )}
               </div>
               <div>
-                <p className="text-xs uppercase tracking-[0.28em] text-white/60 lg:text-sm">UDAR</p>
+                <p className="text-xs uppercase tracking-[0.28em] text-white/60 lg:text-sm">
+                  {branding?.brand_name || branding?.name || 'UDAR'}
+                </p>
                 <h1 className="text-xl font-semibold lg:text-2xl">CRM</h1>
               </div>
             </div>

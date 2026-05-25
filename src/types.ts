@@ -600,6 +600,12 @@ export interface MockDbSnapshot {
   rolePermissions?: string[]
   today: TodayPanel
   savedViews: Record<string, { name: string; filters: Record<string, string> }[]>
+  organization?: {
+    id: number
+    name: string
+    brand_name: string
+    logo_url: string
+  }
   settings: {
     role: Role
     locale: 'en-US' | 'tr-TR'

@@ -92,6 +92,9 @@ export function SettingsPage() {
   const [workingHoursStart, setWorkingHoursStart] = useState('08:00')
   const [workingHoursEnd, setWorkingHoursEnd] = useState('18:00')
   const [workingDays, setWorkingDays] = useState<number[]>([0, 1, 2, 3, 4])
+  const [orgName, setOrgName] = useState('')
+  const [brandName, setBrandName] = useState('')
+  const [logoUrl, setLogoUrl] = useState('')
   type TeamAssociateRow = {
     id: number
     full_name: string
@@ -260,6 +263,9 @@ export function SettingsPage() {
         setWorkingHoursStart(d.working_hours_start || '08:00')
         setWorkingHoursEnd(d.working_hours_end || '18:00')
         setWorkingDays(Array.isArray(d.working_days) ? d.working_days : [0, 1, 2, 3, 4])
+        setOrgName(d.organization_name || '')
+        setBrandName(d.brand_name || '')
+        setLogoUrl(d.logo_url || '')
       })
       .catch(() => null)
   }, [])
@@ -318,7 +324,15 @@ export function SettingsPage() {
           <CardContent className="space-y-3">
             <div>
               <Label>Ad</Label>
-              <Input defaultValue="" placeholder="Organizasyon adı" />
+              <Input value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="Organizasyon adı" />
+            </div>
+            <div>
+              <Label>Marka Adı</Label>
+              <Input value={brandName} onChange={(e) => setBrandName(e.target.value)} placeholder="Marka Adı" />
+            </div>
+            <div>
+              <Label>Logo Görsel Adresi (URL)</Label>
+              <Input value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="Logo Görsel Adresi (URL)" />
             </div>
             <div>
               <Label>Yerel ayar</Label>
@@ -332,7 +346,27 @@ export function SettingsPage() {
                 </SelectContent>
               </Select>
             </div>
-            <Button onClick={() => toast({ title: 'Profil kaydedildi' })}>Kaydet</Button>
+            <Button
+              onClick={async () => {
+                try {
+                  await api.patch('/auth/organization-settings/', {
+                    organization_name: orgName,
+                    brand_name: brandName,
+                    logo_url: logoUrl,
+                  })
+                  await useAppStore.getState().hydrateFromApi()
+                  toast({ title: 'Profil kaydedildi' })
+                } catch (err: any) {
+                  toast({
+                    title: 'Hata',
+                    description: err?.response?.data?.detail || 'Kaydedilemedi',
+                    variant: 'destructive',
+                  })
+                }
+              }}
+            >
+              Kaydet
+            </Button>
           </CardContent>
         </Card>
         <RbacGuard perm="teams.edit">

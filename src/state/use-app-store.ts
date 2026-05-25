@@ -122,6 +122,7 @@ const emptySnapshot: MockDbSnapshot = {
   rolePermissions: [],
   today: { tasks: [], meetings: [], overdueInvoices: [], lowStockSkus: [] },
   savedViews: {},
+  organization: undefined,
   settings: {
     role: 'Worker' as Role,
     locale: 'tr-TR',
@@ -296,6 +297,7 @@ export const useAppStore = create<AppState>()(
       const meRes = await api.get('/auth/me/')
       const userRoleRaw = meRes.data?.role
       const userRole = isKnownRole(userRoleRaw) ? userRoleRaw : undefined
+      const orgInfo = meRes.data?.organization
       // current user bilgilerini lokal sakla (UI tarafında filtre varsayılanları için)
       if (meRes.data?.id) {
         try {
@@ -639,6 +641,7 @@ export const useAppStore = create<AppState>()(
       set((state) => ({
         data: {
           ...state.data,
+          organization: orgInfo,
           settings: { ...state.data.settings, role: userRole ?? state.data.settings.role },
           rolePermissions: currentUserPermissions,
           products,
