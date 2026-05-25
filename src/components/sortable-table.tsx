@@ -42,13 +42,15 @@ type SortableTableProps<TData extends Record<string, any>> = {
 
 function DraggableTableRow({
   row,
+  id,
   enableDragAndDrop,
 }: {
   row: any
+  id: string
   enableDragAndDrop?: boolean
 }) {
   const { setNodeRef, transform, transition, isDragging } = useSortable({
-    id: row.id,
+    id,
     disabled: !enableDragAndDrop,
   })
 
@@ -260,9 +262,10 @@ export function SortableTable<TData extends Record<string, any>>({
           </TableHeader>
           <TableBody>
             {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row) => (
+              table.getRowModel().rows.map((row, index) => (
                 <DraggableTableRow
-                  key={row.id}
+                  key={rowIds[index]}
+                  id={rowIds[index]}
                   row={row}
                   enableDragAndDrop={enableDragAndDrop}
                 />
