@@ -770,6 +770,8 @@ class BusinessPartnerViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             result = import_business_partners_from_excel(org, uploaded_file, update_existing=update_existing)
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            return Response({'detail': f'Excel dosyası okunamadı: {exc}'}, status=status.HTTP_400_BAD_REQUEST)
         return Response(result)
 
 

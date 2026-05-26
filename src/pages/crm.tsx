@@ -449,9 +449,7 @@ export function CompaniesPage() {
     formData.append('update_existing', 'true')
     setImportingPartners(true)
     try {
-      const response = await api.post('/partners/import-excel/', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      const response = await api.post('/partners/import-excel/', formData)
       await useAppStore.getState().hydrateFromApi()
       const result = response.data || {}
       toast({
@@ -466,9 +464,15 @@ export function CompaniesPage() {
         })
       }
     } catch (error: any) {
+      const detail =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (typeof error?.response?.data === 'string' ? error.response.data : '') ||
+        error?.message ||
+        'Excel dosyası okunamadı.'
       toast({
         title: 'Cari aktarımı başarısız',
-        description: error?.response?.data?.detail || 'Excel dosyası okunamadı.',
+        description: detail,
         variant: 'destructive',
       })
     } finally {
