@@ -20,6 +20,7 @@ import { normalizeCompanySize, normalizeCountryLabel } from '@/lib/location-data
 import { downloadCompaniesAsXlsx } from '@/lib/company-export-xlsx'
 import { useAppStore } from '@/state/use-app-store'
 import { hasPermission } from '@/lib/permissions'
+import api from '@/lib/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import type { Opportunity, Contact as ContactType, Company as CompanyType } from '@/types'
 import { BadgeCheck, Download, HandCoins, Plus, Timer, Trash2, Upload } from 'lucide-react'
