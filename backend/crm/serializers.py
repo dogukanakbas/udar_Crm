@@ -293,7 +293,7 @@ class QuoteSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['number', 'prepared_by', 'subtotal', 'discount_total', 'tax_total', 'total', 'created_at', 'updated_at']
+        read_only_fields = ['number', 'subtotal', 'discount_total', 'tax_total', 'total', 'created_at', 'updated_at']
 
     def get_owner_name(self, obj):
         if not obj.owner:

@@ -6,6 +6,7 @@ import {
   getFilteredRowModel,
   getPaginationRowModel,
   getSortedRowModel,
+  type RowSelectionState,
   type SortingState,
   useReactTable,
 } from '@tanstack/react-table'
@@ -22,6 +23,7 @@ type DataTableProps<TData> = {
   searchKey?: string
   onExport?: (rows: TData[]) => void
   renderToolbar?: React.ReactNode
+  renderSelectionActions?: (context: { selectedRows: TData[]; selectedCount: number; clearSelection: () => void }) => React.ReactNode
   pageSizeOptions?: number[]
   initialPageSize?: number
 }
@@ -32,11 +34,13 @@ export function DataTable<TData>({
   searchKey,
   onExport,
   renderToolbar,
+  renderSelectionActions,
   pageSizeOptions,
   initialPageSize,
 }: DataTableProps<TData>) {
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = React.useState('')
+  const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({})
   const resolvedPageSizeOptions = React.useMemo(
     () => (pageSizeOptions?.length ? pageSizeOptions : [10, 25, 50, 100]),
     [pageSizeOptions]
@@ -57,10 +61,13 @@ export function DataTable<TData>({
     state: {
       sorting,
       globalFilter,
+      rowSelection,
     },
     enableRowSelection: true,
     onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
+    onRowSelectionChange: setRowSelection,
+    getRowId: (row: any, index) => String(row?.id ?? index),
     globalFilterFn: 'includesString',
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -70,9 +77,34 @@ export function DataTable<TData>({
   })
 
   const selectedRows = table.getSelectedRowModel().rows
+  const selectedOriginalRows = selectedRows.map((row) => row.original)
+  const filteredRows = table.getFilteredRowModel().rows
+  const clearSelection = React.useCallback(() => table.resetRowSelection(), [table])
+  const selectAllFilteredRows = React.useCallback(() => {
+    const nextSelection: RowSelectionState = {}
+    table.getFilteredRowModel().rows.forEach((row) => {
+      nextSelection[row.id] = true
+    })
+    setRowSelection(nextSelection)
+  }, [table])
 
   return (
     <div className="space-y-3">
+      {selectedRows.length > 0 && renderSelectionActions ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3 shadow-sm">
+          <span className="text-sm font-medium">{selectedRows.length} satır seçildi</span>
+          {selectedRows.length < filteredRows.length ? (
+            <Button type="button" variant="ghost" size="sm" onClick={selectAllFilteredRows}>
+              Filtrelenenlerin tümünü seç
+            </Button>
+          ) : null}
+          {renderSelectionActions({
+            selectedRows: selectedOriginalRows,
+            selectedCount: selectedRows.length,
+            clearSelection,
+          })}
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-card/80 p-3 shadow-sm">
         {searchKey && (
           <Input
@@ -170,9 +202,7 @@ export function DataTable<TData>({
           </TableBody>
         </Table>
       </div>
-      {selectedRows.length > 0 && (
-        <p className="text-xs text-muted-foreground">{selectedRows.length} satır seçildi</p>
-      )}
+      {selectedRows.length > 0 && !renderSelectionActions ? <p className="text-xs text-muted-foreground">{selectedRows.length} satır seçildi</p> : null}
     </div>
   )
 }

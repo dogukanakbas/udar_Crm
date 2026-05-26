@@ -1128,6 +1128,16 @@ export function QuotesPage() {
   const [editingQuote, setEditingQuote] = useState<Quote | null>(null)
   const [loadingQuoteId, setLoadingQuoteId] = useState<string | null>(null)
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null)
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkEditOpen, setBulkEditOpen] = useState(false)
+  const [bulkEditIds, setBulkEditIds] = useState<string[]>([])
+  const [bulkEditValues, setBulkEditValues] = useState({
+    status: 'keep',
+    validUntil: '',
+    preparedById: 'keep',
+    payment: '',
+    delivery: '',
+  })
 
   const quotes = data.quotes ?? []
   const companies = data.companies
@@ -1248,6 +1258,74 @@ export function QuotesPage() {
       toast({ title: error?.response?.data?.detail || 'Durum güncellenemedi', variant: 'destructive' })
     } finally {
       setStatusUpdatingId(null)
+    }
+  }
+
+  const bulkQuoteIds = (items: Quote[]) => items.map((item) => item.id)
+
+  const handleBulkDelete = async (items: Quote[], clearSelection?: () => void) => {
+    const ids = bulkQuoteIds(items)
+    if (ids.length === 0) return
+    if (!confirm(`${ids.length} belge kalıcı olarak silinsin mi? Bu işlem geri alınamaz.`)) return
+    setBulkBusy(true)
+    try {
+      await deleteQuotes(ids)
+      clearSelection?.()
+      toast({ title: `${ids.length} belge silindi` })
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Toplu silme sırasında hata oluştu', variant: 'destructive' })
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  const handleBulkStatus = async (items: Quote[], nextStatus: string, clearSelection?: () => void) => {
+    const ids = bulkQuoteIds(items)
+    if (ids.length === 0) return
+    const normalizedStatus = normalizeQuoteWorkflowStatus(nextStatus)
+    setBulkBusy(true)
+    try {
+      await Promise.all(ids.map((id) => updateQuote(id, { status: normalizedStatus as Quote['status'] })))
+      clearSelection?.()
+      toast({ title: `${ids.length} belge ${quoteStatusTr(normalizedStatus)} durumuna alındı` })
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Toplu durum güncelleme sırasında hata oluştu', variant: 'destructive' })
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  const openBulkEdit = (items: Quote[]) => {
+    const ids = bulkQuoteIds(items)
+    if (ids.length === 0) return
+    setBulkEditIds(ids)
+    setBulkEditValues({ status: 'keep', validUntil: '', preparedById: 'keep', payment: '', delivery: '' })
+    setBulkEditOpen(true)
+  }
+
+  const handleBulkEditSave = async () => {
+    const apiPatch: any = {}
+    if (bulkEditValues.status !== 'keep') apiPatch.status = normalizeQuoteWorkflowStatus(bulkEditValues.status)
+    if (bulkEditValues.validUntil) apiPatch.validUntil = bulkEditValues.validUntil
+    if (bulkEditValues.preparedById !== 'keep') apiPatch.preparedById = bulkEditValues.preparedById === '__empty__' ? null : bulkEditValues.preparedById
+    if (bulkEditValues.payment.trim()) apiPatch.payment = bulkEditValues.payment.trim()
+    if (bulkEditValues.delivery.trim()) apiPatch.delivery = bulkEditValues.delivery.trim()
+
+    if (Object.keys(apiPatch).length === 0) {
+      toast({ title: 'Toplu düzenleme için en az bir alan seçin', variant: 'destructive' })
+      return
+    }
+
+    setBulkBusy(true)
+    try {
+      await Promise.all(bulkEditIds.map((id) => updateQuote(id, apiPatch)))
+      toast({ title: `${bulkEditIds.length} belge güncellendi` })
+      setBulkEditOpen(false)
+      setBulkEditIds([])
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Toplu düzenleme sırasında hata oluştu', variant: 'destructive' })
+    } finally {
+      setBulkBusy(false)
     }
   }
 
@@ -1389,6 +1467,55 @@ export function QuotesPage() {
         />
       ) : null}
 
+      <Dialog open={bulkEditOpen} onOpenChange={setBulkEditOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Toplu düzenle</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-1">
+              <Label>Durum</Label>
+              <Select value={bulkEditValues.status} onValueChange={(value) => setBulkEditValues((current) => ({ ...current, status: value }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="keep">Değiştirme</SelectItem>
+                  {QUOTE_WORKFLOW_STATUSES.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Geçerlilik tarihi</Label>
+              <Input type="date" value={bulkEditValues.validUntil} onChange={(event) => setBulkEditValues((current) => ({ ...current, validUntil: event.target.value }))} />
+            </div>
+            <div className="space-y-1">
+              <Label>Hazırlayan</Label>
+              <Select value={bulkEditValues.preparedById} onValueChange={(value) => setBulkEditValues((current) => ({ ...current, preparedById: value }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="keep">Değiştirme</SelectItem>
+                  <SelectItem value="__empty__">Boş bırak</SelectItem>
+                  {preparerOptions.map((preparer) => <SelectItem key={preparer.id} value={preparer.id}>{preparer.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Ödeme koşulu</Label>
+              <Input value={bulkEditValues.payment} onChange={(event) => setBulkEditValues((current) => ({ ...current, payment: event.target.value }))} placeholder="Boş bırakılırsa değişmez" />
+            </div>
+            <div className="space-y-1 md:col-span-2">
+              <Label>Teslim tipi / notu</Label>
+              <Input value={bulkEditValues.delivery} onChange={(event) => setBulkEditValues((current) => ({ ...current, delivery: event.target.value }))} placeholder="Boş bırakılırsa değişmez" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setBulkEditOpen(false)} disabled={bulkBusy}>Vazgeç</Button>
+            <Button type="button" onClick={handleBulkEditSave} disabled={bulkBusy || bulkEditIds.length === 0}>
+              {bulkBusy ? 'Güncelleniyor...' : `${bulkEditIds.length} belgeyi güncelle`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
 
       <div
         className={cn(
@@ -1487,6 +1614,30 @@ export function QuotesPage() {
           <DataTable
             columns={tableColumns}
             data={filtered}
+            renderSelectionActions={({ selectedRows, selectedCount, clearSelection }) => (
+              <RbacGuard perm="quotes.edit">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="button" size="sm" variant="outline" disabled={bulkBusy} onClick={() => openBulkEdit(selectedRows)}>
+                    Toplu düzenle
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" disabled={bulkBusy} onClick={() => handleBulkStatus(selectedRows, 'Approved', clearSelection)}>
+                    Toplu onayla
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" disabled={bulkBusy} onClick={() => handleBulkStatus(selectedRows, 'Pending', clearSelection)}>
+                    Beklemeye al
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" disabled={bulkBusy} onClick={() => handleBulkStatus(selectedRows, 'Rejected', clearSelection)}>
+                    Toplu ret
+                  </Button>
+                  <Button type="button" size="sm" variant="destructive" disabled={bulkBusy} onClick={() => handleBulkDelete(selectedRows, clearSelection)}>
+                    {selectedCount} seçiliyi sil
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" disabled={bulkBusy} onClick={clearSelection}>
+                    Seçimi temizle
+                  </Button>
+                </div>
+              </RbacGuard>
+            )}
             onExport={(rows) => {
               const blob = new Blob([buildCsv(rows)], { type: 'text/csv;charset=utf-8;' })
               const link = document.createElement('a')
