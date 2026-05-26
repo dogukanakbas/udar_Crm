@@ -26,7 +26,7 @@ from django.contrib.auth.validators import UnicodeUsernameValidator
 from .user_import import allocate_username, full_name_to_username_base, split_full_name
 from rest_framework import viewsets, permissions, filters
 from permissions import IsOrgMember, HasAPIPermission
-from .models import Team, TeamAssociate, OrganizationSettings
+from .models import DEFAULT_DOCUMENT_TERMS_TEXT, Team, TeamAssociate, OrganizationSettings
 from .payment_options import normalize_payment_options
 from .price_lists import DEFAULT_PRICE_LIST_LABEL, get_default_price_list, normalize_price_lists
 from .serializers import TeamSerializer, TeamAssociateSerializer
@@ -707,6 +707,8 @@ class OrganizationSettingsView(APIView):
       "price_lists": price_lists,
       "payment_options": normalize_payment_options(settings_row.payment_options),
       "service_expense_tax_rate": float(settings_row.service_expense_tax_rate or 20),
+      "quote_terms_text": settings_row.quote_terms_text or DEFAULT_DOCUMENT_TERMS_TEXT,
+      "contract_terms_text": settings_row.contract_terms_text or DEFAULT_DOCUMENT_TERMS_TEXT,
       "organization_name": settings_row.organization.name,
       "brand_name": getattr(settings_row.organization, "brand_name", "") or settings_row.organization.name,
       "logo_url": getattr(settings_row.organization, "logo_url", ""),
@@ -724,6 +726,8 @@ class OrganizationSettingsView(APIView):
         "price_lists": normalize_price_lists(None),
         "payment_options": normalize_payment_options(None),
         "service_expense_tax_rate": 20,
+        "quote_terms_text": DEFAULT_DOCUMENT_TERMS_TEXT,
+        "contract_terms_text": DEFAULT_DOCUMENT_TERMS_TEXT,
         "organization_name": "",
         "brand_name": "",
         "logo_url": "",
@@ -740,6 +744,8 @@ class OrganizationSettingsView(APIView):
         "price_lists": normalize_price_lists(None),
         "payment_options": normalize_payment_options(None),
         "service_expense_tax_rate": 20,
+        "quote_terms_text": DEFAULT_DOCUMENT_TERMS_TEXT,
+        "contract_terms_text": DEFAULT_DOCUMENT_TERMS_TEXT,
         "organization_name": org.name,
         "brand_name": getattr(org, "brand_name", "") or org.name,
         "logo_url": getattr(org, "logo_url", ""),
@@ -777,6 +783,8 @@ class OrganizationSettingsView(APIView):
     price_lists = request.data.get("price_lists")
     payment_options = request.data.get("payment_options")
     service_expense_tax_rate = request.data.get("service_expense_tax_rate")
+    quote_terms_text = request.data.get("quote_terms_text")
+    contract_terms_text = request.data.get("contract_terms_text")
     if start:
       from datetime import datetime
       try:
@@ -808,5 +816,9 @@ class OrganizationSettingsView(APIView):
         s.service_expense_tax_rate = max(0, min(100, float(service_expense_tax_rate)))
       except (TypeError, ValueError):
         pass
+    if quote_terms_text is not None:
+      s.quote_terms_text = str(quote_terms_text)
+    if contract_terms_text is not None:
+      s.contract_terms_text = str(contract_terms_text)
     s.save()
     return Response(self._serialize(s))

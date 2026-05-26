@@ -47,6 +47,17 @@ type TemplatePlaceholderGroup = {
 }
 
 const DEFAULT_DOCUMENT_COLUMNS = ['Kod', 'Satış Birimi', 'Ölçü / Gövde', 'Renk / Kapak', 'Miktar', 'Liste Fiyatı', 'İSK1%', 'İSK2%', 'Birim', 'Birim Net Fiyatı', 'Tutar']
+const DEFAULT_DOCUMENT_TERMS_TEXT = [
+  '1- Alıcı özellikleri belirtilen ürünlerin satın alma şartlarını kabul eder.',
+  '2- Satıcı onaylanan kalemlerin üretimini ve sevkini kabul eder.',
+  '3- Onay sonrası teknik ve finansal değişiklikler yeni mutabakat gerektirir.',
+  '4- Ödemesi tamamlanmayan siparişler üretime alınmayabilir.',
+  '5- Mücbir sebepler kaynaklı gecikmelerde satıcı sorumlu tutulamaz.',
+  '6- Teslimden sonra yazılı bildirim gelmezse ürünler eksiksiz kabul edilir.',
+  '7- Alıcı gerekli vergi ve yetki belgelerini eksiksiz sunar.',
+  '8- İmalat hataları garanti koşulları ve teknik şartname kapsamındadır.',
+  '9- İhtilaflarda Malatya Mahkemeleri ve İcra Daireleri yetkilidir.',
+].join('\n')
 const SELLER_MASTER_TEMPLATE_KEY = 'seller_master'
 const DEFAULT_MASTER_TEMPLATE_ITEM: DocumentTemplateLibraryItem = {
   template_key: SELLER_MASTER_TEMPLATE_KEY,
@@ -446,6 +457,8 @@ export function DocumentTemplateLibrary() {
   const [priceLists, setPriceLists] = useState<PriceListOption[]>(normalizePriceLists())
   const [paymentOptions, setPaymentOptions] = useState<string[]>(normalizePaymentOptions())
   const [serviceExpenseTaxRate, setServiceExpenseTaxRate] = useState(20)
+  const [quoteTermsText, setQuoteTermsText] = useState(DEFAULT_DOCUMENT_TERMS_TEXT)
+  const [contractTermsText, setContractTermsText] = useState(DEFAULT_DOCUMENT_TERMS_TEXT)
   const [savingSettings, setSavingSettings] = useState(false)
   const [placeholderGroups, setPlaceholderGroups] = useState<TemplatePlaceholderGroup[]>([])
 
@@ -476,11 +489,15 @@ export function DocumentTemplateLibrary() {
         setPriceLists(normalizePriceLists(response.data?.price_lists))
         setPaymentOptions(normalizePaymentOptions(response.data?.payment_options))
         setServiceExpenseTaxRate(normalizeServiceExpenseTaxRate(response.data?.service_expense_tax_rate))
+        setQuoteTermsText(response.data?.quote_terms_text || DEFAULT_DOCUMENT_TERMS_TEXT)
+        setContractTermsText(response.data?.contract_terms_text || DEFAULT_DOCUMENT_TERMS_TEXT)
       })
       .catch(() => {
         setPriceLists(normalizePriceLists())
         setPaymentOptions(normalizePaymentOptions())
         setServiceExpenseTaxRate(20)
+        setQuoteTermsText(DEFAULT_DOCUMENT_TERMS_TEXT)
+        setContractTermsText(DEFAULT_DOCUMENT_TERMS_TEXT)
       })
   }, [])
 
@@ -698,6 +715,34 @@ export function DocumentTemplateLibrary() {
                 Ödeme tipi ekle
               </Button>
             </div>
+            <div className="space-y-3 border-t pt-4">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold">Belge koşulları</p>
+                <p className="text-xs text-muted-foreground">Yeni oluşturulan teklif ve sözleşmeler bu metinleri ayrı ayrı varsayılan koşul olarak kullanır. Her dolu satır çıktıda ayrı koşul satırı olur.</p>
+              </div>
+              <div className="grid gap-4 xl:grid-cols-2">
+                <div className="space-y-2 rounded-lg border border-border/70 bg-background/50 p-3">
+                  <Label>Teklif koşulları</Label>
+                  <Textarea
+                    rows={10}
+                    value={quoteTermsText}
+                    onChange={(event) => setQuoteTermsText(event.target.value)}
+                    disabled={data.settings.role !== 'Admin' || savingSettings}
+                  />
+                  <p className="text-xs text-muted-foreground">Teklif PDF/Excel çıktılarında TEKLİF KOŞULLARI başlığı altında görünür.</p>
+                </div>
+                <div className="space-y-2 rounded-lg border border-border/70 bg-background/50 p-3">
+                  <Label>Sözleşme koşulları</Label>
+                  <Textarea
+                    rows={10}
+                    value={contractTermsText}
+                    onChange={(event) => setContractTermsText(event.target.value)}
+                    disabled={data.settings.role !== 'Admin' || savingSettings}
+                  />
+                  <p className="text-xs text-muted-foreground">Sözleşme PDF/Excel çıktılarında SÖZLEŞME KOŞULLARI başlığı altında görünür.</p>
+                </div>
+              </div>
+            </div>
             <RbacGuard perm="quotes.edit">
               <Button
                 onClick={async () => {
@@ -707,13 +752,17 @@ export function DocumentTemplateLibrary() {
                       price_lists: priceLists,
                       payment_options: paymentOptions,
                       service_expense_tax_rate: serviceExpenseTaxRate,
+                      quote_terms_text: quoteTermsText,
+                      contract_terms_text: contractTermsText,
                     })
                     setPriceLists(normalizePriceLists(response.data?.price_lists))
                     setPaymentOptions(normalizePaymentOptions(response.data?.payment_options))
                     setServiceExpenseTaxRate(normalizeServiceExpenseTaxRate(response.data?.service_expense_tax_rate))
+                    setQuoteTermsText(response.data?.quote_terms_text || DEFAULT_DOCUMENT_TERMS_TEXT)
+                    setContractTermsText(response.data?.contract_terms_text || DEFAULT_DOCUMENT_TERMS_TEXT)
                     toast({
                       title: 'Belge sabitleri güncellendi',
-                      description: `${getDefaultPriceList(response.data?.price_lists).label} ve ödeme tipleri yeni belgelerde kullanılacak.`,
+                      description: `${getDefaultPriceList(response.data?.price_lists).label}, ödeme tipleri ve koşullar yeni belgelerde kullanılacak.`,
                     })
                   } catch (error: any) {
                     toast({

@@ -436,7 +436,8 @@ const getInitialValues = (
   sellerCompanies: SellerCompanyProfile[],
   quote?: Quote,
   priceLists: PriceListOption[] = normalizePriceLists(),
-  serviceExpenseTaxRate = 20
+  serviceExpenseTaxRate = 20,
+  documentTerms: { quoteTermsText?: string; contractTermsText?: string } = {}
 ) => {
   const customerSnapshot = quote?.contractConfig?.customerSnapshot || quote?.contractConfig?.customer_snapshot || {}
   const company = companies.find((item) => item.id === quote?.customerId) || companies[0]
@@ -506,8 +507,12 @@ const getInitialValues = (
     customerPhone: customerSnapshot.phone || company?.phone || '',
     customerEmail: customerSnapshot.email || company?.email || '',
     signatureCustomerLabel: quote?.contractConfig?.signatureCustomerLabel || quote?.contractConfig?.signature_customer_label || customerSnapshot.name || company?.name || '',
-    termsText: getTermsText(quote?.contractConfig) || DEFAULT_TERMS_TEXT,
-    contractNotesText: getContractNotesText(quote?.contractConfig) || DEFAULT_CONTRACT_NOTES_TEXT,
+    termsText: quote
+      ? getTermsText(quote?.contractConfig) || DEFAULT_TERMS_TEXT
+      : mode === 'Contract'
+        ? documentTerms.contractTermsText || DEFAULT_TERMS_TEXT
+        : documentTerms.quoteTermsText || DEFAULT_TERMS_TEXT,
+    contractNotesText: quote ? getContractNotesText(quote?.contractConfig) || DEFAULT_CONTRACT_NOTES_TEXT : '',
     lines: initialLines,
     serviceExpenses: buildServiceExpenseRows(initialLines, products, getSectionOptionsFromCategories([]), storedServiceExpenses, serviceExpenseTaxRate),
   }
@@ -1674,6 +1679,10 @@ function DocumentWizardTrigger({
   const [priceLists, setPriceLists] = useState<PriceListOption[]>(normalizePriceLists())
   const [paymentOptions, setPaymentOptions] = useState<string[]>(normalizePaymentOptions())
   const [serviceExpenseTaxRate, setServiceExpenseTaxRate] = useState(20)
+  const [documentTerms, setDocumentTerms] = useState<{ quoteTermsText: string; contractTermsText: string }>({
+    quoteTermsText: DEFAULT_TERMS_TEXT,
+    contractTermsText: DEFAULT_TERMS_TEXT,
+  })
   const [showProductCodesInPicker, setShowProductCodesInPicker] = useState(false)
   const isControlled = controlledOpen !== undefined
   const modalOpen = isControlled ? controlledOpen : open
@@ -1718,7 +1727,7 @@ function DocumentWizardTrigger({
   )
   const documentMode = quote?.documentType ?? mode
   const isEditing = Boolean(quote)
-  const getFormDefaults = () => getInitialValues(documentMode, companies, preparers, products, sellerCompanies, quote, priceLists, serviceExpenseTaxRate)
+  const getFormDefaults = () => getInitialValues(documentMode, companies, preparers, products, sellerCompanies, quote, priceLists, serviceExpenseTaxRate, documentTerms)
   const form = useForm({ resolver: zodResolver(documentSchema) as any, defaultValues: getFormDefaults() })
   const preparedById = form.watch('preparedById')
   const preparedByDisplayName = getPreparerDisplayName(preparers, preparedById, quote?.preparedByName || quote?.owner)
@@ -1730,11 +1739,16 @@ function DocumentWizardTrigger({
         setPriceLists(normalizePriceLists(response.data?.price_lists))
         setPaymentOptions(normalizePaymentOptions(response.data?.payment_options))
         setServiceExpenseTaxRate(normalizeServiceExpenseTaxRate(response.data?.service_expense_tax_rate))
+        setDocumentTerms({
+          quoteTermsText: response.data?.quote_terms_text || DEFAULT_TERMS_TEXT,
+          contractTermsText: response.data?.contract_terms_text || DEFAULT_TERMS_TEXT,
+        })
       })
       .catch(() => {
         setPriceLists(normalizePriceLists())
         setPaymentOptions(normalizePaymentOptions())
         setServiceExpenseTaxRate(20)
+        setDocumentTerms({ quoteTermsText: DEFAULT_TERMS_TEXT, contractTermsText: DEFAULT_TERMS_TEXT })
       })
   }, [])
 
@@ -1744,6 +1758,16 @@ function DocumentWizardTrigger({
     form.setValue('priceListKey', selected.key, { shouldDirty: false })
     form.setValue('priceListLabel', selected.label, { shouldDirty: false })
   }, [form, priceLists, modalOpen])
+
+  useEffect(() => {
+    if (!modalOpen || isEditing || form.formState.dirtyFields?.termsText) return
+    form.setValue(
+      'termsText',
+      documentMode === 'Contract' ? documentTerms.contractTermsText : documentTerms.quoteTermsText,
+      { shouldDirty: false }
+    )
+    form.setValue('contractNotesText', '', { shouldDirty: false })
+  }, [documentMode, documentTerms, form, isEditing, modalOpen])
 
   const handleOpenChange = (nextOpen: boolean) => {
     setModalOpen(nextOpen)

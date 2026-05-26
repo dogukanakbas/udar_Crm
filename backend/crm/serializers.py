@@ -35,6 +35,21 @@ def normalize_currency_code(value, default='TRY'):
     return normalized if normalized in SUPPORTED_CURRENCIES else default
 
 
+def get_org_document_terms_text(organization, document_type):
+    settings_row = None
+    if organization is not None:
+        try:
+            settings_row = organization.settings
+        except Exception:
+            settings_row = None
+    if settings_row is not None:
+        field_name = 'contract_terms_text' if document_type == 'Contract' else 'quote_terms_text'
+        value = getattr(settings_row, field_name, '')
+        if str(value or '').strip():
+            return str(value)
+    return DEFAULT_TERMS_TEXT
+
+
 def is_turkey_country(value):
     normalized = str(value or '').strip().lower()
     return normalized in TURKEY_ALIASES
@@ -547,7 +562,8 @@ class QuoteSerializer(serializers.ModelSerializer):
         config.setdefault('signature_customer_label', snapshot.get('name') or 'CARİ ÜNVANI')
         existing_config = self._normalize_contract_config(instance.contract_config or {}) if instance else {}
         config['contract_date'] = existing_config.get('contract_date') or timezone.localdate().isoformat()
-        config.setdefault('terms_text', DEFAULT_TERMS_TEXT)
+        document_type = validated_data.get('document_type') or (instance.document_type if instance else 'Quote')
+        config.setdefault('terms_text', get_org_document_terms_text(organization, document_type))
         config.setdefault('contract_notes_text', DEFAULT_CONTRACT_NOTES_TEXT)
         config['general_terms'] = parse_terms_text(config.get('terms_text'))
         config['contract_notes'] = parse_terms_text(config.get('contract_notes_text'))

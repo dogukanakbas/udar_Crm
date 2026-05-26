@@ -47,6 +47,22 @@ DEFAULT_CONTRACT_NOTES = [
 ]
 DEFAULT_CONTRACT_NOTES_TEXT = '\n'.join(DEFAULT_CONTRACT_NOTES)
 
+
+def _default_terms_text_for_quote(quote):
+    organization = getattr(quote, 'organization', None)
+    settings_row = None
+    if organization is not None:
+        try:
+            settings_row = organization.settings
+        except Exception:
+            settings_row = None
+    if settings_row is not None:
+        field_name = 'contract_terms_text' if getattr(quote, 'document_type', '') == 'Contract' else 'quote_terms_text'
+        value = getattr(settings_row, field_name, '')
+        if str(value or '').strip():
+            return str(value)
+    return DEFAULT_TERMS_TEXT
+
 SECTION_FAMILY_MAP = {
     'steel_door': 'steel',
     'interior_door': 'interior',
@@ -1519,7 +1535,7 @@ def _build_reportlab_document_pdf_export(quote):
     ], widths=[45 * mm, 210 * mm]))
     story.append(Spacer(1, 6))
 
-    terms = parse_terms_text(config.get('termsText') or config.get('terms_text') or DEFAULT_TERMS_TEXT)
+    terms = parse_terms_text(config.get('termsText') or config.get('terms_text') or _default_terms_text_for_quote(quote))
     if quote.document_type == 'Contract':
         terms += parse_contract_notes_text(config.get('contractNotesText') or config.get('contract_notes_text') or '')
     if terms:
@@ -2376,7 +2392,7 @@ def _write_payment_delivery_tail(ws, quote, row, start_col=2, end_col=13):
 
 def _write_terms_tail(ws, quote, row):
     config = quote.contract_config or {}
-    raw_terms = _config_text(config, 'termsText', 'terms_text') or DEFAULT_TERMS_TEXT
+    raw_terms = _config_text(config, 'termsText', 'terms_text') or _default_terms_text_for_quote(quote)
     terms = parse_terms_text(raw_terms)
     if quote.document_type == 'Contract':
         notes = parse_contract_notes_text(_config_text(config, 'contractNotesText', 'contract_notes_text'))
@@ -2868,7 +2884,7 @@ def _fill_commercial_rows(ws, quote, template):
 
 
 def _fill_terms(ws, quote, template):
-    terms = parse_terms_text((quote.contract_config or {}).get('terms_text'))
+    terms = parse_terms_text((quote.contract_config or {}).get('terms_text') or _default_terms_text_for_quote(quote))
     for row in template['terms_rows']:
         _set_cell_value(ws, f'C{row}', '')
     for row, term in zip(template['terms_rows'], terms, strict=False):
@@ -3868,7 +3884,7 @@ def _fill_master_contract_terms(ws, quote, template):
     terms_rows = list(template.get('terms_rows') or [])
     if len(terms_rows) < 2:
         return
-    terms = parse_terms_text((quote.contract_config or {}).get('terms_text'))
+    terms = parse_terms_text((quote.contract_config or {}).get('terms_text') or _default_terms_text_for_quote(quote))
     body_rows = terms_rows[:-1]
     closing_row = terms_rows[-1]
     for row in body_rows:
@@ -3970,7 +3986,7 @@ def _fill_terms(ws, quote, template):
         _fill_master_contract_terms(ws, quote, template)
         return
 
-    terms = parse_terms_text((quote.contract_config or {}).get('terms_text'))
+    terms = parse_terms_text((quote.contract_config or {}).get('terms_text') or _default_terms_text_for_quote(quote))
     for row in template['terms_rows']:
         _set_cell_value(ws, f'C{row}', '')
     for row, term in zip(template['terms_rows'], terms, strict=False):

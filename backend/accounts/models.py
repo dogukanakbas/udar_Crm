@@ -3,6 +3,18 @@ from django.contrib.auth.models import AbstractUser
 from datetime import time
 from organizations.models import Organization, Branch
 
+DEFAULT_DOCUMENT_TERMS_TEXT = '\n'.join([
+    '1- Alıcı özellikleri belirtilen ürünlerin satın alma şartlarını kabul eder.',
+    '2- Satıcı onaylanan kalemlerin üretimini ve sevkini kabul eder.',
+    '3- Onay sonrası teknik ve finansal değişiklikler yeni mutabakat gerektirir.',
+    '4- Ödemesi tamamlanmayan siparişler üretime alınmayabilir.',
+    '5- Mücbir sebepler kaynaklı gecikmelerde satıcı sorumlu tutulamaz.',
+    '6- Teslimden sonra yazılı bildirim gelmezse ürünler eksiksiz kabul edilir.',
+    '7- Alıcı gerekli vergi ve yetki belgelerini eksiksiz sunar.',
+    '8- İmalat hataları garanti koşulları ve teknik şartname kapsamındadır.',
+    '9- İhtilaflarda Malatya Mahkemeleri ve İcra Daireleri yetkilidir.',
+])
+
 
 class Permission(models.Model):
     code = models.CharField(max_length=100, unique=True)
@@ -98,6 +110,8 @@ class OrganizationSettings(models.Model):
     price_lists = models.JSONField(default=list, blank=True)
     payment_options = models.JSONField(default=list, blank=True)
     service_expense_tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=20)
+    quote_terms_text = models.TextField(default=DEFAULT_DOCUMENT_TERMS_TEXT, blank=True)
+    contract_terms_text = models.TextField(default=DEFAULT_DOCUMENT_TERMS_TEXT, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
