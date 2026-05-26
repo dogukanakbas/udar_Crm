@@ -67,14 +67,6 @@ function secured(Component: ComponentType, perm?: string) {
   }
 }
 
-function adminOnly(Component: ComponentType) {
-  return function AdminOnlyRouteComponent() {
-    const role = useAppStore((state) => state.data.settings.role)
-    if (role !== 'Admin') return <AccessDeniedPage />
-    return <Component />
-  }
-}
-
 const dashboardRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/',
@@ -85,13 +77,13 @@ const dashboardRoute = new Route({
       throw redirect({ to: defaultLandingForRole(role) as any })
     }
   },
-  component: DashboardPage,
+  component: secured(DashboardPage, 'settings.view'),
 })
 
 const opportunitiesRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/crm/opportunities',
-  component: adminOnly(OpportunitiesPage),
+  component: secured(OpportunitiesPage, 'opportunities.view'),
 })
 
 const companiesRoute = new Route({
@@ -103,7 +95,7 @@ const companiesRoute = new Route({
 const contactsRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/crm/contacts',
-  component: adminOnly(ContactsPage),
+  component: secured(ContactsPage, 'contacts.view'),
 })
 
 const quotesRoute = new Route({
@@ -127,19 +119,19 @@ const quoteDetailRoute = new Route({
 const quoteTemplatesRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/crm/quote-templates',
-  component: secured(QuoteTemplatesPage, 'pricing.manage'),
+  component: secured(QuoteTemplatesPage, 'templates.view'),
 })
 
 const sellerCompaniesRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/crm/seller-companies',
-  component: secured(SellerCompaniesPage, 'pricing.manage'),
+  component: secured(SellerCompaniesPage, 'templates.seller_companies.edit'),
 })
 
 const salesOrdersRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/erp/sales-orders',
-  component: adminOnly(SalesOrdersPage),
+  component: secured(SalesOrdersPage, 'orders.view'),
 })
 
 const purchasesRoute = new Route({
@@ -181,7 +173,7 @@ const logisticsRoute = new Route({
 const tasksRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/tasks',
-  component: adminOnly(TasksPage),
+  component: secured(TasksPage, 'tasks.view'),
 })
 
 const taskDetailRoute = new Route({
@@ -193,7 +185,7 @@ const taskDetailRoute = new Route({
 const calendarRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/calendar',
-  component: adminOnly(CalendarPage),
+  component: secured(CalendarPage, 'tasks.calendar.view'),
 })
 
 const workerTrackingRoute = new Route({

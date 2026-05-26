@@ -5,6 +5,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from '@dnd-kit/utilities'
 
 import api from '@/lib/api'
+import { hasPermission } from '@/lib/permissions'
 import { RbacGuard } from '@/components/rbac'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -239,7 +240,7 @@ function SortableProductGroupCard({
             </div>
           </div>
         </div>
-        <RbacGuard perm="products.edit">
+        <RbacGuard perm="templates.products.edit">
           <Button size="sm" onClick={() => onSave(getItemWithDrafts())} disabled={saving}>
             <Save className="mr-2 h-4 w-4" />
             Kaydet
@@ -391,7 +392,7 @@ export function DocumentProductGroupManager() {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap gap-2">
-          <RbacGuard perm="products.edit">
+          <RbacGuard perm="templates.products.edit">
             <Button size="sm" variant="outline" onClick={addGroup}>
               <Plus className="mr-2 h-4 w-4" />
               Ürün grubu ekle
@@ -461,6 +462,11 @@ export function DocumentTemplateLibrary() {
   const [contractTermsText, setContractTermsText] = useState(DEFAULT_DOCUMENT_TERMS_TEXT)
   const [savingSettings, setSavingSettings] = useState(false)
   const [placeholderGroups, setPlaceholderGroups] = useState<TemplatePlaceholderGroup[]>([])
+  const canEditPricing = hasPermission(data.settings.role, data.rolePermissions || [], 'templates.pricing.edit')
+  const canEditPaymentOptions = hasPermission(data.settings.role, data.rolePermissions || [], 'templates.payment_options.edit')
+  const canEditServiceTax = hasPermission(data.settings.role, data.rolePermissions || [], 'templates.service_tax.edit')
+  const canEditDocumentTerms = hasPermission(data.settings.role, data.rolePermissions || [], 'templates.document_terms.edit')
+  const canEditDocumentConstants = canEditPricing || canEditPaymentOptions || canEditServiceTax || canEditDocumentTerms
 
   const fetchTemplates = async () => {
     setLoading(true)
@@ -629,7 +635,7 @@ export function DocumentTemplateLibrary() {
                     <Input
                       value={priceList.key}
                       onChange={(event) => updatePriceList(priceList.key, { key: event.target.value })}
-                      disabled={data.settings.role !== 'Admin' || savingSettings}
+                      disabled={!canEditPricing || savingSettings}
                     />
                   </div>
                   <div className="space-y-2">
@@ -637,13 +643,13 @@ export function DocumentTemplateLibrary() {
                     <Input
                       value={priceList.label}
                       onChange={(event) => updatePriceList(priceList.key, { label: event.target.value })}
-                      disabled={data.settings.role !== 'Admin' || savingSettings}
+                      disabled={!canEditPricing || savingSettings}
                     />
                   </div>
                   <Button
                     type="button"
                     variant={priceList.is_default ? 'default' : 'outline'}
-                    disabled={data.settings.role !== 'Admin' || savingSettings}
+                    disabled={!canEditPricing || savingSettings}
                     onClick={() => updatePriceList(priceList.key, { is_default: true })}
                   >
                     {priceList.is_default ? 'Varsayılan' : 'Varsayılan yap'}
@@ -652,7 +658,7 @@ export function DocumentTemplateLibrary() {
                     type="button"
                     size="icon"
                     variant="ghost"
-                    disabled={data.settings.role !== 'Admin' || savingSettings || priceLists.length <= 1}
+                    disabled={!canEditPricing || savingSettings || priceLists.length <= 1}
                     onClick={() => removePriceList(priceList.key)}
                     title="Fiyat listesini sil"
                   >
@@ -661,7 +667,7 @@ export function DocumentTemplateLibrary() {
                   {index === 0 ? <p className="text-xs text-muted-foreground md:col-span-4">Varsayılan liste yeni müşteri ve teklifler için otomatik seçilir.</p> : null}
                 </div>
               ))}
-              <Button type="button" variant="outline" onClick={addPriceList} disabled={data.settings.role !== 'Admin' || savingSettings}>
+              <Button type="button" variant="outline" onClick={addPriceList} disabled={!canEditPricing || savingSettings}>
                 <Plus className="mr-2 h-4 w-4" />
                 Fiyat listesi ekle
               </Button>
@@ -679,7 +685,7 @@ export function DocumentTemplateLibrary() {
                   max={100}
                   value={serviceExpenseTaxRate}
                   onChange={(event) => setServiceExpenseTaxRate(normalizeServiceExpenseTaxRate(event.target.value))}
-                  disabled={data.settings.role !== 'Admin' || savingSettings}
+                  disabled={!canEditServiceTax || savingSettings}
                 />
               </div>
             </div>
@@ -695,14 +701,14 @@ export function DocumentTemplateLibrary() {
                     <Input
                       value={option}
                       onChange={(event) => updatePaymentOption(index, event.target.value)}
-                      disabled={data.settings.role !== 'Admin' || savingSettings}
+                      disabled={!canEditPaymentOptions || savingSettings}
                     />
                   </div>
                   <Button
                     type="button"
                     size="icon"
                     variant="ghost"
-                    disabled={data.settings.role !== 'Admin' || savingSettings || paymentOptions.length <= 1}
+                    disabled={!canEditPaymentOptions || savingSettings || paymentOptions.length <= 1}
                     onClick={() => removePaymentOption(index)}
                     title="Ödeme tipini sil"
                   >
@@ -710,7 +716,7 @@ export function DocumentTemplateLibrary() {
                   </Button>
                 </div>
               ))}
-              <Button type="button" variant="outline" onClick={addPaymentOption} disabled={data.settings.role !== 'Admin' || savingSettings}>
+              <Button type="button" variant="outline" onClick={addPaymentOption} disabled={!canEditPaymentOptions || savingSettings}>
                 <Plus className="mr-2 h-4 w-4" />
                 Ödeme tipi ekle
               </Button>
@@ -727,7 +733,7 @@ export function DocumentTemplateLibrary() {
                     rows={10}
                     value={quoteTermsText}
                     onChange={(event) => setQuoteTermsText(event.target.value)}
-                    disabled={data.settings.role !== 'Admin' || savingSettings}
+                    disabled={!canEditDocumentTerms || savingSettings}
                   />
                   <p className="text-xs text-muted-foreground">Teklif PDF/Excel çıktılarında TEKLİF KOŞULLARI başlığı altında görünür.</p>
                 </div>
@@ -737,24 +743,26 @@ export function DocumentTemplateLibrary() {
                     rows={10}
                     value={contractTermsText}
                     onChange={(event) => setContractTermsText(event.target.value)}
-                    disabled={data.settings.role !== 'Admin' || savingSettings}
+                    disabled={!canEditDocumentTerms || savingSettings}
                   />
                   <p className="text-xs text-muted-foreground">Sözleşme PDF/Excel çıktılarında SÖZLEŞME KOŞULLARI başlığı altında görünür.</p>
                 </div>
               </div>
             </div>
-            <RbacGuard perm="quotes.edit">
+            <RbacGuard perm="templates.view">
               <Button
                 onClick={async () => {
                   setSavingSettings(true)
                   try {
-                    const response = await api.patch('/auth/organization-settings/', {
-                      price_lists: priceLists,
-                      payment_options: paymentOptions,
-                      service_expense_tax_rate: serviceExpenseTaxRate,
-                      quote_terms_text: quoteTermsText,
-                      contract_terms_text: contractTermsText,
-                    })
+                    const payload: Record<string, unknown> = {}
+                    if (canEditPricing) payload.price_lists = priceLists
+                    if (canEditPaymentOptions) payload.payment_options = paymentOptions
+                    if (canEditServiceTax) payload.service_expense_tax_rate = serviceExpenseTaxRate
+                    if (canEditDocumentTerms) {
+                      payload.quote_terms_text = quoteTermsText
+                      payload.contract_terms_text = contractTermsText
+                    }
+                    const response = await api.patch('/auth/organization-settings/', payload)
                     setPriceLists(normalizePriceLists(response.data?.price_lists))
                     setPaymentOptions(normalizePaymentOptions(response.data?.payment_options))
                     setServiceExpenseTaxRate(normalizeServiceExpenseTaxRate(response.data?.service_expense_tax_rate))
@@ -774,7 +782,7 @@ export function DocumentTemplateLibrary() {
                     setSavingSettings(false)
                   }
                 }}
-                disabled={data.settings.role !== 'Admin' || savingSettings}
+                disabled={!canEditDocumentConstants || savingSettings}
               >
                 {savingSettings ? 'Kaydediliyor...' : 'Belge sabitlerini kaydet'}
               </Button>
@@ -876,7 +884,7 @@ export function DocumentTemplateLibrary() {
                           <Download className="mr-2 h-4 w-4" />
                           Kullanılanı indir
                         </Button>
-                        <RbacGuard perm="quotes.edit">
+                        <RbacGuard perm="templates.excel.upload">
                           <Button
                             size="sm"
                             onClick={() => openUploadPicker(template.template_key, sellerGroup.seller_company_key)}

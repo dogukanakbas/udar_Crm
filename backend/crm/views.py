@@ -36,6 +36,7 @@ from workflow.models import ApprovalInstance, ApprovalStep
 from erp.models import Product
 from .serializers import QuoteListSerializer, QuoteSerializer, PricingRuleSerializer, BusinessPartnerSerializer, ProductSerializer, LeadSerializer, OpportunitySerializer, ContactSerializer
 from permissions import IsOrgMember, IsOwnerOrManager, HasAPIPermission
+from accounts.utils import user_has_perm
 from audit.utils import log_entity_action
 
 EXCEL_TEMPLATE_CONTENT_TYPES = {
@@ -192,18 +193,20 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, IsOwnerOrManager, HasAPIPermission]
     required_perm = 'quotes.view'
     permission_map = {
-        'create': 'quotes.edit',
-        'update': 'quotes.edit',
-        'partial_update': 'quotes.edit',
-        'destroy': 'quotes.edit',
-        'send': 'quotes.edit',
-        'convert': 'quotes.edit',
-        'request_approval': 'quotes.edit',
-        'resubmit': 'quotes.edit',
+        'list': 'quotes.view.own',
+        'retrieve': 'quotes.view.own',
+        'create': 'quotes.create',
+        'update': 'quotes.edit.own',
+        'partial_update': 'quotes.edit.own',
+        'destroy': 'quotes.delete',
+        'send': 'quotes.status.change',
+        'convert': 'quotes.convert',
+        'request_approval': 'quotes.status.change',
+        'resubmit': 'quotes.status.change',
         'approve': 'quotes.approve',
         'reject': 'quotes.approve',
-        'apply_preview': 'quotes.edit',
-        'template_library_upload': 'pricing.manage',
+        'apply_preview': 'quotes.edit.own',
+        'template_library_upload': 'templates.excel.upload',
     }
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['number', 'customer__name', 'status', 'document_type']
@@ -228,12 +231,12 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         if document_type:
             qs = qs.filter(document_type=document_type)
         prepared_by = self.request.query_params.get('prepared_by')
-        if prepared_by and getattr(user, 'role', '') in ['Admin', 'Manager', 'Finance']:
+        if prepared_by and user_has_perm(user, 'quotes.view.all'):
             if prepared_by == '__empty__':
                 qs = qs.filter(prepared_by__isnull=True)
             else:
                 qs = qs.filter(prepared_by_id=prepared_by)
-        if getattr(user, 'role', '') not in ['Admin', 'Manager', 'Finance']:
+        if not user_has_perm(user, 'quotes.view.all'):
             qs = qs.filter(owner=user)
         return qs.order_by('-created_at', '-id')
 
@@ -579,18 +582,18 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 class PricingRuleViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = PricingRuleSerializer
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
-    required_perm = 'pricing.manage'
+    required_perm = 'templates.pricing.edit'
     queryset = PricingRule.objects.all()
 
 
 class SellerCompanyViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
-    required_perm = 'quotes.view'
+    required_perm = 'templates.view'
     permission_map = {
-        'create': 'pricing.manage',
-        'partial_update': 'pricing.manage',
-        'destroy': 'pricing.manage',
-        'upload_logo': 'pricing.manage',
+        'create': 'templates.seller_companies.edit',
+        'partial_update': 'templates.seller_companies.edit',
+        'destroy': 'templates.seller_companies.edit',
+        'upload_logo': 'templates.seller_companies.edit',
     }
 
     def _organization(self, request):
@@ -736,16 +739,14 @@ class BusinessPartnerViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
     required_perm = 'partners.view'
     permission_map = {
-        'create': 'partners.edit',
+        'create': 'partners.create',
         'update': 'partners.edit',
         'partial_update': 'partners.edit',
-        'destroy': 'partners.edit',
+        'destroy': 'partners.delete',
     }
     queryset = BusinessPartner.objects.all()
 
     def destroy(self, request, *args, **kwargs):
-        if getattr(request.user, 'role', '') != 'Admin':
-            raise PermissionDenied('Cari silme işlemini yalnızca Admin kullanıcı yapabilir.')
         try:
             return super().destroy(request, *args, **kwargs)
         except ProtectedError:
@@ -777,12 +778,12 @@ class LeadViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 class OpportunityViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = OpportunitySerializer
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
-    required_perm = 'opportunities.admin'
+    required_perm = 'opportunities.view'
     permission_map = {
-        'create': 'opportunities.admin',
-        'update': 'opportunities.admin',
-        'partial_update': 'opportunities.admin',
-        'destroy': 'opportunities.admin',
+        'create': 'opportunities.edit',
+        'update': 'opportunities.edit',
+        'partial_update': 'opportunities.edit',
+        'destroy': 'opportunities.edit',
     }
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name', 'stage']

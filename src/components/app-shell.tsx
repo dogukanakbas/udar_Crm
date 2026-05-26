@@ -65,37 +65,36 @@ const nav: Array<{
   label: string
   to?: string
   icon: React.ComponentType<any>
-  roles: string[]
+  roles?: string[]
   perm?: string
   children?: Array<{ label: string; to: string; perm?: string; roles?: string[] }>
 }> = [
-  { label: 'Kontrol Paneli', to: '/', icon: Home, roles: ['Admin'] },
+  { label: 'Kontrol Paneli', to: '/', icon: Home, perm: 'settings.view' },
   { label: 'Görevlerim', to: '/', icon: Home, roles: ['Worker'] },
-  { label: 'Geçmiş görevler', to: '/task-history', icon: CalendarClock, roles: ['Worker'], perm: 'tasks.view' },
-  { label: 'Şifre değiştir', to: '/change-password', icon: KeyRound, roles: ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse', 'Worker'] },
+  { label: 'Geçmiş görevler', to: '/task-history', icon: CalendarClock, perm: 'tasks.view.own' },
+  { label: 'Şifre değiştir', to: '/change-password', icon: KeyRound },
   {
     label: 'CRM',
     icon: Gauge,
-    roles: ['Admin', 'Manager', 'Sales', 'Finance'],
     children: [
-      { label: 'Fırsatlar', to: '/crm/opportunities', perm: 'opportunities.view', roles: ['Admin'] },
+      { label: 'Fırsatlar', to: '/crm/opportunities', perm: 'opportunities.view' },
       { label: 'Cari Kartı', to: '/crm/companies', perm: 'partners.view' },
-      { label: 'Kişiler', to: '/crm/contacts', perm: 'contacts.view', roles: ['Admin'] },
-      { label: 'Teklif & Sözleşmeler', to: '/crm/quotes', perm: 'quotes.view' },
-      { label: 'Satıcı Firmalar', to: '/crm/seller-companies', perm: 'pricing.manage', roles: ['Admin', 'Manager'] },
-      { label: 'Şablon Yönetimi', to: '/crm/quote-templates', perm: 'pricing.manage', roles: ['Admin', 'Manager'] },
+      { label: 'Kişiler', to: '/crm/contacts', perm: 'contacts.view' },
+      { label: 'Teklif & Sözleşmeler', to: '/crm/quotes', perm: 'quotes.view.own' },
+      { label: 'Satıcı Firmalar', to: '/crm/seller-companies', perm: 'templates.seller_companies.edit' },
+      { label: 'Şablon Yönetimi', to: '/crm/quote-templates', perm: 'templates.view' },
     ],
   },
   {
     label: 'ERP',
     icon: Package,
-    roles: ['Admin', 'Manager', 'Finance', 'Warehouse'],
+    perm: 'erp.view',
     children: [
-      { label: 'Satış Siparişleri', to: '/erp/sales-orders', perm: 'orders.view', roles: ['Admin'] },
-      { label: 'Satınalma', to: '/erp/purchases', perm: 'orders.view', roles: ['Admin', 'Manager', 'Finance', 'Warehouse'] },
+      { label: 'Satış Siparişleri', to: '/erp/sales-orders', perm: 'orders.view' },
+      { label: 'Satınalma', to: '/erp/purchases', perm: 'orders.view' },
       { label: 'Stok', to: '/erp/inventory', perm: 'inventory.view' },
       { label: 'Faturalama', to: '/erp/invoicing', perm: 'invoices.view' },
-      { label: 'Muhasebe', to: '/erp/accounting', perm: 'invoices.view' },
+      { label: 'Muhasebe', to: '/erp/accounting', perm: 'accounting.view' },
       { label: 'Lojistik Takip', to: '/logistics/tracking', perm: 'logistics.view' },
       { label: 'MDF Yönetimi', to: '/mdf', perm: 'inventory.view' },
       { label: 'MDF Giriş / Çıkış', to: '/mdf/history', perm: 'inventory.view' },
@@ -104,18 +103,17 @@ const nav: Array<{
   {
     label: 'Destek',
     icon: HeadsetIcon,
-    roles: ['Admin', 'Support', 'Manager'],
     children: [{ label: 'Destek talepleri', to: '/support/tickets', perm: 'tickets.view' }],
   },
-  { label: 'Görevler', to: '/tasks', icon: ClipboardCheckIcon, roles: ['Admin'], perm: 'tasks.view' },
-  { label: 'Çalışan Takibi', to: '/worker-tracking', icon: Activity, roles: ['Admin', 'Manager'], perm: 'teams.view' },
-  { label: 'Takvim', to: '/calendar', icon: CalendarIconMini, roles: ['Admin'], perm: 'tasks.view' },
-  { label: 'Raporlar', to: '/reports', icon: BarChart3, roles: ['Admin', 'Manager', 'Finance'], perm: 'audit.view' },
-  { label: 'Ayarlar', to: '/settings', icon: Settings, roles: ['Admin', 'Manager'], perm: 'teams.edit' },
+  { label: 'Görevler', to: '/tasks', icon: ClipboardCheckIcon, perm: 'tasks.view' },
+  { label: 'Çalışan Takibi', to: '/worker-tracking', icon: Activity, perm: 'worker_tracking.view' },
+  { label: 'Takvim', to: '/calendar', icon: CalendarIconMini, perm: 'tasks.calendar.view' },
+  { label: 'Raporlar', to: '/reports', icon: BarChart3, perm: 'reports.view' },
+  { label: 'Ayarlar', to: '/settings', icon: Settings, perm: 'settings.view' },
 ]
 
 const isNavItemVisible = (item: (typeof nav)[number], role: string, permissions: string[]) => {
-  if (!item.roles.includes(role)) return false
+  if (item.roles && !item.roles.includes(role)) return false
   if (item.children) {
     return item.children.some((child) => isNavChildVisible(child, role, permissions))
   }

@@ -323,27 +323,26 @@ export const useAppStore = create<AppState>()(
 
       // Rolün görmeyeceği endpointlere gitme; arka plan tazeleme yetki toast'ı üretmemeli.
       const effectiveRole = userRole ?? get().data.settings.role
+      const effectivePermissions = Array.isArray(meRes.data?.permissions) ? meRes.data.permissions : []
       const emptyList = Promise.resolve({ data: [] })
       const quiet = { suppressAuthToast: true } as any
-      const canRead = (perm: string) => hasPermission(effectiveRole, [], perm)
+      const canRead = (perm: string) => hasPermission(effectiveRole, effectivePermissions, perm)
       const fetchIf = (perm: string, url: string, config: Record<string, any> = {}) =>
         canRead(perm) ? api.get(url, { ...config, ...quiet }) : emptyList
-      const fetchIfAdmin = (url: string, config: Record<string, any> = {}) =>
-        effectiveRole === 'Admin' ? api.get(url, { ...config, ...quiet }) : emptyList
       const settled = await Promise.allSettled([
         fetchIf('products.view', '/products/'),
         fetchIf('products.view', '/categories/'),
-        fetchIf('quotes.view', '/quotes/', { params: { summary: 1 } }),
-        fetchIf('quotes.view', '/seller-companies/'),
+        fetchIf('quotes.view.own', '/quotes/', { params: { summary: 1 } }),
+        fetchIf('templates.view', '/seller-companies/'),
         fetchIf('partners.view', '/partners/'),
-        fetchIfAdmin('/contacts/'),
-        fetchIfAdmin('/opportunities/'),
+        fetchIf('contacts.view', '/contacts/'),
+        fetchIf('opportunities.view', '/opportunities/'),
         fetchIf('tickets.view', '/tickets/'),
         fetchIf('logistics.view', '/vehicles/'),
-        fetchIfAdmin('/sales-orders/'),
+        fetchIf('orders.view', '/sales-orders/'),
         fetchIf('teams.view', '/teams/'),
-        api.get('/auth/users/', quiet),
-        fetchIf('tasks.view', '/tasks/'),
+        fetchIf('users.view', '/auth/users/', quiet),
+        fetchIf('tasks.view.own', '/tasks/'),
       ])
       const [
         productsRes,
@@ -510,7 +509,7 @@ export const useAppStore = create<AppState>()(
         } as any)
       }
       const currentUserPermissions =
-        users.find((user) => String(user.id) === String(meRes.data?.id))?.permissions || []
+        users.find((user) => String(user.id) === String(meRes.data?.id))?.permissions || effectivePermissions
       const tasks: Task[] = (tasksRes.data || []).map((t: any, idx: number) => ({
         id: String(t.id ?? idx),
         title: t.title,

@@ -15,12 +15,14 @@ import { useTheme } from '@/components/theme-provider'
 import { useEffect, useState } from 'react'
 import type { AutomationRule } from '@/types'
 import api from '@/lib/api'
+import { hasPermission } from '@/lib/permissions'
 import { ROLE_LABEL_TR } from '@/lib/role-labels'
 import { DataTable } from '@/components/data-table'
 import { type ColumnDef } from '@tanstack/react-table'
 import type { UserLite } from '@/types'
 import { AlertCircle, ShieldCheck, Plus, Trash2, ImageIcon, Pencil } from 'lucide-react'
 import { RbacGuard } from '@/components/rbac'
+import { RolesPermissionPanel } from '@/pages/roles'
 
 function formatApiError(err: unknown): string {
   const e = err as { response?: { data?: Record<string, unknown> | string } }
@@ -108,6 +110,8 @@ export function SettingsPage() {
   const [assocPhone, setAssocPhone] = useState('')
   const [assocNotes, setAssocNotes] = useState('')
   const [assocTeamIds, setAssocTeamIds] = useState<number[]>([])
+  const canEditUsers = hasPermission(data.settings.role, data.rolePermissions || [], 'users.edit')
+  const canDeleteUsers = hasPermission(data.settings.role, data.rolePermissions || [], 'users.delete')
   const [editingUser, setEditingUser] = useState<UserLite | null>(null)
   const [editUserOpen, setEditUserOpen] = useState(false)
   const [editUserUsername, setEditUserUsername] = useState('')
@@ -182,22 +186,25 @@ export function SettingsPage() {
       header: 'Rol',
       cell: ({ row }) => ROLE_LABEL_TR[row.original.role] ?? row.original.role,
     },
-    ...(data.settings.role === 'Admin'
+    ...(canEditUsers || canDeleteUsers
       ? ([
           {
             id: 'user-actions',
             header: '',
             cell: ({ row }: { row: { original: UserLite } }) => (
               <div className="flex items-center justify-end gap-1">
-                <Button variant="ghost" size="sm" className="h-8" onClick={() => openUserEditor(row.original)}>
-                  <Pencil className="mr-1 h-3.5 w-3.5" />
-                  Düzenle
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 text-destructive hover:text-destructive"
-                  onClick={async () => {
+                {canEditUsers ? (
+                  <Button variant="ghost" size="sm" className="h-8" onClick={() => openUserEditor(row.original)}>
+                    <Pencil className="mr-1 h-3.5 w-3.5" />
+                    Düzenle
+                  </Button>
+                ) : null}
+                {canDeleteUsers ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 text-destructive hover:text-destructive"
+                    onClick={async () => {
                     if (
                       !confirm(
                         `${row.original.username} kullanıcısını kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz.`
@@ -217,10 +224,11 @@ export function SettingsPage() {
                         'Silinemedi'
                       toast({ title: 'Hata', description: String(msg), variant: 'destructive' })
                     }
-                  }}
-                >
-                  Sil
-                </Button>
+                    }}
+                  >
+                    Sil
+                  </Button>
+                ) : null}
               </div>
             ),
           },
@@ -315,6 +323,9 @@ export function SettingsPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="Ayarlar" description="Çalışma alanı tercihleri, kullanıcılar, tema" />
+      <RbacGuard perm="roles.view">
+        <RolesPermissionPanel embedded />
+      </RbacGuard>
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader>
@@ -369,7 +380,7 @@ export function SettingsPage() {
             </Button>
           </CardContent>
         </Card>
-        <RbacGuard perm="teams.edit">
+        <RbacGuard perm="settings.organization.edit">
           <Card>
             <CardHeader>
               <CardTitle>Mesai saatleri</CardTitle>
@@ -441,7 +452,8 @@ export function SettingsPage() {
             </CardContent>
           </Card>
         </RbacGuard>
-        <Card>
+        <RbacGuard perm="users.create">
+          <Card>
           <CardHeader>
             <CardTitle>Kullanıcılar & roller</CardTitle>
             <CardDescription>
@@ -612,7 +624,8 @@ export function SettingsPage() {
               </div>
             </div>
           </CardContent>
-        </Card>
+          </Card>
+        </RbacGuard>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
@@ -1566,4 +1579,3 @@ export function SettingsPage() {
     </div>
   )
 }
-

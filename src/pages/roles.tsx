@@ -9,10 +9,17 @@ import api from '@/lib/api'
 import { useToast } from '@/components/ui/use-toast'
 
 type RolePerms = Record<string, string[]>
+type PermissionCatalogModule = {
+  key: string
+  label: string
+  description?: string
+  permissions: [string, string][]
+}
 
-export function RolesPage() {
+export function RolesPermissionPanel({ embedded = false }: { embedded?: boolean }) {
   const { toast } = useToast()
   const [permCatalog, setPermCatalog] = useState<string[]>([])
+  const [catalogModules, setCatalogModules] = useState<PermissionCatalogModule[]>([])
   const [rolePerms, setRolePerms] = useState<RolePerms>({})
   const [selectedRole, setSelectedRole] = useState<string>('Admin')
   const [filter, setFilter] = useState('')
@@ -21,6 +28,7 @@ export function RolesPage() {
     try {
       const [p, r] = await Promise.all([api.get('/auth/permissions/'), api.get('/auth/role-perms/')])
       setPermCatalog(p.data?.permissions || [])
+      setCatalogModules(p.data?.catalog || [])
       setRolePerms(r.data || {})
     } catch {
       toast({ title: 'Rol/izinler yüklenemedi', variant: 'destructive' })
@@ -52,15 +60,28 @@ export function RolesPage() {
   }
 
   const roles = ['Admin', 'Manager', 'Sales', 'Finance', 'Support', 'Warehouse', 'Worker']
-  const filtered = permCatalog.filter((c) => !filter || c.toLowerCase().includes(filter.toLowerCase()))
+  const normalizedFilter = filter.trim().toLowerCase()
+  const catalog =
+    catalogModules.length > 0
+      ? catalogModules
+      : [{ key: 'all', label: 'Tüm izinler', permissions: permCatalog.map((code) => [code, code] as [string, string]) }]
+  const filteredCatalog = catalog
+    .map((module) => ({
+      ...module,
+      permissions: module.permissions.filter(([code, label]) => {
+        if (!normalizedFilter) return true
+        return code.toLowerCase().includes(normalizedFilter) || label.toLowerCase().includes(normalizedFilter) || module.label.toLowerCase().includes(normalizedFilter)
+      }),
+    }))
+    .filter((module) => module.permissions.length > 0)
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Rol / İzin Yönetimi" description="Alan bazlı izinleri düzenle" />
+      {!embedded ? <PageHeader title="Rol / İzin Yönetimi" description="XenForo mantığında grup bazlı modüler izinleri düzenle" /> : null}
       <Card>
         <CardHeader>
-          <CardTitle>Roller</CardTitle>
-          <CardDescription>Bir rol seç ve izinleri düzenle</CardDescription>
+          <CardTitle>Yetki grupları</CardTitle>
+          <CardDescription>Bir kullanıcı grubu seçin; modüllere göre görüntüleme, oluşturma, düzenleme ve silme izinlerini belirleyin.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
@@ -76,19 +97,35 @@ export function RolesPage() {
             ))}
           </div>
           <div className="flex items-center gap-2">
-            <Input placeholder="İzin filtrele" value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-xs" />
+            <Input placeholder="İzin veya modül ara" value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-xs" />
             <Button onClick={save} size="sm">Kaydet</Button>
           </div>
-          <div className="grid md:grid-cols-2 gap-2 max-h-[400px] overflow-y-auto border rounded p-2">
-            {filtered.map((code) => {
-              const checked = (rolePerms[selectedRole] || []).includes(code)
-              return (
-                <label key={code} className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={checked} onCheckedChange={() => togglePerm(code)} />
-                  <span className="font-mono text-xs">{code}</span>
-                </label>
-              )
-            })}
+          <div className="grid gap-3 xl:grid-cols-2">
+            {filteredCatalog.map((module) => (
+              <div key={module.key} className="rounded-lg border border-border/70 bg-background/60 p-3">
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">{module.label}</p>
+                    {module.description ? <p className="text-xs text-muted-foreground">{module.description}</p> : null}
+                  </div>
+                  <Badge variant="secondary">{module.permissions.filter(([code]) => (rolePerms[selectedRole] || []).includes(code)).length}/{module.permissions.length}</Badge>
+                </div>
+                <div className="space-y-2">
+                  {module.permissions.map(([code, label]) => {
+                    const checked = (rolePerms[selectedRole] || []).includes(code)
+                    return (
+                      <label key={code} className="flex items-start gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60">
+                        <Checkbox checked={checked} onCheckedChange={() => togglePerm(code)} />
+                        <span>
+                          <span className="block font-medium leading-none">{label}</span>
+                          <span className="font-mono text-[11px] text-muted-foreground">{code}</span>
+                        </span>
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -96,3 +133,6 @@ export function RolesPage() {
   )
 }
 
+export function RolesPage() {
+  return <RolesPermissionPanel />
+}

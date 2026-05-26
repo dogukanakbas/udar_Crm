@@ -15,6 +15,7 @@ import pyotp
 import secrets
 from .serializers import TwoFATokenObtainPairSerializer
 from .models import Permission, RolePermission
+from .permissions_map import PERMISSION_CATALOG
 from rest_framework import status
 from django.contrib.auth.hashers import check_password
 from audit.utils import log_entity_action
@@ -30,7 +31,7 @@ from .models import DEFAULT_DOCUMENT_TERMS_TEXT, Team, TeamAssociate, Organizati
 from .payment_options import normalize_payment_options
 from .price_lists import DEFAULT_PRICE_LIST_LABEL, get_default_price_list, normalize_price_lists
 from .serializers import TeamSerializer, TeamAssociateSerializer
-from .utils import ensure_permissions_seeded, get_effective_permissions, user_has_perm
+from .utils import ensure_permissions_seeded, get_effective_permissions, user_has_any_perm, user_has_perm
 
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,7 @@ class MeView(APIView):
         "first_name": user.first_name or "",
         "last_name": user.last_name or "",
         "role": getattr(user, "role", None),
+        "permissions": get_effective_permissions(user),
         "organization": {
           "id": user.organization.id,
           "name": user.organization.name,
@@ -92,6 +94,8 @@ class UsersListView(APIView):
 
   def get(self, request):
     ensure_permissions_seeded()
+    if not user_has_perm(request.user, "users.view"):
+      return Response({"detail": "Kullanıcıları görüntüleme yetkiniz yok"}, status=status.HTTP_403_FORBIDDEN)
     User = get_user_model()
     qs = User.objects.all()
     org = getattr(request.user, "organization", None)
@@ -120,8 +124,8 @@ class DeleteUserView(APIView):
   permission_classes = [IsAuthenticated]
 
   def patch(self, request, pk):
-    if getattr(request.user, "role", "") != "Admin":
-      return Response({"detail": "Yalnızca Admin kullanıcı güncelleyebilir"}, status=status.HTTP_403_FORBIDDEN)
+    if not user_has_perm(request.user, "users.edit"):
+      return Response({"detail": "Kullanıcı düzenleme yetkiniz yok"}, status=status.HTTP_403_FORBIDDEN)
 
     User = get_user_model()
     org = getattr(request.user, "organization", None)
@@ -186,8 +190,8 @@ class DeleteUserView(APIView):
     )
 
   def delete(self, request, pk):
-    if getattr(request.user, "role", "") != "Admin":
-      return Response({"detail": "Yalnızca Admin kullanıcı silebilir"}, status=status.HTTP_403_FORBIDDEN)
+    if not user_has_perm(request.user, "users.delete"):
+      return Response({"detail": "Kullanıcı silme yetkiniz yok"}, status=status.HTTP_403_FORBIDDEN)
     if str(request.user.pk) == str(pk):
       return Response({"detail": "Kendi hesabınızı silemezsiniz"}, status=status.HTTP_400_BAD_REQUEST)
     User = get_user_model()
@@ -253,8 +257,8 @@ class CreateUserView(APIView):
 
   def post(self, request):
     requester = request.user
-    if getattr(requester, "role", "") != "Admin":
-      return Response({"detail": "Yalnızca Admin kullanıcı oluşturabilir"}, status=403)
+    if not user_has_perm(requester, "users.create"):
+      return Response({"detail": "Kullanıcı oluşturma yetkiniz yok"}, status=403)
     org = getattr(requester, "organization", None)
     if not org:
       return Response({"detail": "Organizasyon bulunamadı"}, status=400)
@@ -330,8 +334,8 @@ class BulkCreateUsersView(APIView):
 
   def post(self, request):
     requester = request.user
-    if getattr(requester, "role", "") != "Admin":
-      return Response({"detail": "Yalnızca Admin kullanıcı oluşturabilir"}, status=403)
+    if not user_has_perm(requester, "users.create"):
+      return Response({"detail": "Kullanıcı oluşturma yetkiniz yok"}, status=403)
     org = getattr(requester, "organization", None)
     if not org:
       return Response({"detail": "Organizasyon bulunamadı"}, status=400)
@@ -467,8 +471,8 @@ class InviteUserView(APIView):
   permission_classes = [IsAuthenticated]
 
   def post(self, request):
-    if getattr(request.user, "role", "") != "Admin":
-      return Response({"detail": "Only Admin"}, status=status.HTTP_403_FORBIDDEN)
+    if not user_has_perm(request.user, "users.create"):
+      return Response({"detail": "Kullanıcı davet etme yetkiniz yok"}, status=status.HTTP_403_FORBIDDEN)
     email = (request.data.get("email") or "").strip().lower()
     role = request.data.get("role") or "Worker"
     if not email:
@@ -596,8 +600,10 @@ class PermissionListView(APIView):
 
   def get(self, request):
     ensure_permissions_seeded()
-    perms = list(Permission.objects.all().values_list("code", flat=True))
-    return Response({"permissions": perms})
+    if not user_has_perm(request.user, "roles.view"):
+      return Response({"detail": "Yetki kataloğunu görüntüleme yetkiniz yok"}, status=status.HTTP_403_FORBIDDEN)
+    perms = list(Permission.objects.all().order_by("code").values("code", "description"))
+    return Response({"permissions": [item["code"] for item in perms], "catalog": PERMISSION_CATALOG})
 
 
 class RolePermissionView(APIView):
@@ -605,9 +611,8 @@ class RolePermissionView(APIView):
 
   def get(self, request):
     ensure_permissions_seeded()
-    # Only Admin users can view/edit role permissions
-    if getattr(request.user, "role", "") != "Admin":
-      return Response({"detail": "Only Admin"}, status=status.HTTP_403_FORBIDDEN)
+    if not user_has_perm(request.user, "roles.view"):
+      return Response({"detail": "Rol yetkilerini görüntüleme yetkiniz yok"}, status=status.HTTP_403_FORBIDDEN)
     data = {}
     for rp in RolePermission.objects.select_related("permission"):
       data.setdefault(rp.role, []).append(rp.permission.code)
@@ -615,8 +620,8 @@ class RolePermissionView(APIView):
 
   def post(self, request):
     ensure_permissions_seeded()
-    if getattr(request.user, "role", "") != "Admin":
-      return Response({"detail": "Only Admin"}, status=status.HTTP_403_FORBIDDEN)
+    if not user_has_perm(request.user, "roles.edit"):
+      return Response({"detail": "Rol yetkilerini düzenleme yetkiniz yok"}, status=status.HTTP_403_FORBIDDEN)
     role = request.data.get("role")
     codes = request.data.get("permissions") or []
     if not role or not isinstance(codes, list):
@@ -752,8 +757,19 @@ class OrganizationSettingsView(APIView):
       })
 
   def patch(self, request):
-    if getattr(request.user, "role", "") != "Admin":
-      return Response({"detail": "Sadece Admin güncelleyebilir"}, status=status.HTTP_403_FORBIDDEN)
+    required_perms = set()
+    if any(key in request.data for key in ["organization_name", "brand_name", "logo_url", "working_hours_start", "working_hours_end", "working_days"]):
+      required_perms.add("settings.organization.edit")
+    if any(key in request.data for key in ["price_list_label", "price_lists"]):
+      required_perms.add("templates.pricing.edit")
+    if "payment_options" in request.data:
+      required_perms.add("templates.payment_options.edit")
+    if "service_expense_tax_rate" in request.data:
+      required_perms.add("templates.service_tax.edit")
+    if any(key in request.data for key in ["quote_terms_text", "contract_terms_text"]):
+      required_perms.add("templates.document_terms.edit")
+    if required_perms and not all(user_has_perm(request.user, perm) for perm in required_perms):
+      return Response({"detail": "Bu ayarları güncelleme yetkiniz yok"}, status=status.HTTP_403_FORBIDDEN)
     org = request.user.organization
     if not org:
       return Response({"detail": "Organizasyon bulunamadı"}, status=status.HTTP_400_BAD_REQUEST)

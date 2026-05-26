@@ -1147,8 +1147,8 @@ export function QuotesPage() {
   const quotes = data.quotes ?? []
   const companies = data.companies
   const users = data.users ?? []
-  const canFilterByPreparer = canSeeAllQuotes(data.settings.role)
-  const canManageQuoteStatus = canSeeAllQuotes(data.settings.role)
+  const canFilterByPreparer = canSeeAllQuotes(data.settings.role, data.rolePermissions || [])
+  const canManageQuoteStatus = canSeeAllQuotes(data.settings.role, data.rolePermissions || [])
   const companyNameById = useMemo(
     () => new Map(companies.map((company) => [company.id, company.name])),
     [companies]

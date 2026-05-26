@@ -10,7 +10,11 @@ class IsOrgMember(permissions.BasePermission):
 class IsOwnerOrManager(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         user = request.user
-        if getattr(user, 'role', '') in ['Admin', 'Manager', 'Sales']:
+        if getattr(user, 'is_superadmin', False) or getattr(user, 'is_superuser', False):
+            return True
+        if request.method in permissions.SAFE_METHODS and user_has_perm(user, 'quotes.view.all'):
+            return True
+        if request.method not in permissions.SAFE_METHODS and user_has_perm(user, 'quotes.edit.all'):
             return True
         owner = getattr(obj, 'owner', None)
         return owner == user
@@ -32,9 +36,6 @@ class HasAPIPermission(permissions.BasePermission):
         user = request.user
         if not user or not user.is_authenticated:
             return False
-        if getattr(user, 'role', None) == 'Admin':
-            return True
-
         action = getattr(view, 'action', None)
         perm_map = getattr(view, 'permission_map', {}) or self.permission_map
         perm = None

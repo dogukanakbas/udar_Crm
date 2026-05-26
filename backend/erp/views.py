@@ -96,13 +96,13 @@ class ProductViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
     required_perm = 'products.view'
     permission_map = {
-        'create': 'products.edit',
+        'create': 'products.create',
         'update': 'products.edit',
         'partial_update': 'products.edit',
-        'destroy': 'products.edit',
-        'import_template_catalog': 'products.edit',
-        'bulk_delete': 'products.edit',
-        'bulk_upsert': 'products.edit',
+        'destroy': 'products.delete',
+        'import_template_catalog': 'products.import',
+        'bulk_delete': 'products.bulk.delete',
+        'bulk_upsert': 'products.import',
         'reorder': 'products.edit',
     }
     filter_backends = [filters.OrderingFilter]
@@ -200,10 +200,10 @@ class CategoryViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
     required_perm = 'products.view'
     permission_map = {
-        'create': 'products.edit',
+        'create': 'products.create',
         'update': 'products.edit',
         'partial_update': 'products.edit',
-        'destroy': 'products.edit',
+        'destroy': 'products.delete',
         'reorder': 'products.edit',
     }
     filter_backends = [filters.OrderingFilter]
@@ -235,12 +235,12 @@ class CategoryViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 class SalesOrderViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = SalesOrderSerializer
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
-    required_perm = 'sales_orders.admin'
+    required_perm = 'orders.view'
     permission_map = {
-        'create': 'sales_orders.admin',
-        'update': 'sales_orders.admin',
-        'partial_update': 'sales_orders.admin',
-        'destroy': 'sales_orders.admin',
+        'create': 'orders.create',
+        'update': 'orders.edit',
+        'partial_update': 'orders.edit',
+        'destroy': 'orders.delete',
     }
     queryset = SalesOrder.objects.all()
 
@@ -263,10 +263,10 @@ class PurchaseOrderViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
     required_perm = 'orders.view'
     permission_map = {
-        'create': 'orders.edit',
+        'create': 'orders.create',
         'update': 'orders.edit',
         'partial_update': 'orders.edit',
-        'destroy': 'orders.edit',
+        'destroy': 'orders.delete',
     }
     queryset = PurchaseOrder.objects.all()
 

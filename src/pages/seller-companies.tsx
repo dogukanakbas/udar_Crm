@@ -286,7 +286,7 @@ export function SellerCompaniesPage() {
         title="Satıcı Firma Yönetimi"
         description="AYKA, ORTKA ve diğer satıcı firmaların şablonlarda kullanılan unvan, vergi, iletişim, imza, logo ve banka bilgilerini buradan yönetin."
         actions={
-          <RbacGuard perm="quotes.edit">
+          <RbacGuard perm="templates.seller_companies.edit">
             <Button onClick={openCreateDialog}>
               <Plus className="mr-2 h-4 w-4" />
               Yeni satıcı firma
@@ -341,7 +341,7 @@ export function SellerCompaniesPage() {
                         <p>Banka hesabı: {company.bankAccounts?.length || 0} ({bankAccountCurrencySummary(company.bankAccounts)})</p>
                       </div>
                     </div>
-                    <RbacGuard perm="quotes.edit">
+                    <RbacGuard perm="templates.seller_companies.edit">
                       <div className="flex gap-2">
                         <Button variant="outline" size="sm" onClick={() => openEditDialog(company)}>
                           <Pencil className="mr-2 h-4 w-4" />

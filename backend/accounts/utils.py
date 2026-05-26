@@ -1,5 +1,5 @@
 from accounts.models import Permission, RolePermission
-from accounts.permissions_map import DEFAULT_ROLE_PERMS
+from accounts.permissions_map import DEFAULT_ROLE_PERMS, LEGACY_PERMISSION_ALIASES, PERMISSION_LABELS
 
 DEPRECATED_PERMISSIONS = {"leads.view", "leads.edit"}
 ROLE_PERMISSION_REVOKES = {
@@ -26,10 +26,13 @@ def ensure_permissions_seeded():
     for role, codes in ROLE_PERMISSION_REVOKES.items():
         RolePermission.objects.filter(role__iexact=role, permission__code__in=codes).delete()
 
-    for perms in DEFAULT_ROLE_PERMS.values():
-        for code in perms:
-            Permission.objects.get_or_create(code=code, defaults={'description': code})
+    for code, label in PERMISSION_LABELS.items():
+        Permission.objects.get_or_create(code=code, defaults={'description': label})
     for role, perms in DEFAULT_ROLE_PERMS.items():
+        # Rol/grup yetkileri panelden özelleştirilebilir. Bu nedenle varsayılanlar
+        # sadece rolün hiç yetkisi yoksa basılır; her çağrıda silinen yetki geri eklenmez.
+        if RolePermission.objects.filter(role__iexact=role).exists():
+            continue
         for code in perms:
             perm = Permission.objects.get(code=code)
             RolePermission.objects.get_or_create(role=role, permission=perm)
@@ -37,19 +40,24 @@ def ensure_permissions_seeded():
 
 def user_has_perm(user, perm_code: str) -> bool:
     role = (getattr(user, 'role', None) or '').strip()
-    if role == 'Admin':
+    if getattr(user, 'is_superadmin', False) or getattr(user, 'is_superuser', False):
         return True
+    acceptable_codes = [perm_code, *LEGACY_PERMISSION_ALIASES.get(perm_code, [])]
     # Primary: DB role-permission table (case-insensitive)
-    if RolePermission.objects.filter(role__iexact=role, permission__code=perm_code).exists():
+    if RolePermission.objects.filter(role__iexact=role, permission__code__in=acceptable_codes).exists():
         return True
     # Fallback: in case seed_permissions not run, use DEFAULT_ROLE_PERMS map
     perms = DEFAULT_ROLE_PERMS.get(role, []) or DEFAULT_ROLE_PERMS.get(role.capitalize(), [])
-    return perm_code in perms
+    return any(code in perms for code in acceptable_codes)
+
+
+def user_has_any_perm(user, perm_codes: list[str] | tuple[str, ...] | set[str]) -> bool:
+    return any(user_has_perm(user, code) for code in perm_codes)
 
 
 def get_effective_permissions(user) -> list[str]:
     role = (getattr(user, 'role', None) or '').strip()
-    if role == 'Admin':
+    if getattr(user, 'is_superadmin', False) or getattr(user, 'is_superuser', False):
         return ['*']
 
     db_perms = list(

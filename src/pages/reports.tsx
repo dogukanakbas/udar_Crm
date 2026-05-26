@@ -14,6 +14,7 @@ import { useAppStore } from '@/state/use-app-store'
 import { Badge } from '@/components/ui/badge'
 import { formatDate } from '@/lib/utils'
 import api from '@/lib/api'
+import { hasPermission } from '@/lib/permissions'
 import { taskPriorityLabelTR, taskStatusLabelTR } from '@/lib/task-labels'
 import { DataTable } from '@/components/data-table'
 
@@ -61,8 +62,7 @@ type TaskReportSummary = {
 export function ReportsPage() {
   const { data } = useAppStore()
   const { toast } = useToast()
-  const role = data.settings.role
-  const canReports = role === 'Admin' || role === 'Manager' || role === 'Finance'
+  const canReports = hasPermission(data.settings.role, data.rolePermissions || [], 'reports.view')
 
   const [groupBy, setGroupBy] = useState('status')
   const [filter, setFilter] = useState('all')

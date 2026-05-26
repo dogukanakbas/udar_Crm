@@ -19,6 +19,7 @@ import { useToast } from '@/components/ui/use-toast'
 import { normalizeCompanySize, normalizeCountryLabel } from '@/lib/location-data'
 import { downloadCompaniesAsXlsx } from '@/lib/company-export-xlsx'
 import { useAppStore } from '@/state/use-app-store'
+import { hasPermission } from '@/lib/permissions'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import type { Opportunity, Contact as ContactType, Company as CompanyType } from '@/types'
 import { BadgeCheck, Download, HandCoins, Plus, Timer, Trash2 } from 'lucide-react'
@@ -326,7 +327,7 @@ export function CompaniesPage() {
   const [regionFilter, setRegionFilter] = useState('all')
   const [sizeFilter, setSizeFilter] = useState('all')
   const [editingCompany, setEditingCompany] = useState<CompanyType | null>(null)
-  const isAdmin = data.settings.role === 'Admin'
+  const canDeletePartners = hasPermission(data.settings.role, data.rolePermissions || [], 'partners.delete')
   const normalizeFilterValue = (value?: string) => value?.trim() ?? ''
 
   const normalizedCompanies = useMemo(
@@ -406,7 +407,7 @@ export function CompaniesPage() {
   }
 
   const handleDeleteCompany = async (company: CompanyType) => {
-    if (!isAdmin) return
+    if (!canDeletePartners) return
     if (!confirm(`${company.name} cari kartı kalıcı olarak silinsin mi? Bu işlem geri alınamaz.`)) return
     try {
       await deleteCompany(company.id)
@@ -421,7 +422,7 @@ export function CompaniesPage() {
   }
 
   const handleBulkDeleteCompanies = async (companies: CompanyType[], clearSelection: () => void) => {
-    if (!isAdmin || companies.length === 0) return
+    if (!canDeletePartners || companies.length === 0) return
     if (!confirm(`${companies.length} cari kartı kalıcı olarak silinsin mi? Bu işlem geri alınamaz.`)) return
     try {
       for (const company of companies) {
@@ -476,7 +477,7 @@ export function CompaniesPage() {
             <Button variant="ghost" size="sm" onClick={() => setEditingCompany(row.original)}>
               Düzenle
             </Button>
-            {isAdmin ? (
+            {canDeletePartners ? (
               <Button
                 variant="ghost"
                 size="sm"
@@ -491,7 +492,7 @@ export function CompaniesPage() {
         ),
       },
     ],
-    [isAdmin]
+    [canDeletePartners]
   )
   return (
     <div className="space-y-4">
@@ -637,7 +638,7 @@ export function CompaniesPage() {
         data={filteredCompanies}
         searchKey="name"
         renderSelectionActions={
-          isAdmin
+          canDeletePartners
             ? ({ selectedRows, clearSelection }) => (
                 <Button
                   type="button"
