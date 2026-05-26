@@ -88,6 +88,18 @@ const normalizeDocumentGroup = (category: any, index: number) => {
   }
 }
 
+const parseDocumentColumnsText = (value: string) =>
+  value
+    .split(',')
+    .map((column) => column.trim())
+    .filter(Boolean)
+
+const parseTechnicalItemsText = (value: string) =>
+  value
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+
 function SortableProductGroupCard({
   item,
   onPatch,
@@ -105,9 +117,39 @@ function SortableProductGroupCard({
     transition,
   }
   const defaults = item.templateDefaults || {}
+  const documentColumnsText = useMemo(
+    () => (defaults.document_columns || DEFAULT_DOCUMENT_COLUMNS).join(', '),
+    [defaults.document_columns]
+  )
+  const technicalItemsText = useMemo(
+    () => (defaults.technical_items || []).join('\n'),
+    [defaults.technical_items]
+  )
+  const [columnsDraft, setColumnsDraft] = useState(documentColumnsText)
+  const [technicalItemsDraft, setTechnicalItemsDraft] = useState(technicalItemsText)
 
   const setTemplate = (key: string, value: any) =>
     onPatch(item.id, { templateDefaults: { ...defaults, [key]: value } })
+
+  useEffect(() => {
+    setColumnsDraft(documentColumnsText)
+  }, [documentColumnsText])
+
+  useEffect(() => {
+    setTechnicalItemsDraft(technicalItemsText)
+  }, [technicalItemsText])
+
+  const getItemWithDrafts = () => ({
+    ...item,
+    templateDefaults: {
+      ...defaults,
+      document_columns: parseDocumentColumnsText(columnsDraft),
+      technical_items: parseTechnicalItemsText(technicalItemsDraft),
+    },
+  })
+
+  const commitColumnsDraft = () => setTemplate('document_columns', parseDocumentColumnsText(columnsDraft))
+  const commitTechnicalItemsDraft = () => setTemplate('technical_items', parseTechnicalItemsText(technicalItemsDraft))
 
   return (
     <div ref={setNodeRef} style={style} className="rounded-xl border border-border/70 bg-background/60 p-4">
@@ -150,7 +192,7 @@ function SortableProductGroupCard({
           </div>
         </div>
         <RbacGuard perm="products.edit">
-          <Button size="sm" onClick={() => onSave(item)} disabled={saving}>
+          <Button size="sm" onClick={() => onSave(getItemWithDrafts())} disabled={saving}>
             <Save className="mr-2 h-4 w-4" />
             Kaydet
           </Button>
@@ -159,29 +201,27 @@ function SortableProductGroupCard({
 
       <details className="mt-4 rounded-lg border border-dashed border-border/70 p-3">
         <summary className="cursor-pointer text-sm font-medium">Tablo kolonları ve teknik alt maddeler</summary>
-        <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <div className="mt-3 grid gap-3 xl:grid-cols-2">
           <div className="space-y-1">
             <Label>Tablo kolonları</Label>
             <Textarea
               rows={5}
-              value={(defaults.document_columns || DEFAULT_DOCUMENT_COLUMNS).join(', ')}
-              onChange={(event) =>
-                setTemplate(
-                  'document_columns',
-                  event.target.value.split(',').map((value) => value.trim()).filter(Boolean)
-                )
-              }
+              value={columnsDraft}
+              onChange={(event) => setColumnsDraft(event.target.value)}
+              onBlur={commitColumnsDraft}
             />
             <p className="text-xs text-muted-foreground">Excel tablo başlıkları soldan sağa bu sırayla yorumlanır.</p>
           </div>
           <div className="space-y-1">
-            <Label>Varsayılan teknik madde</Label>
-            <Input
-              value={(defaults.technical_items || [])[0] || ''}
-              onChange={(event) => setTemplate('technical_items', event.target.value.trim() ? [event.target.value] : [])}
-              placeholder="Bu ürün grubu için tek satırlık varsayılan madde"
+            <Label>Teknik alt maddeler</Label>
+            <Textarea
+              rows={5}
+              value={technicalItemsDraft}
+              onChange={(event) => setTechnicalItemsDraft(event.target.value)}
+              onBlur={commitTechnicalItemsDraft}
+              placeholder="Her satıra ayrı teknik alt madde yazın"
             />
-            <p className="text-xs text-muted-foreground">Ürüne özel teknik maddeler ürün kartından yönetilir; burada yalnızca tek satırlık grup varsayılanı tutulur.</p>
+            <p className="text-xs text-muted-foreground">Her satır ayrı teknik alt madde olarak kaydedilir; yazarken boşluklar korunur.</p>
           </div>
         </div>
       </details>
