@@ -1451,7 +1451,7 @@ def _build_reportlab_document_pdf_export(quote):
 
     service_items = _service_expense_rows(quote, groups)
     if service_items:
-        service_rows = [[p('Ürün Adı', heading), p('Miktar', heading), p('Birim Fiyat', heading), p('Ara Toplam', heading), p('K.D.V. %', heading), p('K.D.V.', heading), p('Yekün', heading)]]
+        service_rows = [[p('Ürün Adı', heading), p('Miktar', heading), p('Birim Fiyat', heading), p('Ara Toplam', heading), p('K.D.V.', heading), p('Yekün', heading)]]
         subtotal_total = Decimal('0')
         tax_total = Decimal('0')
         grand_total = Decimal('0')
@@ -1466,10 +1466,11 @@ def _build_reportlab_document_pdf_export(quote):
             tax_total += tax
             grand_total += subtotal + tax
             qty_total += qty
-            service_rows.append([p(item['label'], small), p(f'{qty:,.2f}', small), p(money(unit_amount), small), p(money(subtotal), small), p(f'%{tax_rate:,.2f}', small), p(money(tax), small), p(money(subtotal + tax), small)])
-        service_rows.append([p('TOPLAM', small), p(f'{qty_total:,.2f}', small), '', p(money(subtotal_total), small), '', p(money(tax_total), small), p(money(grand_total), small)])
+            service_rows.append([p(item['label'], small), p(f'{qty:,.2f}', small), p(money(unit_amount), small), p(money(subtotal), small), p(f'%{tax_rate:,.2f}\n{money(tax)}', small), p(money(subtotal + tax), small)])
+        total_tax_rate = Decimal(service_items[0].get('tax_rate') or 0) if service_items else Decimal('0')
+        service_rows.append([p('TOPLAM', small), p(f'{qty_total:,.2f}', small), '', p(money(subtotal_total), small), p(f'%{total_tax_rate:,.2f}\n{money(tax_total)}', small), p(money(grand_total), small)])
         story.append(p('HİZMETLER', heading))
-        story.append(basic_table(service_rows, widths=[74 * mm, 22 * mm, 34 * mm, 34 * mm, 22 * mm, 30 * mm, 34 * mm], header_rows=1))
+        story.append(basic_table(service_rows, widths=[82 * mm, 22 * mm, 34 * mm, 38 * mm, 38 * mm, 38 * mm], header_rows=1))
         story.append(Spacer(1, 8))
 
     config = quote.contract_config or {}
@@ -2056,7 +2057,7 @@ def _write_service_summary_group(ws, quote, groups, row, column, physical_width,
     header_fill = PatternFill('solid', fgColor='EAF2F8')
     thin = Side(style='thin', color='9FB2C8')
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    headers = ['Ürün Adı', 'Miktar', 'Birim Fiyat', 'Ara Toplam', 'K.D.V. %', 'K.D.V.', 'Yekün']
+    headers = ['Ürün Adı', 'Miktar', 'Birim Fiyat', 'Ara Toplam', 'K.D.V.', 'Yekün']
     spans = _dynamic_column_spans(headers, column_count)
 
     _unmerge_overlapping_range(ws, row, row, column, last_column)
@@ -2093,6 +2094,7 @@ def _write_service_summary_group(ws, quote, groups, row, column, physical_width,
     tax_total = Decimal('0')
     grand_total = Decimal('0')
     quantity_total = Decimal('0')
+    last_tax_rate = Decimal('0')
     for item in (service_rows if service_rows is not None else _service_expense_rows(quote, groups)):
         subtotal = item['amount']
         tax = item['tax']
@@ -2103,14 +2105,14 @@ def _write_service_summary_group(ws, quote, groups, row, column, physical_width,
         quantity = Decimal(item.get('quantity') or 0)
         unit_amount = Decimal(item.get('unit_amount') or 0)
         tax_rate = Decimal(item.get('tax_rate') or 0)
+        last_tax_rate = tax_rate
         quantity_total += quantity
         row = _write_service_summary_row(ws, row, column, spans, [
             item['label'],
             quantity,
             unit_amount,
             subtotal,
-            tax_rate,
-            tax,
+            _service_tax_cell_value(tax_rate, tax, currency_code),
             grand,
         ], currency_code, border)
 
@@ -2119,11 +2121,14 @@ def _write_service_summary_group(ws, quote, groups, row, column, physical_width,
         quantity_total,
         '',
         subtotal_total,
-        '',
-        tax_total,
+        _service_tax_cell_value(last_tax_rate, tax_total, currency_code),
         grand_total,
     ], currency_code, border, bold=True)
     return row
+
+
+def _service_tax_cell_value(tax_rate, tax_amount, currency_code):
+    return f'%{Decimal(tax_rate or 0):,.2f}\n{_currency_symbol(currency_code)} {Decimal(tax_amount or 0):,.2f}'
 
 
 def _write_service_summary_row(ws, row, column, spans, values, currency_code, border, bold=False):
@@ -2140,13 +2145,12 @@ def _write_service_summary_row(ws, row, column, spans, values, currency_code, bo
             cell.number_format = _currency_number_format(currency_code)
             if index == 1:
                 cell.number_format = '#,##0.##'
-            elif index == 4:
-                cell.number_format = '0.##"%"'
         cell.font = _seller_master_font(color='203864' if bold else '000000', bold=bold, size=SELLER_MASTER_TABLE_FONT_SIZE)
-        is_amount_column = index in {2, 3, 5, 6}
+        is_amount_column = index in {2, 3, 5}
         is_quantity_column = index == 1
+        is_tax_column = index == 4
         cell.alignment = Alignment(
-            horizontal='center' if is_quantity_column else ('right' if is_amount_column or index == 4 else 'left'),
+            horizontal='center' if is_quantity_column else ('right' if is_amount_column or is_tax_column else 'left'),
             vertical='center',
             wrap_text=True,
             shrink_to_fit=is_amount_column,
