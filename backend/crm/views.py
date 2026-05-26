@@ -12,6 +12,7 @@ from rest_framework.response import Response
 import mimetypes
 
 from django.conf import settings
+from django.db.models.deletion import ProtectedError
 from django.utils import timezone
 from django.http import FileResponse
 from PIL import Image, UnidentifiedImageError
@@ -741,6 +742,17 @@ class BusinessPartnerViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         'destroy': 'partners.edit',
     }
     queryset = BusinessPartner.objects.all()
+
+    def destroy(self, request, *args, **kwargs):
+        if getattr(request.user, 'role', '') != 'Admin':
+            raise PermissionDenied('Cari silme işlemini yalnızca Admin kullanıcı yapabilir.')
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response(
+                {'detail': 'Bu cariye bağlı teklif veya sözleşme olduğu için silinemez.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
 
 class LeadViewSet(OrgScopedMixin, viewsets.ModelViewSet):

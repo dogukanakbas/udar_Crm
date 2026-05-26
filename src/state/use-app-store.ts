@@ -40,6 +40,7 @@ type AppState = {
   setLocale: (locale: MockDbSnapshot['settings']['locale']) => void
   createCompany: (payload: Omit<Company, 'id'>) => Promise<Company | undefined>
   updateCompany: (id: string, patch: Partial<Company>) => void
+  deleteCompany: (id: string) => Promise<void>
   createContact: (payload: Omit<Contact, 'id'>) => void
   createLead: (payload: Omit<Lead, 'id' | 'createdAt' | 'timeline'>) => void
   updateLead: (id: string, patch: Partial<Lead>) => void
@@ -723,6 +724,15 @@ export const useAppStore = create<AppState>()(
       await get().hydrateFromApi()
     } catch (err) {
       console.error('API updateCompany failed', err)
+      throw err
+    }
+  },
+  deleteCompany: async (id) => {
+    try {
+      await api.delete(`/partners/${id}/`)
+      await get().hydrateFromApi()
+    } catch (err) {
+      console.error('API deleteCompany failed', err)
       throw err
     }
   },

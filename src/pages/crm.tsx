@@ -21,7 +21,7 @@ import { downloadCompaniesAsXlsx } from '@/lib/company-export-xlsx'
 import { useAppStore } from '@/state/use-app-store'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import type { Opportunity, Contact as ContactType, Company as CompanyType } from '@/types'
-import { BadgeCheck, Download, HandCoins, Plus, Timer } from 'lucide-react'
+import { BadgeCheck, Download, HandCoins, Plus, Timer, Trash2 } from 'lucide-react'
 
 const contactSchema = z.object({
   companyId: z.string(),
@@ -319,13 +319,14 @@ export function OpportunitiesPage() {
 }
 
 export function CompaniesPage() {
-  const { data, createCompany, updateCompany } = useAppStore()
+  const { data, createCompany, updateCompany, deleteCompany } = useAppStore()
   const { toast } = useToast()
   const [industryFilter, setIndustryFilter] = useState('all')
   const [countryFilter, setCountryFilter] = useState('all')
   const [regionFilter, setRegionFilter] = useState('all')
   const [sizeFilter, setSizeFilter] = useState('all')
   const [editingCompany, setEditingCompany] = useState<CompanyType | null>(null)
+  const isAdmin = data.settings.role === 'Admin'
   const normalizeFilterValue = (value?: string) => value?.trim() ?? ''
 
   const normalizedCompanies = useMemo(
@@ -404,6 +405,39 @@ export function CompaniesPage() {
     setSizeFilter('all')
   }
 
+  const handleDeleteCompany = async (company: CompanyType) => {
+    if (!isAdmin) return
+    if (!confirm(`${company.name} cari kartı kalıcı olarak silinsin mi? Bu işlem geri alınamaz.`)) return
+    try {
+      await deleteCompany(company.id)
+      toast({ title: 'Cari silindi' })
+    } catch (error: any) {
+      toast({
+        title: 'Cari silinemedi',
+        description: error?.response?.data?.detail || 'Bu cari ilişkili kayıtlar nedeniyle silinemiyor olabilir.',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const handleBulkDeleteCompanies = async (companies: CompanyType[], clearSelection: () => void) => {
+    if (!isAdmin || companies.length === 0) return
+    if (!confirm(`${companies.length} cari kartı kalıcı olarak silinsin mi? Bu işlem geri alınamaz.`)) return
+    try {
+      for (const company of companies) {
+        await deleteCompany(company.id)
+      }
+      clearSelection()
+      toast({ title: 'Cariler silindi', description: `${companies.length} cari silindi.` })
+    } catch (error: any) {
+      toast({
+        title: 'Bazı cariler silinemedi',
+        description: error?.response?.data?.detail || 'İlişkili teklif veya sözleşmesi olan cariler silinemez.',
+        variant: 'destructive',
+      })
+    }
+  }
+
   const columns: ColumnDef<(typeof data.companies)[number]>[] = useMemo(
     () => [
       { accessorKey: 'name', header: 'Cari' },
@@ -438,13 +472,26 @@ export function CompaniesPage() {
         id: 'actions',
         header: '',
         cell: ({ row }) => (
-          <Button variant="ghost" size="sm" onClick={() => setEditingCompany(row.original)}>
-            Düzenle
-          </Button>
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setEditingCompany(row.original)}>
+              Düzenle
+            </Button>
+            {isAdmin ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-destructive hover:text-destructive"
+                onClick={() => handleDeleteCompany(row.original)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Sil
+              </Button>
+            ) : null}
+          </div>
         ),
       },
     ],
-    []
+    [isAdmin]
   )
   return (
     <div className="space-y-4">
@@ -585,7 +632,26 @@ export function CompaniesPage() {
           </Select>
         </div>
       </div>
-      <DataTable columns={columns} data={filteredCompanies} searchKey="name" />
+      <DataTable
+        columns={columns}
+        data={filteredCompanies}
+        searchKey="name"
+        renderSelectionActions={
+          isAdmin
+            ? ({ selectedRows, clearSelection }) => (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => handleBulkDeleteCompanies(selectedRows as CompanyType[], clearSelection)}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Seçilileri sil
+                </Button>
+              )
+            : undefined
+        }
+      />
     </div>
   )
 }
