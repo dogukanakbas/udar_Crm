@@ -69,10 +69,11 @@ const getDefaultValues = (company?: Company): CompanyFormValues => ({
 })
 
 const API_FIELD_LABELS: Record<string, string> = {
-  name: 'Ad',
+  name: 'Cari Unvanı',
   group: 'Sektör / grup',
   email: 'E-posta',
   phone: 'Telefon',
+  owner: 'Yetkili-2',
   currency: 'Para birimi',
   price_list_key: 'Fiyat listesi',
   country: 'Ülke',
@@ -229,7 +230,7 @@ export function CompanyModal({ children, company, onSubmit, open, onOpenChange }
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-2">
-              <Label>Ad</Label>
+              <Label>Cari Unvanı</Label>
               <Input {...form.register('name')} />
             </div>
             <div className="flex flex-col gap-2">
@@ -352,7 +353,7 @@ export function CompanyModal({ children, company, onSubmit, open, onOpenChange }
               <Input {...form.register('taxNumber')} />
             </div>
             <div className="flex flex-col gap-2">
-              <Label>Sahip</Label>
+              <Label>Yetkili-2</Label>
               <Input {...form.register('owner')} />
             </div>
           </div>
