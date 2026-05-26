@@ -175,7 +175,7 @@ YEKUN_SUMMARY_GROUPS = [
 SELLER_MASTER_BODY_FONT_SIZE = 12
 SELLER_MASTER_TABLE_FONT_SIZE = 11
 SELLER_MASTER_HEADER_FONT_SIZE = 14
-DEFAULT_DYNAMIC_DOCUMENT_COLUMNS = ['Kod', 'Satış Birimi', 'Ölçü / Gövde', 'Renk / Kapak', 'Miktar', 'Liste Fiyatı', '1-İskonto %', '2-İskonto %', 'Birim', 'Birim Net Fiyatı', 'Tutar']
+DEFAULT_DYNAMIC_DOCUMENT_COLUMNS = ['Kod', 'Satış Birimi', 'Ölçü / Gövde', 'Renk / Kapak', 'Miktar', 'Liste Fiyatı', 'İskonto 1', 'İskonto 2', 'Birim', 'Birim Net Fiyatı', 'Tutar']
 SPECIAL_PRODUCT_DOCUMENT_GROUPS = [
     {
         'terms': ['saft kapagi', 'saft kapak', 'rogar kapagi', 'rogar kapak', 'menhol', 'menhole'],
@@ -214,6 +214,39 @@ def _document_order_value(value, fallback=999):
         return fallback
 
 
+def _is_discount_one_column(column):
+    key = _normalize_column_key(column)
+    return bool(key and ('iskonto1' in key or '1iskonto' in key or key == 'iskonto'))
+
+
+def _is_discount_two_column(column):
+    key = _normalize_column_key(column)
+    return bool(key and ('iskonto2' in key or '2iskonto' in key))
+
+
+def _normalize_document_columns(columns):
+    parsed = [str(column or '').strip() for column in (columns or []) if str(column or '').strip()]
+    if not parsed:
+        parsed = list(DEFAULT_DYNAMIC_DOCUMENT_COLUMNS)
+
+    normalized = [
+        column
+        for column in parsed
+        if not _is_discount_one_column(column) and not _is_discount_two_column(column)
+    ]
+    keys = [_normalize_column_key(column) for column in normalized]
+    try:
+        insert_at = max(index for index, key in enumerate(keys) if 'liste' in key or ('fiyat' in key and 'net' not in key)) + 1
+    except ValueError:
+        try:
+            insert_at = next(index for index, key in enumerate(keys) if key == 'birim' or key.endswith('birim'))
+        except StopIteration:
+            insert_at = len(normalized)
+
+    # Bu kolonlar ürün tablolarında her zaman Liste Fiyatı ile Birim arasında görünmeli.
+    return normalized[:insert_at] + ['İskonto 1', 'İskonto 2'] + normalized[insert_at:]
+
+
 def _document_group_catalog(organization):
     if not organization:
         return {}
@@ -235,11 +268,12 @@ def _document_group_catalog(organization):
         columns = defaults.get('document_columns')
         if not isinstance(columns, list) or not columns:
             columns = DEFAULT_DYNAMIC_DOCUMENT_COLUMNS
+        columns = _normalize_document_columns(columns)
         entry = {
             'section_key': str(section_key or '').strip() or 'service',
             'label': label or _section_label(section_key),
             'order': order,
-            'columns': [str(column or '').strip() for column in columns if str(column or '').strip()] or DEFAULT_DYNAMIC_DOCUMENT_COLUMNS,
+            'columns': columns,
             'template_family': defaults.get('template_family') or '',
         }
         keys = {
@@ -566,6 +600,7 @@ def resolve_product_document_defaults(product=None, fallback_section_key='', lin
     columns = group_defaults.get('document_columns') or category_defaults.get('document_columns') or product_defaults.get('document_columns')
     if not isinstance(columns, list) or not columns:
         columns = DEFAULT_DYNAMIC_DOCUMENT_COLUMNS
+    columns = _normalize_document_columns(columns)
     technical_items = detail_defaults.get('technical_items') or product_defaults.get('technical_items') or category_defaults.get('technical_items')
     if not isinstance(technical_items, list):
         technical_items = []
@@ -573,7 +608,7 @@ def resolve_product_document_defaults(product=None, fallback_section_key='', lin
         'section_key': str(section_key or '').strip() or 'service',
         'label': str(label or '').strip() or _section_label(section_key),
         'order': order,
-        'columns': [str(column or '').strip() for column in columns if str(column or '').strip()] or DEFAULT_DYNAMIC_DOCUMENT_COLUMNS,
+        'columns': columns,
         'technical_items': [str(item or '').strip() for item in technical_items if str(item or '').strip()],
         'template_family': group_defaults.get('template_family') or category_defaults.get('template_family') or product_defaults.get('template_family') or '',
     }
@@ -1428,7 +1463,7 @@ def _build_reportlab_document_pdf_export(quote):
 
     groups = _build_dynamic_line_groups(quote)
     for group in groups:
-        rows = [[p('Kod', heading), p('Ürün', heading), p('Miktar', heading), p('Birim', heading), p('Liste Fiyatı', heading), p('Birim Net', heading), p('Tutar', heading)]]
+        rows = [[p('Kod', heading), p('Ürün', heading), p('Miktar', heading), p('Liste Fiyatı', heading), p('İskonto 1', heading), p('İskonto 2', heading), p('Birim', heading), p('Birim Net', heading), p('Tutar', heading)]]
         quantity_total = Decimal('0')
         for line in group['lines']:
             details = dict(line.details or {})
@@ -1439,14 +1474,16 @@ def _build_reportlab_document_pdf_export(quote):
                 p(details.get('code') or getattr(product, 'sku', '') or '', small),
                 p(line.name or '', small),
                 p(f'{qty:,.2f}', small),
-                p(line.unit or 'Adet', small),
                 p(money(line.unit_price), small),
+                p(f'%{Decimal(line.discount or 0):,.2f}', small),
+                p(f'%{Decimal(getattr(line, "discount_secondary", 0) or 0):,.2f}', small),
+                p(line.unit or 'Adet', small),
                 p(money(_net_unit_price(line)), small),
                 p(money(_line_subtotal(line)), small),
             ])
-        rows.append(['', '', p(f'{quantity_total:,.2f}', small), '', '', p('Yekün', small), p(money(sum((_line_subtotal(line) + _line_tax(line) for line in group['lines']), Decimal('0'))), small)])
+        rows.append(['', '', p(f'{quantity_total:,.2f}', small), '', '', '', '', p('Yekün', small), p(money(sum((_line_subtotal(line) + _line_tax(line) for line in group['lines']), Decimal('0'))), small)])
         story.append(p(_turkish_upper(group['label']), heading))
-        story.append(basic_table(rows, widths=[28 * mm, 78 * mm, 22 * mm, 20 * mm, 33 * mm, 33 * mm, 33 * mm], header_rows=1))
+        story.append(basic_table(rows, widths=[24 * mm, 62 * mm, 18 * mm, 28 * mm, 20 * mm, 20 * mm, 18 * mm, 28 * mm, 28 * mm], header_rows=1))
         story.append(Spacer(1, 6))
 
     service_items = _service_expense_rows(quote, groups)

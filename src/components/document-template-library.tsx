@@ -46,7 +46,7 @@ type TemplatePlaceholderGroup = {
   }>
 }
 
-const DEFAULT_DOCUMENT_COLUMNS = ['Kod', 'Satış Birimi', 'Ölçü / Gövde', 'Renk / Kapak', 'Miktar', 'Liste Fiyatı', 'Birim', 'Birim Net Fiyatı', 'Tutar']
+const DEFAULT_DOCUMENT_COLUMNS = ['Kod', 'Satış Birimi', 'Ölçü / Gövde', 'Renk / Kapak', 'Miktar', 'Liste Fiyatı', 'İskonto 1', 'İskonto 2', 'Birim', 'Birim Net Fiyatı', 'Tutar']
 const SELLER_MASTER_TEMPLATE_KEY = 'seller_master'
 const DEFAULT_MASTER_TEMPLATE_ITEM: DocumentTemplateLibraryItem = {
   template_key: SELLER_MASTER_TEMPLATE_KEY,
@@ -64,10 +64,45 @@ const normalizeServiceExpenseTaxRate = (value: unknown) => {
   return Math.min(100, Math.max(0, parsed))
 }
 
+const normalizeColumnKey = (value: string) =>
+  value
+    .toLocaleLowerCase('tr-TR')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ı/g, 'i')
+    .replace(/[^a-z0-9]+/g, '')
+
+const isDiscountOneColumn = (value: string) => {
+  const key = normalizeColumnKey(value)
+  return key === 'iskonto' || key.includes('iskonto1') || key.includes('1iskonto')
+}
+
+const isDiscountTwoColumn = (value: string) => {
+  const key = normalizeColumnKey(value)
+  return key.includes('iskonto2') || key.includes('2iskonto')
+}
+
+const normalizeDocumentColumns = (columns: string[]) => {
+  const parsed = columns.map((column) => String(column || '').trim()).filter(Boolean)
+  const base = (parsed.length ? parsed : DEFAULT_DOCUMENT_COLUMNS).filter(
+    (column) => !isDiscountOneColumn(column) && !isDiscountTwoColumn(column)
+  )
+  const keys = base.map(normalizeColumnKey)
+  let listPriceIndex = -1
+  keys.forEach((key, index) => {
+    if (key.includes('liste') || (key.includes('fiyat') && !key.includes('net'))) {
+      listPriceIndex = index
+    }
+  })
+  const unitIndex = keys.findIndex((key) => key === 'birim' || key.endsWith('birim'))
+  const insertAt = listPriceIndex >= 0 ? listPriceIndex + 1 : unitIndex >= 0 ? unitIndex : base.length
+  return [...base.slice(0, insertAt), 'İskonto 1', 'İskonto 2', ...base.slice(insertAt)]
+}
+
 const normalizeDocumentGroup = (category: any, index: number) => {
   const defaults = category.templateDefaults || {}
   const columns = Array.isArray(defaults.document_columns) && defaults.document_columns.length
-    ? defaults.document_columns
+    ? normalizeDocumentColumns(defaults.document_columns)
     : DEFAULT_DOCUMENT_COLUMNS
   const technicalItems = Array.isArray(defaults.technical_items) ? defaults.technical_items : []
   return {
@@ -89,10 +124,12 @@ const normalizeDocumentGroup = (category: any, index: number) => {
 }
 
 const parseDocumentColumnsText = (value: string) =>
-  value
-    .split(',')
-    .map((column) => column.trim())
-    .filter(Boolean)
+  normalizeDocumentColumns(
+    value
+      .split(',')
+      .map((column) => column.trim())
+      .filter(Boolean)
+  )
 
 const parseTechnicalItemsText = (value: string) =>
   value

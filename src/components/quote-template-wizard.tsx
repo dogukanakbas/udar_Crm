@@ -594,7 +594,7 @@ export function TemplateQuoteWizardTrigger({
               <p>
                 Kod seçince: <strong>liste fiyatı</strong> ve tutarlar otomatik hesaplanır; <strong>birim</strong> şablona göre (mobilyada alt listeye
                 göre) ve <strong>miktar</strong> boşsa 1 yapılır. Ölçü/kapak için listede ayrı kolon yok; ürün adından (m², kasa ölçüsü, Membran/Lake
-                vb.) çıkarılabilenler doldurulur. <strong>İskonto</strong> yüzdeleri listede yok, satırdan elle girilir.
+                vb.) çıkarılabilenler doldurulur. <strong>İskonto</strong> yüzdeleri ürün satırından alınır ve çıktı tablosuna yazılır.
               </p>
             </div>
             <ScrollArea className="h-[min(480px,55vh)] rounded-md border">
