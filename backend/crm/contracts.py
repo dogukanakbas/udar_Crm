@@ -175,7 +175,7 @@ YEKUN_SUMMARY_GROUPS = [
 SELLER_MASTER_BODY_FONT_SIZE = 12
 SELLER_MASTER_TABLE_FONT_SIZE = 11
 SELLER_MASTER_HEADER_FONT_SIZE = 14
-DEFAULT_DYNAMIC_DOCUMENT_COLUMNS = ['Kod', 'Satış Birimi', 'Ölçü / Gövde', 'Renk / Kapak', 'Miktar', 'Liste Fiyatı', 'İskonto 1', 'İskonto 2', 'Birim', 'Birim Net Fiyatı', 'Tutar']
+DEFAULT_DYNAMIC_DOCUMENT_COLUMNS = ['Kod', 'Satış Birimi', 'Ölçü / Gövde', 'Renk / Kapak', 'Miktar', 'Liste Fiyatı', 'İSK1%', 'İSK2%', 'Birim', 'Birim Net Fiyatı', 'Tutar']
 SPECIAL_PRODUCT_DOCUMENT_GROUPS = [
     {
         'terms': ['saft kapagi', 'saft kapak', 'rogar kapagi', 'rogar kapak', 'menhol', 'menhole'],
@@ -216,12 +216,12 @@ def _document_order_value(value, fallback=999):
 
 def _is_discount_one_column(column):
     key = _normalize_column_key(column)
-    return bool(key and ('iskonto1' in key or '1iskonto' in key or key == 'iskonto'))
+    return bool(key and ('iskonto1' in key or '1iskonto' in key or 'isk1' in key or '1isk' in key or key == 'iskonto' or key == 'isk'))
 
 
 def _is_discount_two_column(column):
     key = _normalize_column_key(column)
-    return bool(key and ('iskonto2' in key or '2iskonto' in key))
+    return bool(key and ('iskonto2' in key or '2iskonto' in key or 'isk2' in key or '2isk' in key))
 
 
 def _normalize_document_columns(columns):
@@ -244,7 +244,7 @@ def _normalize_document_columns(columns):
             insert_at = len(normalized)
 
     # Bu kolonlar ürün tablolarında her zaman Liste Fiyatı ile Birim arasında görünmeli.
-    return normalized[:insert_at] + ['İskonto 1', 'İskonto 2'] + normalized[insert_at:]
+    return normalized[:insert_at] + ['İSK1%', 'İSK2%'] + normalized[insert_at:]
 
 
 def _document_group_catalog(organization):
@@ -1463,7 +1463,7 @@ def _build_reportlab_document_pdf_export(quote):
 
     groups = _build_dynamic_line_groups(quote)
     for group in groups:
-        rows = [[p('Kod', heading), p('Ürün', heading), p('Miktar', heading), p('Liste Fiyatı', heading), p('İskonto 1', heading), p('İskonto 2', heading), p('Birim', heading), p('Birim Net', heading), p('Tutar', heading)]]
+        rows = [[p('Kod', heading), p('Ürün', heading), p('Miktar', heading), p('Liste Fiyatı', heading), p('İSK1%', heading), p('İSK2%', heading), p('Birim', heading), p('Birim Net', heading), p('Tutar', heading)]]
         quantity_total = Decimal('0')
         for line in group['lines']:
             details = dict(line.details or {})
@@ -2542,15 +2542,15 @@ def _dynamic_column_value(line, header):
         return total, 'currency'
     if 'liste' in key or ('fiyat' in key and 'net' not in key):
         return Decimal(line.unit_price or 0), 'currency'
-    if 'iskonto2' in key or '2iskonto' in key:
+    if 'iskonto2' in key or '2iskonto' in key or 'isk2' in key or '2isk' in key:
         return Decimal(getattr(line, 'discount_secondary', 0) or 0), 'number'
-    if 'iskonto1' in key or '1iskonto' in key or key == 'iskonto':
+    if 'iskonto1' in key or '1iskonto' in key or 'isk1' in key or '1isk' in key or key == 'iskonto' or key == 'isk':
         return Decimal(line.discount or 0), 'number'
     if 'kdv' in key:
         return Decimal(line.tax or 0), 'number'
     if 'miktar' in key or 'adet' in key:
         return Decimal(line.qty or 0), 'number'
-    if 'olcu' in key or 'govde' in key:
+    if 'olcu' in key or 'govde' in key or 'detay1' in key:
         return primary, 'text'
     if 'renk' in key or 'kapak' in key or 'detay2' in key:
         return secondary, 'text'

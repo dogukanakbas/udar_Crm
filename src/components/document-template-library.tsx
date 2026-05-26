@@ -46,7 +46,7 @@ type TemplatePlaceholderGroup = {
   }>
 }
 
-const DEFAULT_DOCUMENT_COLUMNS = ['Kod', 'Satış Birimi', 'Ölçü / Gövde', 'Renk / Kapak', 'Miktar', 'Liste Fiyatı', 'İskonto 1', 'İskonto 2', 'Birim', 'Birim Net Fiyatı', 'Tutar']
+const DEFAULT_DOCUMENT_COLUMNS = ['Kod', 'Satış Birimi', 'Ölçü / Gövde', 'Renk / Kapak', 'Miktar', 'Liste Fiyatı', 'İSK1%', 'İSK2%', 'Birim', 'Birim Net Fiyatı', 'Tutar']
 const SELLER_MASTER_TEMPLATE_KEY = 'seller_master'
 const DEFAULT_MASTER_TEMPLATE_ITEM: DocumentTemplateLibraryItem = {
   template_key: SELLER_MASTER_TEMPLATE_KEY,
@@ -74,12 +74,12 @@ const normalizeColumnKey = (value: string) =>
 
 const isDiscountOneColumn = (value: string) => {
   const key = normalizeColumnKey(value)
-  return key === 'iskonto' || key.includes('iskonto1') || key.includes('1iskonto')
+  return key === 'iskonto' || key === 'isk' || key.includes('iskonto1') || key.includes('1iskonto') || key.includes('isk1') || key.includes('1isk')
 }
 
 const isDiscountTwoColumn = (value: string) => {
   const key = normalizeColumnKey(value)
-  return key.includes('iskonto2') || key.includes('2iskonto')
+  return key.includes('iskonto2') || key.includes('2iskonto') || key.includes('isk2') || key.includes('2isk')
 }
 
 const normalizeDocumentColumns = (columns: string[]) => {
@@ -96,7 +96,7 @@ const normalizeDocumentColumns = (columns: string[]) => {
   })
   const unitIndex = keys.findIndex((key) => key === 'birim' || key.endsWith('birim'))
   const insertAt = listPriceIndex >= 0 ? listPriceIndex + 1 : unitIndex >= 0 ? unitIndex : base.length
-  return [...base.slice(0, insertAt), 'İskonto 1', 'İskonto 2', ...base.slice(insertAt)]
+  return [...base.slice(0, insertAt), 'İSK1%', 'İSK2%', ...base.slice(insertAt)]
 }
 
 const normalizeDocumentGroup = (category: any, index: number) => {
