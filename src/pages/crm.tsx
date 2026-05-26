@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
@@ -22,7 +22,7 @@ import { useAppStore } from '@/state/use-app-store'
 import { hasPermission } from '@/lib/permissions'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import type { Opportunity, Contact as ContactType, Company as CompanyType } from '@/types'
-import { BadgeCheck, Download, HandCoins, Plus, Timer, Trash2 } from 'lucide-react'
+import { BadgeCheck, Download, HandCoins, Plus, Timer, Trash2, Upload } from 'lucide-react'
 
 const contactSchema = z.object({
   companyId: z.string(),
@@ -328,6 +328,9 @@ export function CompaniesPage() {
   const [sizeFilter, setSizeFilter] = useState('all')
   const [editingCompany, setEditingCompany] = useState<CompanyType | null>(null)
   const canDeletePartners = hasPermission(data.settings.role, data.rolePermissions || [], 'partners.delete')
+  const canImportPartners = hasPermission(data.settings.role, data.rolePermissions || [], 'partners.import')
+  const importInputRef = useRef<HTMLInputElement | null>(null)
+  const [importingPartners, setImportingPartners] = useState(false)
   const normalizeFilterValue = (value?: string) => value?.trim() ?? ''
 
   const normalizedCompanies = useMemo(
@@ -439,6 +442,41 @@ export function CompaniesPage() {
     }
   }
 
+  const handleImportPartners = async (file?: File | null) => {
+    if (!file || importingPartners) return
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('update_existing', 'true')
+    setImportingPartners(true)
+    try {
+      const response = await api.post('/partners/import-excel/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      await useAppStore.getState().hydrateFromApi()
+      const result = response.data || {}
+      toast({
+        title: 'Cari aktarımı tamamlandı',
+        description: `${result.created || 0} yeni, ${result.updated || 0} güncellendi, ${result.skipped || 0} atlandı.`,
+      })
+      if (Array.isArray(result.errors) && result.errors.length > 0) {
+        toast({
+          title: 'Bazı satırlar aktarılamadı',
+          description: `${result.errors.length} satır için hata var. İlk hata: ${result.errors[0]?.detail || 'Bilinmeyen hata'}`,
+          variant: 'destructive',
+        })
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Cari aktarımı başarısız',
+        description: error?.response?.data?.detail || 'Excel dosyası okunamadı.',
+        variant: 'destructive',
+      })
+    } finally {
+      setImportingPartners(false)
+      if (importInputRef.current) importInputRef.current.value = ''
+    }
+  }
+
   const columns: ColumnDef<(typeof data.companies)[number]>[] = useMemo(
     () => [
       { accessorKey: 'name', header: 'Cari' },
@@ -515,6 +553,26 @@ export function CompaniesPage() {
         description="Cari bilgiler, vergi detayları ve sözleşmede kullanılacak alıcı alanları"
         actions={
           <div className="flex items-center gap-2">
+            {canImportPartners ? (
+              <>
+                <input
+                  ref={importInputRef}
+                  type="file"
+                  accept=".xls,.xlsx"
+                  className="hidden"
+                  onChange={(event) => handleImportPartners(event.target.files?.[0])}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={importingPartners}
+                  onClick={() => importInputRef.current?.click()}
+                >
+                  <Upload className="mr-2 h-4 w-4" />
+                  {importingPartners ? 'Aktarılıyor...' : 'İçe aktar'}
+                </Button>
+              </>
+            ) : null}
             <Button
               variant="outline"
               size="sm"

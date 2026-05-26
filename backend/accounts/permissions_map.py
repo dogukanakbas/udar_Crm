@@ -21,6 +21,7 @@ PERMISSION_CATALOG = [
             ("partners.create", "Cari kartı oluştur"),
             ("partners.edit", "Cari kartı düzenle"),
             ("partners.delete", "Cari kartı sil"),
+            ("partners.import", "Cari kartlarını Excel'den içe aktar"),
             ("partners.export", "Cari kartlarını dışa aktar"),
         ],
     },
@@ -201,7 +202,7 @@ DEFAULT_ROLE_PERMS = {
     "Admin": ALL_PERMISSION_CODES,
     "Manager": [
         "quotes.view.all", "quotes.create", "quotes.edit.all", "quotes.status.change", "quotes.convert", "quotes.download", "quotes.prepare",
-        "partners.view", "partners.create", "partners.edit", "partners.export",
+        "partners.view", "partners.create", "partners.edit", "partners.import", "partners.export",
         "templates.view", "templates.products.edit", "templates.seller_companies.edit", "templates.document_terms.edit", "templates.pricing.edit", "templates.payment_options.edit", "templates.service_tax.edit", "templates.excel.upload",
         "products.view", "products.create", "products.edit", "products.import", "products.export",
         "erp.view", "orders.view", "orders.create", "orders.edit", "orders.receive", "inventory.view", "inventory.edit", "logistics.view", "logistics.edit", "vehicles.view", "vehicles.edit",
@@ -210,7 +211,7 @@ DEFAULT_ROLE_PERMS = {
     ],
     "Sales": [
         "quotes.view.own", "quotes.create", "quotes.edit.own", "quotes.status.change", "quotes.convert", "quotes.download", "quotes.prepare",
-        "partners.view", "partners.create", "partners.edit", "products.view", "templates.view",
+        "partners.view", "partners.create", "partners.edit", "partners.import", "products.view", "templates.view",
     ],
     "Finance": [
         "quotes.view.all", "quotes.download", "partners.view", "erp.view", "invoices.view", "invoices.edit", "invoices.pay", "orders.view", "reports.view", "audit.view", "approvals.view",

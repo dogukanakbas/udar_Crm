@@ -4,7 +4,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
   Admin: ['*'],
   Manager: [
     'quotes.view.all', 'quotes.create', 'quotes.edit.all', 'quotes.status.change', 'quotes.convert', 'quotes.download', 'quotes.prepare',
-    'partners.view', 'partners.create', 'partners.edit', 'partners.export',
+    'partners.view', 'partners.create', 'partners.edit', 'partners.import', 'partners.export',
     'templates.view', 'templates.products.edit', 'templates.seller_companies.edit', 'templates.document_terms.edit', 'templates.pricing.edit', 'templates.payment_options.edit', 'templates.service_tax.edit', 'templates.excel.upload',
     'products.view', 'products.create', 'products.edit', 'products.import', 'products.export',
     'erp.view', 'orders.view', 'orders.create', 'orders.edit', 'orders.receive', 'inventory.view', 'inventory.edit', 'logistics.view', 'logistics.edit', 'vehicles.view', 'vehicles.edit',
@@ -23,6 +23,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'partners.view',
     'partners.create',
     'partners.edit',
+    'partners.import',
     'templates.view',
   ],
   Finance: ['quotes.view.all', 'quotes.download', 'quotes.approve', 'partners.view', 'erp.view', 'invoices.view', 'invoices.edit', 'invoices.pay', 'approvals.view', 'orders.view', 'audit.view', 'reports.view'],

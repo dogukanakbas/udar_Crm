@@ -32,6 +32,7 @@ from .contracts import (
     save_template_override,
     _normalize_seller_profile,
 )
+from .partner_import import import_business_partners_from_excel
 from workflow.models import ApprovalInstance, ApprovalStep
 from erp.models import Product
 from .serializers import QuoteListSerializer, QuoteSerializer, PricingRuleSerializer, BusinessPartnerSerializer, ProductSerializer, LeadSerializer, OpportunitySerializer, ContactSerializer
@@ -743,6 +744,7 @@ class BusinessPartnerViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         'update': 'partners.edit',
         'partial_update': 'partners.edit',
         'destroy': 'partners.delete',
+        'import_excel': 'partners.import',
     }
     queryset = BusinessPartner.objects.all()
 
@@ -754,6 +756,21 @@ class BusinessPartnerViewSet(OrgScopedMixin, viewsets.ModelViewSet):
                 {'detail': 'Bu cariye bağlı teklif veya sözleşme olduğu için silinemez.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+    @action(detail=False, methods=['post'], url_path='import-excel', parser_classes=[MultiPartParser, FormParser])
+    def import_excel(self, request):
+        uploaded_file = request.FILES.get('file')
+        if not uploaded_file:
+            return Response({'detail': 'Excel dosyası zorunludur.'}, status=status.HTTP_400_BAD_REQUEST)
+        org = getattr(request.user, 'organization', None)
+        if not org:
+            return Response({'detail': 'Organizasyon bulunamadı.'}, status=status.HTTP_400_BAD_REQUEST)
+        update_existing = str(request.data.get('update_existing', 'true')).lower() not in {'0', 'false', 'hayir', 'hayır'}
+        try:
+            result = import_business_partners_from_excel(org, uploaded_file, update_existing=update_existing)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result)
 
 
 class LeadViewSet(OrgScopedMixin, viewsets.ModelViewSet):
