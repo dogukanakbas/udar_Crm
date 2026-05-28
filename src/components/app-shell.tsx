@@ -165,7 +165,7 @@ export function AppShell() {
   const isWideWorkspace = isQuotesWorkspace || isSellerCompanyWorkspace || isQuoteTemplateWorkspace || isInventoryWorkspace
 
   useEffect(() => {
-    const faviconUrl = resolveBrandingUrl(data.organization?.favicon_url)
+    const faviconUrl = resolveBrandingUrl(data.organization?.favicon_url, 'favicon')
     if (!faviconUrl) return
     const link = document.querySelector<HTMLLinkElement>("link[rel~='icon']")
     if (link) link.href = faviconUrl
@@ -192,7 +192,7 @@ export function AppShell() {
           <div className="mb-4 flex shrink-0 items-center gap-3 rounded-lg border border-white/10 bg-white/[0.06] p-3">
             <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-md bg-white/95 p-2 font-semibold shadow-[0_16px_38px_-22px_rgba(0,0,0,0.8)]">
               {data.organization?.logo_url ? (
-                <img src={resolveBrandingUrl(data.organization.logo_url)} alt="Logo" className="h-full w-full object-contain" />
+                <img src={resolveBrandingUrl(data.organization.logo_url, 'logo')} alt="Logo" className="h-full w-full object-contain" />
               ) : (
                 <div className="flex h-10 w-10 items-center justify-center rounded-md bg-white text-[#173f38] font-bold shadow-[0_16px_38px_-22px_rgba(0,0,0,0.8)]">
                   {(data.organization?.brand_name || data.organization?.name || 'U')[0].toUpperCase()}

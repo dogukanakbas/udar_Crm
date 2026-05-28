@@ -295,7 +295,7 @@ export function SettingsPage() {
       else {
         setFaviconUrl(nextUrl)
         const link = document.querySelector<HTMLLinkElement>("link[rel~='icon']")
-        if (link && nextUrl) link.href = resolveBrandingUrl(nextUrl)
+        if (link && nextUrl) link.href = resolveBrandingUrl(nextUrl, 'favicon')
       }
       await useAppStore.getState().hydrateFromApi({ force: true })
       toast({ title: kind === 'logo' ? 'Logo yüklendi' : 'Favicon yüklendi' })
@@ -373,7 +373,7 @@ export function SettingsPage() {
               <Label>Logo</Label>
               <div className="mt-2 grid gap-3 sm:grid-cols-[120px_1fr]">
                 <div className="flex h-24 items-center justify-center rounded-md border bg-muted/30 p-3">
-                  {logoUrl ? <img src={resolveBrandingUrl(logoUrl)} alt="Logo önizleme" className="max-h-full max-w-full object-contain" /> : <ImageIcon className="h-8 w-8 text-muted-foreground" />}
+                  {logoUrl ? <img src={resolveBrandingUrl(logoUrl, 'logo')} alt="Logo önizleme" className="max-h-full max-w-full object-contain" /> : <ImageIcon className="h-8 w-8 text-muted-foreground" />}
                 </div>
                 <div className="space-y-2">
                   <Input value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="Logo URL veya yüklenen dosya yolu" />
@@ -396,7 +396,7 @@ export function SettingsPage() {
               <Label>Favicon</Label>
               <div className="mt-2 grid gap-3 sm:grid-cols-[64px_1fr]">
                 <div className="flex h-14 items-center justify-center rounded-md border bg-muted/30 p-2">
-                  {faviconUrl ? <img src={resolveBrandingUrl(faviconUrl)} alt="Favicon önizleme" className="max-h-full max-w-full object-contain" /> : <ImageIcon className="h-5 w-5 text-muted-foreground" />}
+                  {faviconUrl ? <img src={resolveBrandingUrl(faviconUrl, 'favicon')} alt="Favicon önizleme" className="max-h-full max-w-full object-contain" /> : <ImageIcon className="h-5 w-5 text-muted-foreground" />}
                 </div>
                 <div className="space-y-2">
                   <Input value={faviconUrl} onChange={(e) => setFaviconUrl(e.target.value)} placeholder="Favicon URL veya yüklenen dosya yolu" />

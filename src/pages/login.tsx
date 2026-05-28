@@ -32,7 +32,7 @@ export function LoginPage() {
           setBranding(res.data)
           if (res.data.favicon_url) {
             const link = document.querySelector<HTMLLinkElement>("link[rel~='icon']")
-            if (link) link.href = resolveBrandingUrl(res.data.favicon_url)
+            if (link) link.href = resolveBrandingUrl(res.data.favicon_url, 'favicon')
           }
         }
       })
@@ -86,7 +86,7 @@ export function LoginPage() {
             <div className="flex items-center gap-4">
               <div className="flex h-20 w-28 items-center justify-center overflow-hidden rounded-lg bg-white/95 p-3 font-semibold shadow-[0_18px_45px_rgba(0,0,0,0.22)] sm:w-36">
                 {branding?.logo_url ? (
-                  <img src={resolveBrandingUrl(branding.logo_url)} alt="Logo" className="h-full w-full object-contain" />
+                  <img src={resolveBrandingUrl(branding.logo_url, 'logo')} alt="Logo" className="h-full w-full object-contain" />
                 ) : (
                   <div className="flex h-12 w-12 items-center justify-center rounded-md bg-white text-xl font-bold text-[#173f38]">
                     {(branding?.brand_name || branding?.name || 'U')[0].toUpperCase()}

@@ -9,6 +9,8 @@ from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError, RestrictedError
+from django.http import FileResponse, Http404
+import mimetypes
 import logging
 import os
 import pyotp
@@ -91,6 +93,24 @@ def _save_branding_file(org, uploaded_file, kind):
   return f"{settings.MEDIA_URL.rstrip('/')}/branding/org_{org.id}/{target.name}"
 
 
+def _branding_file_path(url_value):
+  raw = str(url_value or "")
+  prefix = settings.MEDIA_URL.rstrip("/") + "/"
+  if raw.startswith(("http://", "https://")):
+    from urllib.parse import urlparse
+    raw = urlparse(raw).path
+  if not raw.startswith(prefix):
+    raise Http404("Branding dosyası bulunamadı")
+  target = Path(settings.MEDIA_ROOT) / raw[len(prefix):]
+  try:
+    target.resolve().relative_to(Path(settings.MEDIA_ROOT).resolve())
+  except ValueError as exc:
+    raise Http404("Branding dosyası bulunamadı") from exc
+  if not target.exists() or not target.is_file():
+    raise Http404("Branding dosyası bulunamadı")
+  return target
+
+
 class MeView(APIView):
   permission_classes = [IsAuthenticated]
 
@@ -144,6 +164,24 @@ class BrandingView(APIView):
       "logo_url": "",
       "favicon_url": "",
     })
+
+
+class BrandingAssetView(APIView):
+  permission_classes = [AllowAny]
+
+  def get(self, request, kind):
+    if kind not in {"logo", "favicon"}:
+      raise Http404("Branding dosyası bulunamadı")
+    from organizations.models import Organization
+    org = Organization.objects.first()
+    if not org:
+      raise Http404("Branding dosyası bulunamadı")
+    field = "logo_url" if kind == "logo" else "favicon_url"
+    target = _branding_file_path(getattr(org, field, ""))
+    content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    response = FileResponse(target.open("rb"), content_type=content_type)
+    response["Cache-Control"] = "public, max-age=300"
+    return response
 
 
 class UsersListView(APIView):
