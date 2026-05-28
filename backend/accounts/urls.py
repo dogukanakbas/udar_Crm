@@ -19,6 +19,7 @@ from .views import (
     InviteUserView,
     ActivateUserView,
     OrganizationSettingsView,
+    OrganizationBrandingUploadView,
     BrandingView,
 )
 
@@ -43,5 +44,5 @@ urlpatterns = [
     path('invite/', InviteUserView.as_view(), name='invite_user'),
     path('activate/', ActivateUserView.as_view(), name='activate_user'),
     path('organization-settings/', OrganizationSettingsView.as_view(), name='organization_settings'),
+    path('organization-branding-upload/', OrganizationBrandingUploadView.as_view(), name='organization_branding_upload'),
 ]
-

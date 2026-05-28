@@ -20,7 +20,7 @@ import { ROLE_LABEL_TR } from '@/lib/role-labels'
 import { DataTable } from '@/components/data-table'
 import { type ColumnDef } from '@tanstack/react-table'
 import type { UserLite } from '@/types'
-import { AlertCircle, ShieldCheck, Plus, Trash2, ImageIcon, Pencil } from 'lucide-react'
+import { AlertCircle, ShieldCheck, Plus, Trash2, ImageIcon, Pencil, Upload } from 'lucide-react'
 import { RbacGuard } from '@/components/rbac'
 import { RolesPermissionPanel } from '@/pages/roles'
 
@@ -97,6 +97,8 @@ export function SettingsPage() {
   const [orgName, setOrgName] = useState('')
   const [brandName, setBrandName] = useState('')
   const [logoUrl, setLogoUrl] = useState('')
+  const [faviconUrl, setFaviconUrl] = useState('')
+  const [brandingUploading, setBrandingUploading] = useState<'logo' | 'favicon' | null>(null)
   type TeamAssociateRow = {
     id: number
     full_name: string
@@ -274,9 +276,34 @@ export function SettingsPage() {
         setOrgName(d.organization_name || '')
         setBrandName(d.brand_name || '')
         setLogoUrl(d.logo_url || '')
+        setFaviconUrl(d.favicon_url || '')
       })
       .catch(() => null)
   }, [])
+
+  const uploadBrandingFile = async (kind: 'logo' | 'favicon', file?: File | null) => {
+    if (!file) return
+    setBrandingUploading(kind)
+    try {
+      const formData = new FormData()
+      formData.append('kind', kind)
+      formData.append('file', file)
+      const response = await api.post('/auth/organization-branding-upload/', formData)
+      const nextUrl = response.data?.[kind === 'logo' ? 'logo_url' : 'favicon_url'] || ''
+      if (kind === 'logo') setLogoUrl(nextUrl)
+      else {
+        setFaviconUrl(nextUrl)
+        const link = document.querySelector<HTMLLinkElement>("link[rel~='icon']")
+        if (link && nextUrl) link.href = nextUrl
+      }
+      await useAppStore.getState().hydrateFromApi({ force: true })
+      toast({ title: kind === 'logo' ? 'Logo yüklendi' : 'Favicon yüklendi' })
+    } catch (err: any) {
+      toast({ title: 'Yükleme başarısız', description: err?.response?.data?.detail || 'Dosya yüklenemedi', variant: 'destructive' })
+    } finally {
+      setBrandingUploading(null)
+    }
+  }
 
   useEffect(() => {
     api
@@ -342,8 +369,50 @@ export function SettingsPage() {
               <Input value={brandName} onChange={(e) => setBrandName(e.target.value)} placeholder="Marka Adı" />
             </div>
             <div>
-              <Label>Logo Görsel Adresi (URL)</Label>
-              <Input value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="Logo Görsel Adresi (URL)" />
+              <Label>Logo</Label>
+              <div className="mt-2 grid gap-3 sm:grid-cols-[120px_1fr]">
+                <div className="flex h-24 items-center justify-center rounded-md border bg-muted/30 p-3">
+                  {logoUrl ? <img src={logoUrl} alt="Logo önizleme" className="max-h-full max-w-full object-contain" /> : <ImageIcon className="h-8 w-8 text-muted-foreground" />}
+                </div>
+                <div className="space-y-2">
+                  <Input value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="Logo URL veya yüklenen dosya yolu" />
+                  <label className="inline-flex">
+                    <input
+                      type="file"
+                      accept=".png,.jpg,.jpeg,.svg,.webp"
+                      className="sr-only"
+                      onChange={(e) => uploadBrandingFile('logo', e.target.files?.[0])}
+                    />
+                    <span className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm hover:bg-muted">
+                      <Upload className="h-4 w-4" />
+                      {brandingUploading === 'logo' ? 'Yükleniyor...' : 'Logo yükle'}
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div>
+              <Label>Favicon</Label>
+              <div className="mt-2 grid gap-3 sm:grid-cols-[64px_1fr]">
+                <div className="flex h-14 items-center justify-center rounded-md border bg-muted/30 p-2">
+                  {faviconUrl ? <img src={faviconUrl} alt="Favicon önizleme" className="max-h-full max-w-full object-contain" /> : <ImageIcon className="h-5 w-5 text-muted-foreground" />}
+                </div>
+                <div className="space-y-2">
+                  <Input value={faviconUrl} onChange={(e) => setFaviconUrl(e.target.value)} placeholder="Favicon URL veya yüklenen dosya yolu" />
+                  <label className="inline-flex">
+                    <input
+                      type="file"
+                      accept=".ico,.png,.jpg,.jpeg,.svg,.webp"
+                      className="sr-only"
+                      onChange={(e) => uploadBrandingFile('favicon', e.target.files?.[0])}
+                    />
+                    <span className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm hover:bg-muted">
+                      <Upload className="h-4 w-4" />
+                      {brandingUploading === 'favicon' ? 'Yükleniyor...' : 'Favicon yükle'}
+                    </span>
+                  </label>
+                </div>
+              </div>
             </div>
             <div>
               <Label>Yerel ayar</Label>
@@ -364,6 +433,7 @@ export function SettingsPage() {
                     organization_name: orgName,
                     brand_name: brandName,
                     logo_url: logoUrl,
+                    favicon_url: faviconUrl,
                   })
                   await useAppStore.getState().hydrateFromApi()
                   toast({ title: 'Profil kaydedildi' })

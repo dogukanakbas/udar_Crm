@@ -24,6 +24,9 @@ from django.contrib.auth import get_user_model
 from django.utils.crypto import get_random_string
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.contrib.auth.validators import UnicodeUsernameValidator
+from pathlib import Path
+from PIL import Image, UnidentifiedImageError
+from rest_framework.parsers import FormParser, MultiPartParser
 from .user_import import allocate_username, full_name_to_username_base, split_full_name
 from rest_framework import viewsets, permissions, filters
 from permissions import IsOrgMember, HasAPIPermission
@@ -35,6 +38,57 @@ from .utils import ensure_permissions_seeded, get_effective_permissions, user_ha
 
 
 logger = logging.getLogger(__name__)
+
+ALLOWED_BRANDING_EXTENSIONS = {".png", ".jpg", ".jpeg", ".svg", ".ico", ".webp"}
+MAX_BRANDING_FILE_SIZE = 2 * 1024 * 1024
+
+
+def _validate_branding_file(uploaded_file):
+  extension = Path(uploaded_file.name or "").suffix.lower()
+  if extension not in ALLOWED_BRANDING_EXTENSIONS:
+    raise ValueError("PNG, JPG, JPEG, SVG, ICO veya WEBP dosyası yükleyebilirsiniz.")
+  if uploaded_file.size > MAX_BRANDING_FILE_SIZE:
+    raise ValueError("Dosya boyutu 2 MB sınırını aşamaz.")
+  content = uploaded_file.read()
+  uploaded_file.seek(0)
+  if not content:
+    raise ValueError("Dosya boş olamaz.")
+  if extension == ".svg":
+    text = content[:4096].decode("utf-8", errors="ignore").lower()
+    if "<script" in text or "javascript:" in text:
+      raise ValueError("SVG içinde çalıştırılabilir içerik kullanılamaz.")
+    return extension, content
+  if extension != ".ico":
+    try:
+      with Image.open(uploaded_file) as img:
+        img.verify()
+    except (UnidentifiedImageError, OSError) as exc:
+      raise ValueError("Görsel dosyası okunamadı.") from exc
+  uploaded_file.seek(0)
+  return extension, content
+
+
+def _delete_branding_file(url_value):
+  raw = str(url_value or "")
+  prefix = settings.MEDIA_URL.rstrip("/") + "/"
+  if not raw.startswith(prefix):
+    return
+  target = Path(settings.MEDIA_ROOT) / raw[len(prefix):]
+  try:
+    target.resolve().relative_to(Path(settings.MEDIA_ROOT).resolve())
+  except ValueError:
+    return
+  if target.exists():
+    target.unlink()
+
+
+def _save_branding_file(org, uploaded_file, kind):
+  extension, content = _validate_branding_file(uploaded_file)
+  directory = Path(settings.MEDIA_ROOT) / "branding" / f"org_{org.id}"
+  directory.mkdir(parents=True, exist_ok=True)
+  target = directory / f"{kind}{extension}"
+  target.write_bytes(content)
+  return f"{settings.MEDIA_URL.rstrip('/')}/branding/org_{org.id}/{target.name}"
 
 
 class MeView(APIView):
@@ -64,6 +118,7 @@ class MeView(APIView):
           "name": user.organization.name,
           "brand_name": getattr(user.organization, "brand_name", "") or user.organization.name,
           "logo_url": getattr(user.organization, "logo_url", ""),
+          "favicon_url": getattr(user.organization, "favicon_url", ""),
         } if user.organization else None,
         "is_superadmin": getattr(user, "is_superadmin", False),  # NEW: for auth gateway
       }
@@ -81,11 +136,13 @@ class BrandingView(APIView):
         "name": org.name,
         "brand_name": getattr(org, "brand_name", "") or org.name,
         "logo_url": getattr(org, "logo_url", ""),
+        "favicon_url": getattr(org, "favicon_url", ""),
       })
     return Response({
       "name": "UDAR",
       "brand_name": "Udar",
       "logo_url": "",
+      "favicon_url": "",
     })
 
 
@@ -717,6 +774,7 @@ class OrganizationSettingsView(APIView):
       "organization_name": settings_row.organization.name,
       "brand_name": getattr(settings_row.organization, "brand_name", "") or settings_row.organization.name,
       "logo_url": getattr(settings_row.organization, "logo_url", ""),
+      "favicon_url": getattr(settings_row.organization, "favicon_url", ""),
     }
 
   def get(self, request):
@@ -736,6 +794,7 @@ class OrganizationSettingsView(APIView):
         "organization_name": "",
         "brand_name": "",
         "logo_url": "",
+        "favicon_url": "",
       })
     try:
       s = OrganizationSettings.objects.get(organization=org)
@@ -754,11 +813,12 @@ class OrganizationSettingsView(APIView):
         "organization_name": org.name,
         "brand_name": getattr(org, "brand_name", "") or org.name,
         "logo_url": getattr(org, "logo_url", ""),
+        "favicon_url": getattr(org, "favicon_url", ""),
       })
 
   def patch(self, request):
     required_perms = set()
-    if any(key in request.data for key in ["organization_name", "brand_name", "logo_url", "working_hours_start", "working_hours_end", "working_days"]):
+    if any(key in request.data for key in ["organization_name", "brand_name", "logo_url", "favicon_url", "working_hours_start", "working_hours_end", "working_days"]):
       required_perms.add("settings.organization.edit")
     if any(key in request.data for key in ["price_list_label", "price_lists"]):
       required_perms.add("templates.pricing.edit")
@@ -778,6 +838,7 @@ class OrganizationSettingsView(APIView):
     org_name = request.data.get("organization_name")
     brand_name = request.data.get("brand_name")
     logo_url = request.data.get("logo_url")
+    favicon_url = request.data.get("favicon_url")
     org_update_fields = []
     if org_name is not None:
       org.name = str(org_name).strip()
@@ -788,6 +849,9 @@ class OrganizationSettingsView(APIView):
     if logo_url is not None:
       org.logo_url = str(logo_url).strip()
       org_update_fields.append("logo_url")
+    if favicon_url is not None:
+      org.favicon_url = str(favicon_url).strip()
+      org_update_fields.append("favicon_url")
     if org_update_fields:
       org.save(update_fields=org_update_fields)
 
@@ -838,3 +902,32 @@ class OrganizationSettingsView(APIView):
       s.contract_terms_text = str(contract_terms_text)
     s.save()
     return Response(self._serialize(s))
+
+
+class OrganizationBrandingUploadView(APIView):
+  permission_classes = [IsAuthenticated, IsOrgMember]
+  parser_classes = [MultiPartParser, FormParser]
+
+  def post(self, request):
+    if not user_has_perm(request.user, "settings.organization.edit"):
+      return Response({"detail": "Marka dosyası yükleme yetkiniz yok"}, status=status.HTTP_403_FORBIDDEN)
+    org = request.user.organization
+    if not org:
+      return Response({"detail": "Organizasyon bulunamadı"}, status=status.HTTP_400_BAD_REQUEST)
+    kind = str(request.data.get("kind") or "logo").strip().lower()
+    if kind not in {"logo", "favicon"}:
+      return Response({"detail": "Dosya tipi logo veya favicon olmalı"}, status=status.HTTP_400_BAD_REQUEST)
+    uploaded_file = request.FILES.get("file")
+    if not uploaded_file:
+      return Response({"detail": "Dosya zorunludur"}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+      file_url = _save_branding_file(org, uploaded_file, kind)
+    except ValueError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    field = "logo_url" if kind == "logo" else "favicon_url"
+    old_value = getattr(org, field, "")
+    if old_value and old_value != file_url:
+      _delete_branding_file(old_value)
+    setattr(org, field, file_url)
+    org.save(update_fields=[field])
+    return Response({field: request.build_absolute_uri(file_url)})

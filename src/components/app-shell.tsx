@@ -163,6 +163,13 @@ export function AppShell() {
   const isInventoryWorkspace = activePath.startsWith('/erp/inventory')
   const isWideWorkspace = isQuotesWorkspace || isSellerCompanyWorkspace || isQuoteTemplateWorkspace || isInventoryWorkspace
 
+  useEffect(() => {
+    const faviconUrl = data.organization?.favicon_url
+    if (!faviconUrl) return
+    const link = document.querySelector<HTMLLinkElement>("link[rel~='icon']")
+    if (link) link.href = faviconUrl
+  }, [data.organization?.favicon_url])
+
   if (isPublic) {
     if (activePath.startsWith('/login')) {
       return <Outlet />
@@ -182,7 +189,7 @@ export function AppShell() {
         {loggedIn && (
           <aside className="sticky top-0 hidden h-screen w-[276px] shrink-0 border-r border-white/10 bg-[#102d29] p-4 text-white lg:block">
           <div className="mb-6 flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.06] p-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-md font-semibold overflow-hidden">
+            <div className="flex h-16 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md bg-white/95 p-2 font-semibold shadow-[0_16px_38px_-22px_rgba(0,0,0,0.8)]">
               {data.organization?.logo_url ? (
                 <img src={data.organization.logo_url} alt="Logo" className="h-full w-full object-contain" />
               ) : (

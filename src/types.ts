@@ -605,6 +605,7 @@ export interface MockDbSnapshot {
     name: string
     brand_name: string
     logo_url: string
+    favicon_url?: string
   }
   settings: {
     role: Role

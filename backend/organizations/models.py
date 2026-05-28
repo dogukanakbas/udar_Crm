@@ -7,6 +7,7 @@ class Organization(models.Model):
     contract_settings = models.JSONField(default=dict, blank=True)
     brand_name = models.CharField(max_length=255, blank=True, default='')
     logo_url = models.TextField(blank=True, default='')
+    favicon_url = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

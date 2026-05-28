@@ -20,14 +20,20 @@ export function LoginPage() {
   const [hydrating, setHydrating] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [branding, setBranding] = useState<{ name: string; brand_name: string; logo_url: string } | null>(null)
+  const [branding, setBranding] = useState<{ name: string; brand_name: string; logo_url: string; favicon_url?: string } | null>(null)
   const setRole = useAppStore((s) => s.setRole)
   const hydrate = useAppStore((s) => s.hydrateFromApi)
 
   useEffect(() => {
     api.get('/auth/branding/')
       .then((res) => {
-        if (res.data) setBranding(res.data)
+        if (res.data) {
+          setBranding(res.data)
+          if (res.data.favicon_url) {
+            const link = document.querySelector<HTMLLinkElement>("link[rel~='icon']")
+            if (link) link.href = res.data.favicon_url
+          }
+        }
       })
       .catch(() => null)
   }, [])
@@ -76,12 +82,12 @@ export function LoginPage() {
           <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.14)_0%,rgba(255,255,255,0)_38%),linear-gradient(180deg,#1f594e_0%,#113932_52%,#0d2725_100%)]" />
           <div className="absolute inset-x-0 bottom-0 h-40 bg-[linear-gradient(0deg,rgba(199,151,67,0.28),rgba(199,151,67,0))]" />
           <div className="relative flex min-h-[260px] w-full flex-col justify-between gap-8 px-6 py-7 sm:px-10 lg:min-h-dvh lg:px-16 lg:py-14 xl:px-20">
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-md font-semibold overflow-hidden">
+            <div className="flex items-center gap-4">
+              <div className="flex h-20 w-28 items-center justify-center overflow-hidden rounded-lg bg-white/95 p-3 font-semibold shadow-[0_18px_45px_rgba(0,0,0,0.22)] sm:w-36">
                 {branding?.logo_url ? (
                   <img src={branding.logo_url} alt="Logo" className="h-full w-full object-contain" />
                 ) : (
-                  <div className="flex h-10 w-10 items-center justify-center rounded-md bg-white text-lg font-bold text-[#173f38] shadow-[0_18px_45px_rgba(0,0,0,0.22)]">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-md bg-white text-xl font-bold text-[#173f38]">
                     {(branding?.brand_name || branding?.name || 'U')[0].toUpperCase()}
                   </div>
                 )}
