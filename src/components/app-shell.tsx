@@ -40,6 +40,7 @@ import { ROLE_LABEL_TR } from '@/lib/role-labels'
 import { cn } from '@/lib/utils'
 import { getTokens, clearTokens } from '@/lib/auth'
 import { hasPermission } from '@/lib/permissions'
+import { resolveBrandingUrl } from '@/lib/branding'
 
 type PageHeaderProps = {
   title: string
@@ -164,7 +165,7 @@ export function AppShell() {
   const isWideWorkspace = isQuotesWorkspace || isSellerCompanyWorkspace || isQuoteTemplateWorkspace || isInventoryWorkspace
 
   useEffect(() => {
-    const faviconUrl = data.organization?.favicon_url
+    const faviconUrl = resolveBrandingUrl(data.organization?.favicon_url)
     if (!faviconUrl) return
     const link = document.querySelector<HTMLLinkElement>("link[rel~='icon']")
     if (link) link.href = faviconUrl
@@ -187,11 +188,11 @@ export function AppShell() {
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,hsl(var(--accent)/0.12),transparent_30rem),linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.38))]">
       <div className="flex min-h-screen w-full">
         {loggedIn && (
-          <aside className="sticky top-0 hidden h-screen w-[276px] shrink-0 border-r border-white/10 bg-[#102d29] p-4 text-white lg:block">
-          <div className="mb-6 flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.06] p-3">
-            <div className="flex h-16 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md bg-white/95 p-2 font-semibold shadow-[0_16px_38px_-22px_rgba(0,0,0,0.8)]">
+          <aside className="sticky top-0 hidden h-screen w-[276px] shrink-0 flex-col border-r border-white/10 bg-[#102d29] p-4 text-white lg:flex">
+          <div className="mb-4 flex shrink-0 items-center gap-3 rounded-lg border border-white/10 bg-white/[0.06] p-3">
+            <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-md bg-white/95 p-2 font-semibold shadow-[0_16px_38px_-22px_rgba(0,0,0,0.8)]">
               {data.organization?.logo_url ? (
-                <img src={data.organization.logo_url} alt="Logo" className="h-full w-full object-contain" />
+                <img src={resolveBrandingUrl(data.organization.logo_url)} alt="Logo" className="h-full w-full object-contain" />
               ) : (
                 <div className="flex h-10 w-10 items-center justify-center rounded-md bg-white text-[#173f38] font-bold shadow-[0_16px_38px_-22px_rgba(0,0,0,0.8)]">
                   {(data.organization?.brand_name || data.organization?.name || 'U')[0].toUpperCase()}
@@ -205,7 +206,7 @@ export function AppShell() {
               <p className="text-base font-semibold">CRM + ERP</p>
             </div>
           </div>
-          <ScrollArea className="h-[calc(100vh-116px)] pr-2">
+          <ScrollArea className="min-h-0 flex-1 pr-2">
             <nav className="space-y-6 text-sm">
               {nav
                 .filter((group) => isNavItemVisible(group, data.settings.role, data.rolePermissions || []))

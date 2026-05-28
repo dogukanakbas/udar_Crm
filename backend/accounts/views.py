@@ -930,4 +930,4 @@ class OrganizationBrandingUploadView(APIView):
       _delete_branding_file(old_value)
     setattr(org, field, file_url)
     org.save(update_fields=[field])
-    return Response({field: request.build_absolute_uri(file_url)})
+    return Response({field: file_url})
