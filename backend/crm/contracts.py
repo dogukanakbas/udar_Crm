@@ -27,6 +27,12 @@ PDF_CONTENT_TYPE = 'application/pdf'
 EMPTY_BORDER = Border(left=Side(style=None), right=Side(style=None), top=Side(style=None), bottom=Side(style=None))
 EMPTY_FILL = PatternFill(fill_type=None)
 PLACEHOLDER_PATTERN = re.compile(r'\{([A-Za-z0-9_.]+)\}')
+DEFAULT_DOCUMENT_LEGAL_NOTICE = (
+    'Bu teklif, firmamız bünyesinde kullanılan Udar CRM ERP üretim ve yönetim sistemi üzerinden oluşturulmuştur. '
+    'Onaylanan teklifler otomatik olarak üretim iş emrine dönüştürülmekte olup, teklif onayı sonrasında fiyat, teknik detaylar, '
+    'ölçüler ve ürün içerikleri sistem kayıtları doğrultusunda kesinleşmektedir. Bu doküman firmamıza özeldir; izinsiz '
+    'kopyalanamaz, çoğaltılamaz ve üçüncü kişilerle paylaşılamaz. Tüm hakları saklıdır.'
+)
 
 DEFAULT_TERMS = [
     '1- Alıcı özellikleri belirtilen ürünlerin satın alma şartlarını kabul eder.',
@@ -910,6 +916,15 @@ def _default_seller_master_template_path():
     section_header(60, 'TARAFLARIN KAŞE İMZASI')
     merge_range('B61:G66', 'SATICI\n{seciliSatici.resmiUnvan}', alignment=center, outline=True)
     merge_range('H61:M66', 'ALICI\n{cariUnvani}', alignment=center, outline=True)
+    merge_range(
+        'B68:M69',
+        '{yasalAciklama}',
+        font=Font(color='666666', size=7, italic=True),
+        alignment=Alignment(horizontal='center', vertical='center', wrap_text=True),
+        draw_border=False,
+    )
+    ws.row_dimensions[68].height = 18
+    ws.row_dimensions[69].height = 18
 
     workbook.save(target_path)
     return target_path
@@ -1140,6 +1155,7 @@ def list_template_placeholders():
                 {'token': '{yekun}', 'label': 'Yekün'},
                 {'token': '{kdvOrani}', 'label': 'KDV oranı'},
                 {'token': '{notlar}', 'label': 'Belge notları'},
+                {'token': '{yasalAciklama}', 'label': 'Belge altı yasal açıklama'},
             ],
         },
         {
@@ -2235,7 +2251,16 @@ def _render_seller_master_tail(ws, quote, start_row, banner_images=None):
     row = _write_signature_tail(ws, quote, signature_start)
 
     prepared_banner = _prepare_bottom_banner_tail(ws, banner_images or [])
-    banner_start = _bottom_banner_footer_start_row(ws, bank_start, row + 1, prepared_banner)
+    legal_notice_rows = 2
+    if prepared_banner:
+        banner_start = _bottom_banner_footer_start_row(ws, bank_start, row + 1 + legal_notice_rows, prepared_banner)
+        legal_start = max(row + 1, banner_start - legal_notice_rows)
+        if legal_start + legal_notice_rows > banner_start:
+            banner_start = legal_start + legal_notice_rows
+        _write_legal_notice_tail(ws, legal_start)
+    else:
+        row = _write_legal_notice_tail(ws, row + 1)
+        banner_start = row
     _write_bottom_banner_tail(ws, banner_start, prepared_banner)
 
     _add_manual_page_break_before(ws, bank_start)
@@ -2455,6 +2480,24 @@ def _write_signature_tail(ws, quote, row):
     _tail_merge(ws, row + 1, 2, 7, f"SATICI\n{_normalize_display_name(seller.get('display_name', ''))}", None, styles['text_font'], signature_alignment, styles['section_border'])
     _tail_merge(ws, row + 1, 8, 13, f"ALICI\n{customer.get('name') or getattr(quote.customer, 'name', '') or ''}", None, styles['text_font'], signature_alignment, styles['section_border'])
     ws.row_dimensions[row + 1].height = 170
+    return row + 2
+
+
+def _write_legal_notice_tail(ws, row):
+    styles = _tail_styles()
+    _tail_merge(
+        ws,
+        row,
+        2,
+        13,
+        DEFAULT_DOCUMENT_LEGAL_NOTICE,
+        None,
+        _seller_master_font(color='666666', italic=True, size=7),
+        Alignment(horizontal='center', vertical='center', wrap_text=True),
+        None,
+    )
+    ws.row_dimensions[row].height = 28
+    ws.row_dimensions[row + 1].height = 10
     return row + 2
 
 
@@ -3045,6 +3088,7 @@ def _build_template_placeholder_context(quote, template):
         'yekun': Decimal(quote.total or 0),
         'kdvOrani': Decimal(quote.vat_rate or 0),
         'notlar': quote.notes or '',
+        'yasalAciklama': DEFAULT_DOCUMENT_LEGAL_NOTICE,
         'cariUnvani': customer.get('name') or getattr(quote.customer, 'name', '') or '',
         'cariAdi': customer.get('name') or getattr(quote.customer, 'name', '') or '',
         'yetkili': customer.get('authorized_person') or getattr(quote.customer, 'authorized_person', '') or '',
