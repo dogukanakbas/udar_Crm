@@ -2574,7 +2574,7 @@ def _prepare_bottom_banner_tail(ws, banner_images):
         return None
     banner = banner_images[0]
     banner = _crop_excel_image_vertical_content(banner)
-    target_width = _worksheet_printable_width_pixels(ws)
+    target_width = _worksheet_column_range_width_pixels(ws, 2, 13)
     banner = _scale_excel_image_to_width(banner, target_width)
     row_height = 22
     banner_height = float(getattr(banner, 'height', 0) or 0) * 0.75
@@ -3512,9 +3512,17 @@ def _scale_excel_image_to_width(image, target_width):
         image.width = int(target_width)
         return image
     scale = target_width / width
-    image.width = int(target_width)
-    image.height = int(height * scale)
-    return image
+    target_height = max(1, int(height * scale))
+    try:
+        source = PILImage.open(BytesIO(image._data())).convert('RGBA')
+        output = BytesIO()
+        source.resize((int(target_width), target_height), PILImage.Resampling.LANCZOS).save(output, format='PNG')
+        output.seek(0)
+        return XLImage(output)
+    except Exception:
+        image.width = int(target_width)
+        image.height = target_height
+        return image
 
 
 def _crop_excel_image_content(image, padding=0):
@@ -3601,6 +3609,14 @@ def _worksheet_printable_width_pixels(ws):
     margins = ws.page_margins
     printable_width = max(1, page_width - float(margins.left or 0) - float(margins.right or 0))
     return int(printable_width * 144)
+
+
+def _worksheet_column_range_width_pixels(ws, start_column, end_column):
+    total = 0
+    for column in range(start_column, end_column + 1):
+        width = float(ws.column_dimensions[get_column_letter(column)].width or 10)
+        total += int(width * 7 + 5)
+    return max(1, int(total * 0.96))
 
 
 def _clear_logo_frame(ws, cell):
