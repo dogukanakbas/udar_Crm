@@ -44,15 +44,24 @@ def _validate_location(organization, location):
         raise InventoryError('Pasif depo veya rafta stok işlemi yapılamaz.')
 
 
-def _get_locked_stock(organization, product, location, *, allow_legacy=False):
+def _normalize_detail(value):
+    return str(value or '').strip()
+
+
+def _get_locked_stock(organization, product, location, *, allow_legacy=False, detail_1_override='', detail_2_override=''):
     _validate_location(organization, location)
     if not allow_legacy and product.inventory_mode != 'warehouse':
-        raise InventoryError('Ürün önce açılış stok devriyle depo sistemine alınmalıdır.')
+        if product.stock:
+            raise InventoryError('Mevcut bakiyesi bulunan ürün önce açılış stok devriyle depo sistemine alınmalıdır.')
+        Product.objects.filter(pk=product.pk).update(inventory_mode='warehouse')
+        product.inventory_mode = 'warehouse'
     stock, _ = WarehouseStock.objects.select_for_update().get_or_create(
         organization=organization,
         warehouse=location.warehouse,
         location=location,
         product=product,
+        detail_1_override=_normalize_detail(detail_1_override),
+        detail_2_override=_normalize_detail(detail_2_override),
     )
     return stock
 
@@ -68,6 +77,8 @@ def _record(*, organization, product, movement_type, quantity, user=None, refere
         note=note,
         source_type=source_type,
         source_id=source_id,
+        detail_1=(to_stock or from_stock).detail_1_override if (to_stock or from_stock) else '',
+        detail_2=(to_stock or from_stock).detail_2_override if (to_stock or from_stock) else '',
         acted_by=user,
         warehouse_from=from_stock.warehouse if from_stock else None,
         warehouse_to=to_stock.warehouse if to_stock else None,
@@ -81,11 +92,12 @@ def _record(*, organization, product, movement_type, quantity, user=None, refere
 
 
 @transaction.atomic
-def stock_in(*, organization, product, location, quantity, user=None, reference='', note='', source_type='manual', source_id=''):
+def stock_in(*, organization, product, location, quantity, user=None, reference='', note='', source_type='manual', source_id='',
+             detail_1_override='', detail_2_override=''):
     quantity = as_decimal(quantity)
     if quantity <= 0:
         raise InventoryError('Miktar sıfırdan büyük olmalıdır.')
-    stock = _get_locked_stock(organization, product, location)
+    stock = _get_locked_stock(organization, product, location, detail_1_override=detail_1_override, detail_2_override=detail_2_override)
     previous = stock.quantity
     stock.quantity += quantity
     stock.save(update_fields=['quantity', 'updated_at'])
@@ -96,13 +108,14 @@ def stock_in(*, organization, product, location, quantity, user=None, reference=
 
 
 @transaction.atomic
-def stock_out(*, organization, product, location, quantity, user=None, reference='', note='', source_type='manual', source_id=''):
+def stock_out(*, organization, product, location, quantity, user=None, reference='', note='', source_type='manual', source_id='',
+              detail_1_override='', detail_2_override=''):
     quantity = as_decimal(quantity)
     if quantity <= 0:
         raise InventoryError('Miktar sıfırdan büyük olmalıdır.')
     if not str(note or reference).strip():
         raise InventoryError('Stok çıkışında açıklama veya referans zorunludur.')
-    stock = _get_locked_stock(organization, product, location)
+    stock = _get_locked_stock(organization, product, location, detail_1_override=detail_1_override, detail_2_override=detail_2_override)
     previous = stock.quantity
     if previous < quantity:
         raise InventoryError(f'Yetersiz stok. Kullanılabilir miktar: {previous}')
@@ -120,14 +133,10 @@ def adjust(*, organization, product, location, target_quantity, user=None, refer
     target_quantity = as_decimal(target_quantity, 'Hedef miktar')
     if not str(note or reference).strip():
         raise InventoryError('Sayım düzeltmesinde açıklama veya referans zorunludur.')
-    stock = _get_locked_stock(organization, product, location)
+    stock = _get_locked_stock(organization, product, location, detail_1_override=detail_1_override, detail_2_override=detail_2_override)
     previous = stock.quantity
     stock.quantity = target_quantity
-    if detail_1_override is not None:
-        stock.detail_1_override = str(detail_1_override)
-    if detail_2_override is not None:
-        stock.detail_2_override = str(detail_2_override)
-    stock.save()
+    stock.save(update_fields=['quantity', 'updated_at'])
     sync_product_total(product)
     return _record(organization=organization, product=product, movement_type='ADJUST', quantity=abs(target_quantity - previous),
                    user=user, reference=reference, note=note, source_type=source_type, source_id=source_id,
@@ -135,7 +144,8 @@ def adjust(*, organization, product, location, target_quantity, user=None, refer
 
 
 @transaction.atomic
-def transfer(*, organization, product, location_from, location_to, quantity, user=None, reference='', note=''):
+def transfer(*, organization, product, location_from, location_to, quantity, user=None, reference='', note='',
+             detail_1_override='', detail_2_override=''):
     quantity = as_decimal(quantity)
     if quantity <= 0:
         raise InventoryError('Miktar sıfırdan büyük olmalıdır.')
@@ -145,8 +155,8 @@ def transfer(*, organization, product, location_from, location_to, quantity, use
         raise InventoryError('Transferde açıklama veya referans zorunludur.')
     # Stable lock order prevents deadlocks on concurrent transfers.
     first, second = sorted([location_from, location_to], key=lambda item: item.pk)
-    first_stock = _get_locked_stock(organization, product, first)
-    second_stock = _get_locked_stock(organization, product, second)
+    first_stock = _get_locked_stock(organization, product, first, detail_1_override=detail_1_override, detail_2_override=detail_2_override)
+    second_stock = _get_locked_stock(organization, product, second, detail_1_override=detail_1_override, detail_2_override=detail_2_override)
     source = first_stock if first.pk == location_from.pk else second_stock
     target = second_stock if second.pk == location_to.pk else first_stock
     previous = source.quantity
@@ -178,12 +188,17 @@ def allocate_opening_balance(*, organization, product, allocations, user=None):
     if total != product.stock:
         raise InventoryError(f'Dağıtım toplamı mevcut stokla eşleşmelidir. Mevcut stok: {product.stock}')
     for location, quantity, item in normalized:
-        stock = _get_locked_stock(organization, product, location, allow_legacy=True)
+        stock = _get_locked_stock(
+            organization,
+            product,
+            location,
+            allow_legacy=True,
+            detail_1_override=item.get('detail_1_override'),
+            detail_2_override=item.get('detail_2_override'),
+        )
         if stock.quantity:
             raise InventoryError('Açılış aktarımı yapılacak rafta bu ürün için mevcut bakiye var.')
         stock.quantity = quantity
-        stock.detail_1_override = str(item.get('detail_1_override') or '')
-        stock.detail_2_override = str(item.get('detail_2_override') or '')
         stock.save()
         _record(organization=organization, product=product, movement_type='OPENING', quantity=quantity, user=user,
                 reference='AÇILIŞ AKTARIMI', note='Eski toplam stok depo rafına devralındı.', source_type='opening',

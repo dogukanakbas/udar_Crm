@@ -125,7 +125,7 @@ class WarehouseStock(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ('organization', 'location', 'product')
+        unique_together = ('organization', 'location', 'product', 'detail_1_override', 'detail_2_override')
         ordering = ['warehouse__code', 'location__code', 'product__sku']
 
 
@@ -148,6 +148,8 @@ class StockMovement(models.Model):
     resulting_quantity = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     source_type = models.CharField(max_length=50, blank=True, default='manual')
     source_id = models.CharField(max_length=120, blank=True, default='')
+    detail_1 = models.CharField(max_length=500, blank=True, default='')
+    detail_2 = models.CharField(max_length=500, blank=True, default='')
     acted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='stock_movements')
 
 

@@ -370,7 +370,7 @@ class WarehouseStockViewSet(OrgScopedMixin, viewsets.ReadOnlyModelViewSet):
         if q:
             qs = qs.filter(Q(product__sku__icontains=q) | Q(product__name__icontains=q) | Q(product__category__name__icontains=q) |
                            Q(detail_1_override__icontains=q) | Q(detail_2_override__icontains=q))
-        for param, field in [('warehouse', 'warehouse_id'), ('location', 'location_id'), ('product', 'product_id')]:
+        for param, field in [('warehouse', 'warehouse_id'), ('location', 'location_id'), ('product', 'product_id'), ('category', 'product__category_id')]:
             value = self.request.query_params.get(param)
             if value:
                 qs = qs.filter(**{field: value})
@@ -402,7 +402,8 @@ class WarehouseStockViewSet(OrgScopedMixin, viewsets.ReadOnlyModelViewSet):
         if error: return error
         org, product, location = objects
         return self._run(request, stock_in, organization=org, product=product, location=location, quantity=request.data.get('quantity'),
-                         reference=request.data.get('reference', ''), note=request.data.get('note', ''))
+                         reference=request.data.get('reference', ''), note=request.data.get('note', ''),
+                         detail_1_override=request.data.get('detail_1_override', ''), detail_2_override=request.data.get('detail_2_override', ''))
 
     @action(detail=False, methods=['post'], url_path='stock-out')
     def stock_out(self, request):
@@ -410,7 +411,8 @@ class WarehouseStockViewSet(OrgScopedMixin, viewsets.ReadOnlyModelViewSet):
         if error: return error
         org, product, location = objects
         return self._run(request, stock_out, organization=org, product=product, location=location, quantity=request.data.get('quantity'),
-                         reference=request.data.get('reference', ''), note=request.data.get('note', ''))
+                         reference=request.data.get('reference', ''), note=request.data.get('note', ''),
+                         detail_1_override=request.data.get('detail_1_override', ''), detail_2_override=request.data.get('detail_2_override', ''))
 
     @action(detail=False, methods=['post'])
     def adjust(self, request):
@@ -427,7 +429,8 @@ class WarehouseStockViewSet(OrgScopedMixin, viewsets.ReadOnlyModelViewSet):
         if error: return error
         org, product, location, target = objects
         return self._run(request, transfer, organization=org, product=product, location_from=location, location_to=target,
-                         quantity=request.data.get('quantity'), reference=request.data.get('reference', ''), note=request.data.get('note', ''))
+                         quantity=request.data.get('quantity'), reference=request.data.get('reference', ''), note=request.data.get('note', ''),
+                         detail_1_override=request.data.get('detail_1_override', ''), detail_2_override=request.data.get('detail_2_override', ''))
 
     @action(detail=False, methods=['post'], url_path='allocate-opening-balance')
     def allocate_opening_balance(self, request):
@@ -469,10 +472,19 @@ class WarehouseStockViewSet(OrgScopedMixin, viewsets.ReadOnlyModelViewSet):
                     continue
                 location = InventoryLocation.objects.select_related('warehouse').get(organization=org, warehouse__code=str(warehouse_code).strip(), code=str(location_code).strip())
                 product = Product.objects.get(organization=org, sku=str(sku).strip())
-                stock = WarehouseStock.objects.filter(organization=org, location=location, product=product).first()
+                normalized_detail_1 = str(detail_1 or '').strip()
+                normalized_detail_2 = str(detail_2 or '').strip()
+                stock = WarehouseStock.objects.filter(
+                    organization=org,
+                    location=location,
+                    product=product,
+                    detail_1_override=normalized_detail_1,
+                    detail_2_override=normalized_detail_2,
+                ).first()
                 if not stock or stock.quantity != as_decimal(target, 'Hedef miktar') or stock.detail_1_override != str(detail_1 or '') or stock.detail_2_override != str(detail_2 or ''):
                     adjust(organization=org, product=product, location=location, target_quantity=target, user=request.user, reference='EXCEL SAYIM',
-                           note='Depo sayım Excel aktarımı', source_type='excel_count', detail_1_override=detail_1, detail_2_override=detail_2)
+                           note='Depo sayım Excel aktarımı', source_type='excel_count',
+                           detail_1_override=normalized_detail_1, detail_2_override=normalized_detail_2)
                     changed += 1
         except Exception as exc:
             return Response({'detail': f'Excel işlenemedi: {exc}'}, status=status.HTTP_400_BAD_REQUEST)

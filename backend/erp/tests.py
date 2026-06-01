@@ -32,6 +32,17 @@ class InventoryServiceTests(TestCase):
         with self.assertRaises(InventoryError):
             stock_out(organization=self.org, product=self.product, location=self.location, quantity=11, note='Fazla çıkış')
 
+    def test_stock_variants_are_tracked_separately(self):
+        stock_in(organization=self.org, product=self.product, location=self.location, quantity=10, detail_1_override='Beyaz', detail_2_override='Mat')
+        stock_in(organization=self.org, product=self.product, location=self.location, quantity=5, detail_1_override='Antrasit', detail_2_override='Mat')
+        stock_out(organization=self.org, product=self.product, location=self.location, quantity=3, note='Sevk', detail_1_override='Beyaz', detail_2_override='Mat')
+        self.product.refresh_from_db()
+
+        self.assertEqual(WarehouseStock.objects.get(product=self.product, location=self.location, detail_1_override='Beyaz').quantity, Decimal('7'))
+        self.assertEqual(WarehouseStock.objects.get(product=self.product, location=self.location, detail_1_override='Antrasit').quantity, Decimal('5'))
+        self.assertEqual(self.product.stock, Decimal('12'))
+        self.assertEqual(StockMovement.objects.latest('id').detail_1, 'Beyaz')
+
     def test_adjust_and_transfer(self):
         stock_in(organization=self.org, product=self.product, location=self.location, quantity=100)
         adjust(organization=self.org, product=self.product, location=self.location, target_quantity=90, note='Sayım')
@@ -87,3 +98,15 @@ class WarehouseApiTests(TestCase):
         )
         self.assertEqual(location_response.status_code, 201, location_response.data)
         self.assertEqual(InventoryLocation.objects.get(code='Y-01').organization, self.org)
+
+    def test_zero_balance_catalog_product_can_enter_warehouse_with_details(self):
+        legacy = Product.objects.create(organization=self.org, sku='SKU-LEGACY', name='Katalog Ürünü', stock=0)
+        response = self.client.post(
+            '/api/warehouse-stocks/stock-in/',
+            {'product_id': legacy.id, 'location_id': self.location.id, 'quantity': 4, 'detail_1_override': 'Beyaz', 'detail_2_override': 'Mat'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        legacy.refresh_from_db()
+        self.assertEqual(legacy.inventory_mode, 'warehouse')
+        self.assertEqual(WarehouseStock.objects.get(product=legacy).detail_1_override, 'Beyaz')
