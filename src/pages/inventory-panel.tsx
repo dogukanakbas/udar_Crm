@@ -211,11 +211,6 @@ export function InventoryPanel() {
       header: '',
       cell: ({ row }) => (
         <div className="flex items-center gap-2">
-          <RbacGuard perm="inventory.edit">
-            <Button size="sm" variant="outline" onClick={() => setAdjustSku(row.original.sku)}>
-              Güncelle
-            </Button>
-          </RbacGuard>
           <RbacGuard perm="products.edit">
             <Button
               size="sm"

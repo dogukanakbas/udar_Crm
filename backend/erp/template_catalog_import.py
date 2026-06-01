@@ -116,7 +116,7 @@ def upsert_product_catalog(
             if product.price_lists != price_lists:
                 product.price_lists = price_lists
                 changed = True
-            if product.stock != stock:
+            if product.inventory_mode != 'warehouse' and product.stock != stock:
                 product.stock = stock
                 changed = True
             if product.reserved != reserved:
@@ -135,20 +135,20 @@ def upsert_product_catalog(
                 product.attribute_schema_override = attribute_schema_override
                 changed = True
             if changed:
-                product.save(
-                    update_fields=[
+                update_fields = [
                         'name',
                         'category',
                         'price',
                         'price_lists',
-                        'stock',
                         'reserved',
                         'reorder_point',
                         'template_defaults',
                         'attribute_values',
                         'attribute_schema_override',
                     ]
-                )
+                if product.inventory_mode != 'warehouse':
+                    update_fields.append('stock')
+                product.save(update_fields=update_fields)
                 updated_products += 1
         else:
             Product.objects.create(

@@ -3,7 +3,9 @@ from rest_framework import serializers
 from organizations.models import Organization
 from accounts.price_lists import normalize_product_price_lists
 
-from .models import Category, Invoice, InvoicePayment, Product, PurchaseOrder, SalesOrder, StockMovement, Vehicle
+from organizations.models import Warehouse
+from .inventory_service import resolve_product_details
+from .models import Category, InventoryLocation, Invoice, InvoicePayment, Product, PurchaseOrder, SalesOrder, StockMovement, Vehicle, WarehouseStock
 
 
 def _ensure_org(request):
@@ -159,6 +161,8 @@ class ProductSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
+        if instance.inventory_mode == 'warehouse':
+            validated_data.pop('stock', None)
         if 'price_lists' in validated_data or 'price' in validated_data:
             validated_data['price_lists'] = normalize_product_price_lists(
                 validated_data.get('price_lists', instance.price_lists),
@@ -297,6 +301,57 @@ class StockMovementSerializer(serializers.ModelSerializer):
         if isinstance(instance.product, Product):
             data['product'] = instance.product.id
         return data
+
+
+class WarehouseSerializer(serializers.ModelSerializer):
+    branch_name = serializers.CharField(source='branch.name', read_only=True)
+    stock_total = serializers.DecimalField(max_digits=16, decimal_places=2, read_only=True)
+    location_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Warehouse
+        fields = '__all__'
+        extra_kwargs = {'organization': {'required': False}}
+
+
+class InventoryLocationSerializer(serializers.ModelSerializer):
+    warehouse_code = serializers.CharField(source='warehouse.code', read_only=True)
+    warehouse_name = serializers.CharField(source='warehouse.name', read_only=True)
+
+    class Meta:
+        model = InventoryLocation
+        fields = '__all__'
+        extra_kwargs = {'organization': {'required': False}}
+
+    def validate(self, attrs):
+        warehouse = attrs.get('warehouse') or getattr(self.instance, 'warehouse', None)
+        org = getattr(getattr(self.context.get('request'), 'user', None), 'organization', None)
+        if warehouse and org and warehouse.organization_id != org.id:
+            raise serializers.ValidationError({'warehouse': 'Depo bu organizasyona ait değil.'})
+        return attrs
+
+
+class WarehouseStockSerializer(serializers.ModelSerializer):
+    product_sku = serializers.CharField(source='product.sku', read_only=True)
+    product_name = serializers.CharField(source='product.name', read_only=True)
+    category_name = serializers.CharField(source='product.category.name', read_only=True, default='')
+    warehouse_code = serializers.CharField(source='warehouse.code', read_only=True)
+    warehouse_name = serializers.CharField(source='warehouse.name', read_only=True)
+    location_code = serializers.CharField(source='location.code', read_only=True)
+    location_name = serializers.CharField(source='location.name', read_only=True)
+    detail_1 = serializers.SerializerMethodField()
+    detail_2 = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WarehouseStock
+        fields = '__all__'
+        read_only_fields = ['organization', 'warehouse', 'location', 'product', 'quantity', 'updated_at']
+
+    def get_detail_1(self, instance):
+        return instance.detail_1_override or resolve_product_details(instance.product)[0]
+
+    def get_detail_2(self, instance):
+        return instance.detail_2_override or resolve_product_details(instance.product)[1]
 
 
 class VehicleSerializer(serializers.ModelSerializer):

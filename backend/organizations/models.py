@@ -32,6 +32,15 @@ class Warehouse(models.Model):
     name = models.CharField(max_length=255)
     code = models.CharField(max_length=50)
     branch = models.ForeignKey(Branch, on_delete=models.CASCADE, related_name='warehouses', null=True, blank=True)
+    city = models.CharField(max_length=120, blank=True, default='')
+    address = models.TextField(blank=True, default='')
+    responsible = models.CharField(max_length=255, blank=True, default='')
+    phone = models.CharField(max_length=50, blank=True, default='')
+    email = models.EmailField(blank=True, default='')
+    description = models.TextField(blank=True, default='')
+    capacity = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    capacity_unit = models.CharField(max_length=50, blank=True, default='')
+    is_active = models.BooleanField(default=True)
 
     class Meta:
         unique_together = ('organization', 'code')

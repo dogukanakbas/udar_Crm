@@ -23,6 +23,7 @@ import { ActivatePage } from '@/pages/activate'
 import AccessLogsPage from '@/pages/access-logs'
 import { MdfHistoryPage } from '@/pages/mdf-history'
 import { MdfManagementPage } from '@/pages/mdf-management'
+import { WarehouseManagementPage, WarehouseOperationsPage } from '@/pages/warehouses'
 import { getTokens } from '@/lib/auth'
 import { useAppStore } from '@/state/use-app-store'
 import { hasPermission } from '@/lib/permissions'
@@ -144,6 +145,18 @@ const inventoryRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/erp/inventory',
   component: secured(InventoryPage, 'inventory.view'),
+})
+
+const warehouseManagementRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/erp/warehouse-management',
+  component: secured(WarehouseManagementPage, 'warehouses.manage'),
+})
+
+const warehouseOperationsRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/erp/warehouse',
+  component: secured(WarehouseOperationsPage, 'warehouse_stock.view'),
 })
 
 const invoicingRoute = new Route({
@@ -269,6 +282,8 @@ const routeTree = rootRoute.addChildren([
   salesOrdersRoute,
   purchasesRoute,
   inventoryRoute,
+  warehouseManagementRoute,
+  warehouseOperationsRoute,
   invoicingRoute,
   accountingRoute,
   ticketsRoute,

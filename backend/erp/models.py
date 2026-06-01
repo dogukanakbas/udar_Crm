@@ -1,4 +1,5 @@
 from django.db import models
+from django.conf import settings
 from organizations.models import Organization, Warehouse
 
 
@@ -17,6 +18,13 @@ class Category(models.Model):
 
 
 class Product(models.Model):
+    PRODUCT_TYPES = [
+        ('finished', 'Mamül'),
+        ('semi_finished', 'Yarı mamül'),
+        ('raw_material', 'Ham madde'),
+        ('consumable', 'Sarf malzeme'),
+    ]
+    INVENTORY_MODES = [('legacy', 'Eski toplam stok'), ('warehouse', 'Depo bazlı stok')]
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='products')
     sku = models.CharField(max_length=100)
     name = models.CharField(max_length=255)
@@ -30,6 +38,8 @@ class Product(models.Model):
     stock = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     reserved = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     reorder_point = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    product_type = models.CharField(max_length=20, choices=PRODUCT_TYPES, default='finished')
+    inventory_mode = models.CharField(max_length=20, choices=INVENTORY_MODES, default='legacy')
 
     class Meta:
         unique_together = ('organization', 'sku')
@@ -93,13 +103,34 @@ class InventoryLocation(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='inventory_locations')
     warehouse = models.ForeignKey(Warehouse, on_delete=models.CASCADE)
     code = models.CharField(max_length=50)
+    name = models.CharField(max_length=255, blank=True, default='')
+    description = models.TextField(blank=True, default='')
+    is_active = models.BooleanField(default=True)
 
     class Meta:
-        unique_together = ('organization', 'code')
+        unique_together = ('warehouse', 'code')
+
+    def __str__(self):
+        return f"{self.warehouse.code}-{self.code}"
+
+
+class WarehouseStock(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='warehouse_stocks')
+    warehouse = models.ForeignKey(Warehouse, on_delete=models.PROTECT, related_name='stocks')
+    location = models.ForeignKey(InventoryLocation, on_delete=models.PROTECT, related_name='stocks')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='warehouse_stocks')
+    quantity = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    detail_1_override = models.CharField(max_length=500, blank=True, default='')
+    detail_2_override = models.CharField(max_length=500, blank=True, default='')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('organization', 'location', 'product')
+        ordering = ['warehouse__code', 'location__code', 'product__sku']
 
 
 class StockMovement(models.Model):
-    MOVEMENT_TYPES = [('IN', 'IN'), ('OUT', 'OUT'), ('TRANSFER', 'TRANSFER')]
+    MOVEMENT_TYPES = [('IN', 'Giriş'), ('OUT', 'Çıkış'), ('ADJUST', 'Sayım düzeltmesi'), ('TRANSFER', 'Transfer'), ('OPENING', 'Açılış aktarımı')]
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='stock_movements')
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='stock_movements')
     movement_type = models.CharField(max_length=20, choices=MOVEMENT_TYPES, default='IN')
@@ -109,6 +140,37 @@ class StockMovement(models.Model):
     location_to = models.CharField(max_length=120, blank=True)
     note = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    warehouse_from = models.ForeignKey(Warehouse, on_delete=models.PROTECT, null=True, blank=True, related_name='outgoing_movements')
+    warehouse_to = models.ForeignKey(Warehouse, on_delete=models.PROTECT, null=True, blank=True, related_name='incoming_movements')
+    location_from_ref = models.ForeignKey(InventoryLocation, on_delete=models.PROTECT, null=True, blank=True, related_name='outgoing_movements')
+    location_to_ref = models.ForeignKey(InventoryLocation, on_delete=models.PROTECT, null=True, blank=True, related_name='incoming_movements')
+    previous_quantity = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    resulting_quantity = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    source_type = models.CharField(max_length=50, blank=True, default='manual')
+    source_id = models.CharField(max_length=120, blank=True, default='')
+    acted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='stock_movements')
+
+
+class FulfillmentRequest(models.Model):
+    STATUSES = [('waiting', 'Bekliyor'), ('in_progress', 'İşlemde'), ('completed', 'Tamamlandı'), ('cancelled', 'İptal')]
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='fulfillment_requests')
+    source_type = models.CharField(max_length=50)
+    source_id = models.CharField(max_length=120)
+    status = models.CharField(max_length=20, choices=STATUSES, default='waiting')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('organization', 'source_type', 'source_id')
+
+
+class FulfillmentLine(models.Model):
+    METHODS = [('warehouse', 'Depodan teslim'), ('production', 'Üretilecek')]
+    STATUSES = [('waiting', 'Bekliyor'), ('picking', 'Toplanıyor'), ('completed', 'Tamamlandı'), ('shortfall', 'Eksik stok')]
+    request = models.ForeignKey(FulfillmentRequest, on_delete=models.CASCADE, related_name='lines')
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='fulfillment_lines')
+    quantity = models.DecimalField(max_digits=14, decimal_places=2)
+    method = models.CharField(max_length=20, choices=METHODS, default='warehouse')
+    status = models.CharField(max_length=20, choices=STATUSES, default='waiting')
 
 
 class Vehicle(models.Model):

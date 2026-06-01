@@ -387,6 +387,8 @@ export const useAppStore = create<AppState>()(
         resolvedAttributeSchema: p.resolved_attribute_schema || [],
         attributeValues: p.attribute_values || {},
         attributeSchemaOverride: p.attribute_schema_override || [],
+        inventoryMode: p.inventory_mode || 'legacy',
+        productType: p.product_type || 'finished',
       }))
       const companies = (partnersRes.data || []).map((c: any, idx: number) => ({
         id: String(c.id ?? idx),

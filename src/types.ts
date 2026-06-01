@@ -144,6 +144,8 @@ export interface Product {
   resolvedAttributeSchema?: CategoryTemplateField[]
   attributeValues?: Record<string, any>
   attributeSchemaOverride?: CategoryTemplateField[]
+  inventoryMode?: 'legacy' | 'warehouse'
+  productType?: 'finished' | 'semi_finished' | 'raw_material' | 'consumable'
 }
 
 export interface InvoicePayment {

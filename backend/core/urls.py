@@ -22,7 +22,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework import routers
 
 from crm.views import QuoteViewSet, PricingRuleViewSet, SellerCompanyViewSet, BusinessPartnerViewSet, LeadViewSet, OpportunityViewSet, ContactViewSet
-from erp.views import ProductViewSet as ERPProductViewSet, CategoryViewSet, InvoiceViewSet, SalesOrderViewSet, PurchaseOrderViewSet, StockMovementViewSet, VehicleViewSet
+from erp.views import ProductViewSet as ERPProductViewSet, CategoryViewSet, InvoiceViewSet, SalesOrderViewSet, PurchaseOrderViewSet, StockMovementViewSet, VehicleViewSet, WarehouseViewSet, InventoryLocationViewSet, WarehouseStockViewSet, WarehouseDashboardView
 from mdf.views import MdfSkuViewSet
 from accounts.views import TeamViewSet, TeamAssociateViewSet
 from core.views import DashboardKPIView, GlobalSearchView, CalendarICSView, SSEView
@@ -62,6 +62,9 @@ router.register(r'invoices', InvoiceViewSet, basename='invoices')
 router.register(r'sales-orders', SalesOrderViewSet, basename='sales-orders')
 router.register(r'purchase-orders', PurchaseOrderViewSet, basename='purchase-orders')
 router.register(r'stock-movements', StockMovementViewSet, basename='stock-movements')
+router.register(r'warehouses', WarehouseViewSet, basename='warehouses')
+router.register(r'inventory-locations', InventoryLocationViewSet, basename='inventory-locations')
+router.register(r'warehouse-stocks', WarehouseStockViewSet, basename='warehouse-stocks')
 router.register(r'mdf-skus', MdfSkuViewSet, basename='mdf-skus')
 router.register(r'vehicles', VehicleViewSet, basename='vehicles')
 router.register(r'tickets', TicketViewSet, basename='tickets')
@@ -102,6 +105,7 @@ urlpatterns = [
     path('api/approvals/step/<int:pk>/action/', ApprovalActionView.as_view(), name='approval-action'),
     path('api/', include(router.urls)),
     path('api/dashboard/kpis/', DashboardKPIView.as_view(), name='dashboard-kpis'),
+    path('api/warehouse-dashboard/', WarehouseDashboardView.as_view(), name='warehouse-dashboard'),
     path('api/search/', GlobalSearchView.as_view(), name='global-search'),
     path('api/uploads/presign/', UploadPresignView.as_view(), name='upload-presign'),
     path('api/calendar/ics/', CalendarICSView.as_view(), name='calendar-ics'),

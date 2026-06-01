@@ -7,7 +7,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'partners.view', 'partners.create', 'partners.edit', 'partners.import', 'partners.export',
     'templates.view', 'templates.products.edit', 'templates.seller_companies.edit', 'templates.document_terms.edit', 'templates.pricing.edit', 'templates.payment_options.edit', 'templates.service_tax.edit', 'templates.excel.upload',
     'products.view', 'products.create', 'products.edit', 'products.import', 'products.export',
-    'erp.view', 'orders.view', 'orders.create', 'orders.edit', 'orders.receive', 'inventory.view', 'inventory.edit', 'logistics.view', 'logistics.edit', 'vehicles.view', 'vehicles.edit',
+    'erp.view', 'orders.view', 'orders.create', 'orders.edit', 'orders.receive', 'inventory.view', 'inventory.edit', 'warehouses.view', 'warehouses.manage', 'warehouse_locations.manage', 'warehouse_stock.view', 'warehouse_stock.operate', 'warehouse_stock.transfer', 'warehouse_stock.allocate', 'warehouse_stock.import', 'warehouse_stock.export', 'warehouse_movements.view', 'logistics.view', 'logistics.edit', 'vehicles.view', 'vehicles.edit',
     'tickets.view', 'tickets.edit', 'tasks.view', 'tasks.create', 'tasks.edit', 'tasks.assign', 'teams.view', 'teams.edit', 'worker_tracking.view', 'reports.view', 'audit.view',
     'settings.view', 'settings.organization.edit',
   ],
@@ -28,7 +28,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
   ],
   Finance: ['quotes.view.all', 'quotes.download', 'quotes.approve', 'partners.view', 'erp.view', 'invoices.view', 'invoices.edit', 'invoices.pay', 'approvals.view', 'orders.view', 'audit.view', 'reports.view'],
   Support: ['tickets.view', 'tickets.edit', 'tasks.view', 'tasks.edit', 'teams.view'],
-  Warehouse: ['erp.view', 'products.view', 'orders.view', 'orders.receive', 'inventory.view', 'inventory.edit', 'logistics.view', 'logistics.edit', 'tasks.view', 'tasks.edit', 'teams.view'],
+  Warehouse: ['erp.view', 'products.view', 'orders.view', 'orders.receive', 'inventory.view', 'inventory.edit', 'warehouses.view', 'warehouse_stock.view', 'warehouse_stock.operate', 'warehouse_stock.transfer', 'warehouse_stock.import', 'warehouse_stock.export', 'warehouse_movements.view', 'logistics.view', 'logistics.edit', 'tasks.view', 'tasks.edit', 'teams.view'],
   Worker: ['tasks.view.own', 'tasks.edit', 'tasks.handover', 'products.view', 'partners.view', 'tickets.view', 'vehicles.view', 'teams.view', 'quotes.view.own'],
 }
 

@@ -94,6 +94,8 @@ const nav: Array<{
       { label: 'Satış Siparişleri', to: '/erp/sales-orders', perm: 'orders.view' },
       { label: 'Satınalma', to: '/erp/purchases', perm: 'orders.view' },
       { label: 'Stok', to: '/erp/inventory', perm: 'inventory.view' },
+      { label: 'Depo Yönetimi', to: '/erp/warehouse-management', perm: 'warehouses.manage' },
+      { label: 'Depo', to: '/erp/warehouse', perm: 'warehouse_stock.view' },
       { label: 'Faturalama', to: '/erp/invoicing', perm: 'invoices.view' },
       { label: 'Muhasebe', to: '/erp/accounting', perm: 'accounting.view' },
       { label: 'Lojistik Takip', to: '/logistics/tracking', perm: 'logistics.view' },
@@ -162,7 +164,8 @@ export function AppShell() {
   const isSellerCompanyWorkspace = activePath.startsWith('/crm/seller-companies')
   const isQuoteTemplateWorkspace = activePath.startsWith('/crm/quote-templates')
   const isInventoryWorkspace = activePath.startsWith('/erp/inventory')
-  const isWideWorkspace = isQuotesWorkspace || isSellerCompanyWorkspace || isQuoteTemplateWorkspace || isInventoryWorkspace
+  const isWarehouseWorkspace = activePath.startsWith('/erp/warehouse')
+  const isWideWorkspace = isQuotesWorkspace || isSellerCompanyWorkspace || isQuoteTemplateWorkspace || isInventoryWorkspace || isWarehouseWorkspace
 
   useEffect(() => {
     const faviconUrl = resolveBrandingUrl(data.organization?.favicon_url, 'favicon')
