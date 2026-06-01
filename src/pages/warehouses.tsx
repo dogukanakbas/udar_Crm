@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip as ReTooltip, XAxis, YAxis } from 'recharts'
-import { ArrowLeftRight, Download, Minus, Plus, RefreshCw, Search, Upload } from 'lucide-react'
+import { ArrowLeftRight, Download, Minus, Plus, RefreshCw, Search, Trash2, Upload } from 'lucide-react'
 
 import api from '@/lib/api'
 import { PageHeader } from '@/components/app-shell'
@@ -24,9 +24,11 @@ type Stock = { id: number; product: number; product_sku: string; product_name: s
 type Summary = { active_warehouses: number; total_stock: number; critical_stock: number; recent_movements: number; by_warehouse: { name: string; value: number }[]; movement_trend: { day: string; movement_type: string; value: number }[]; top_products: { name: string; value: number }[] }
 type Operation = 'IN' | 'OUT' | 'ADJUST' | 'TRANSFER'
 type Movement = { id: number; movement_type: string; quantity: number; reference?: string; note?: string; location_from?: string; location_to?: string; created_at: string }
+type AllocationRow = { location_id: string; quantity: string; detail_1_override: string; detail_2_override: string }
 
 const blankWarehouse = { code: '', name: '', city: '', address: '', responsible: '', phone: '', email: '', description: '', capacity: '', capacity_unit: '', is_active: true }
 const blankLocation = { warehouse: '', code: '', name: '', description: '', is_active: true }
+const blankAllocationRow = (): AllocationRow => ({ location_id: '', quantity: '', detail_1_override: '', detail_2_override: '' })
 const movementLabels: Record<string, string> = { IN: 'Giriş', OUT: 'Çıkış', ADJUST: 'Sayım', TRANSFER: 'Transfer', OPENING: 'Açılış' }
 const apiErrorMessage = (error: any) => {
   const data = error?.response?.data
@@ -128,7 +130,7 @@ export function WarehouseOperationsPage() {
   const [allocationOpen, setAllocationOpen] = useState(false)
   const [allocationProduct, setAllocationProduct] = useState<any>(null)
   const [form, setForm] = useState<any>({ quantity: '', note: '', reference: '', target_location_id: '', detail_1_override: '', detail_2_override: '' })
-  const [allocation, setAllocation] = useState<any>({ location_id: '', quantity: '', detail_1_override: '', detail_2_override: '' })
+  const [allocations, setAllocations] = useState<AllocationRow[]>([blankAllocationRow()])
 
   const loadStocks = async () => {
     const [stockResponse, movementResponse] = await Promise.all([
@@ -140,7 +142,7 @@ export function WarehouseOperationsPage() {
   }
   useEffect(() => { const timer = window.setTimeout(() => void loadStocks(), 250); return () => window.clearTimeout(timer) }, [query, warehouseFilter, categoryFilter])
   const activeLocations = useMemo(() => locations.filter((item) => item.is_active), [locations])
-  const legacyProducts = products.filter((item: any) => (item as any).inventoryMode !== 'warehouse')
+  const legacyProducts = products.filter((item: any) => item.inventoryMode !== 'warehouse' && Number(item.stock || 0) > 0)
 
   const startOperation = (stock: Stock, type: Operation) => {
     setSelected(stock); setOperation(type)
@@ -168,9 +170,14 @@ export function WarehouseOperationsPage() {
     await loadStocks(); toast({ title: 'Sayım Excel’i işlendi', description: `${response.data.changed_rows} satır güncellendi.` })
   }
   const submitAllocation = async () => {
-    await api.post('/warehouse-stocks/allocate-opening-balance/', { product_id: allocationProduct.id, allocations: [{ ...allocation, location_id: Number(allocation.location_id) }] })
-    setAllocationOpen(false); await loadStocks(); await reload()
-    toast({ title: 'Ürün depo sistemine devralındı' })
+    try {
+      await api.post('/warehouse-stocks/allocate-opening-balance/', { product_id: allocationProduct.id, allocations: allocations.map((item) => ({ ...item, location_id: Number(item.location_id) })) })
+      setAllocationOpen(false); setAllocationProduct(null); setAllocations([blankAllocationRow()])
+      await useAppStore.getState().hydrateFromApi({ force: true }); await loadStocks(); await reload()
+      toast({ title: 'Açılış stokları depolara devredildi' })
+    } catch (error) {
+      toast({ title: 'Açılış devri tamamlanamadı', description: apiErrorMessage(error), variant: 'destructive' })
+    }
   }
 
   return (
@@ -182,9 +189,9 @@ export function WarehouseOperationsPage() {
       </Card>
       <Card padded={false}><Table><TableHeader><TableRow><TableHead>Ürün kodu</TableHead><TableHead>Ürün adı</TableHead><TableHead>Detay-1</TableHead><TableHead>Detay-2</TableHead><TableHead>Depo / Raf</TableHead><TableHead className="text-right">Miktar</TableHead><TableHead /></TableRow></TableHeader><TableBody>{stocks.map((stock) => <TableRow key={stock.id}><TableCell className="font-medium">{stock.product_sku}</TableCell><TableCell>{stock.product_name}</TableCell><TableCell>{stock.detail_1 || '-'}</TableCell><TableCell>{stock.detail_2 || '-'}</TableCell><TableCell>{stock.warehouse_name} / {stock.location_code}</TableCell><TableCell className="text-right font-semibold">{stock.quantity}</TableCell><TableCell><div className="flex justify-end gap-1"><Button size="sm" variant="outline" onClick={() => startOperation(stock, 'IN')}><Plus className="h-4 w-4" /></Button><Button size="sm" variant="outline" onClick={() => startOperation(stock, 'OUT')}><Minus className="h-4 w-4" /></Button><Button size="sm" variant="outline" onClick={() => startOperation(stock, 'ADJUST')}><RefreshCw className="h-4 w-4" /></Button><Button size="sm" variant="outline" onClick={() => startOperation(stock, 'TRANSFER')}><ArrowLeftRight className="h-4 w-4" /></Button></div></TableCell></TableRow>)}</TableBody></Table></Card>
       <Card><CardHeader><CardTitle>Son stok hareketleri</CardTitle><CardDescription>Giriş, çıkış, sayım ve transfer kayıtları değiştirilemez.</CardDescription></CardHeader><CardContent className="space-y-2">{movements.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/70 px-3 py-2 text-sm"><div><span className="font-medium">{movementLabels[item.movement_type] || item.movement_type}</span><span className="ml-2 text-muted-foreground">{item.location_from || '-'} → {item.location_to || '-'}</span></div><div className="text-right"><p className="font-semibold">{item.quantity}</p><p className="text-xs text-muted-foreground">{new Date(item.created_at).toLocaleString('tr-TR')}</p></div></div>)}</CardContent></Card>
-      {hasPermission(settings.role, permissions, 'warehouse_stock.allocate') && legacyProducts.length > 0 && <Card><CardHeader><CardTitle>Açılış stoklarını devral</CardTitle><CardDescription>Eski toplam stoku ürün bazında bir depo rafına aktarın.</CardDescription></CardHeader><CardContent className="flex flex-wrap gap-2">{legacyProducts.map((product: any) => <Button key={product.id} variant="outline" size="sm" onClick={() => { setAllocationProduct(product); setAllocation({ location_id: '', quantity: String(product.stock || 0), detail_1_override: '', detail_2_override: '' }); setAllocationOpen(true) }}>{product.sku} · {product.stock}</Button>)}</CardContent></Card>}
+      {hasPermission(settings.role, permissions, 'warehouse_stock.allocate') && legacyProducts.length > 0 && <Card><CardHeader><CardTitle>Eski stokları depolara aktar</CardTitle><CardDescription>Bu alan yalnız sistem geçişi içindir. Önceden tek toplam olarak tutulan ürün stoklarını ilk kez depo, raf ve varyantlara dağıtır. Günlük işlemler için üstteki stok girişi butonunu kullanın.</CardDescription></CardHeader><CardContent><div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/70 bg-muted/30 p-3"><div><p className="text-sm font-medium">{legacyProducts.length} ürün aktarım bekliyor</p><p className="text-xs text-muted-foreground">Sıfır bakiyeli ürünler bu listede gösterilmez.</p></div><Button variant="outline" onClick={() => { setAllocationProduct(null); setAllocations([blankAllocationRow()]); setAllocationOpen(true) }}><ArrowLeftRight className="mr-2 h-4 w-4" />Aktarım aracını aç</Button></div></CardContent></Card>}
       <OperationDialog open={operationOpen} type={operation} form={form} setForm={setForm} locations={activeLocations} products={products} standalone={!selected} onClose={() => setOperationOpen(false)} onSave={submitOperation} />
-      <AllocationDialog open={allocationOpen} product={allocationProduct} form={allocation} setForm={setAllocation} locations={activeLocations} onClose={() => setAllocationOpen(false)} onSave={submitAllocation} />
+      <AllocationDialog open={allocationOpen} product={allocationProduct} setProduct={setAllocationProduct} products={legacyProducts} rows={allocations} setRows={setAllocations} locations={activeLocations} onClose={() => setAllocationOpen(false)} onSave={submitAllocation} />
     </div>
   )
 }
@@ -211,7 +218,17 @@ function OperationDialog({ open, type, form, setForm, locations, products, stand
   }
   return <Dialog open={open} onOpenChange={onClose}><DialogContent><DialogHeader><DialogTitle>{movementLabels[type]} işlemi</DialogTitle></DialogHeader>{standalone && <><Field label="Ürün"><SearchableCombobox value={String(form.product_id || '')} options={productOptions} placeholder="Ürün seçin" searchPlaceholder="Ürün kodu veya adı yazın" emptyMessage="Eşleşen ürün bulunamadı" onValueChange={selectProduct} /></Field><Field label="Depo / raf"><Select value={form.location_id} onValueChange={(v) => set('location_id', v)}><SelectTrigger><SelectValue placeholder="Raf seçin" /></SelectTrigger><SelectContent>{locations.map((item: Location) => <SelectItem key={item.id} value={String(item.id)}>{item.warehouse_name} / {item.code}</SelectItem>)}</SelectContent></Select></Field></>}<div className="grid gap-3 sm:grid-cols-2"><Field label="Detay-1"><Input value={form.detail_1_override || ''} onChange={(e) => set('detail_1_override', e.target.value)} disabled={!standalone && type !== 'ADJUST'} /></Field><Field label="Detay-2"><Input value={form.detail_2_override || ''} onChange={(e) => set('detail_2_override', e.target.value)} disabled={!standalone && type !== 'ADJUST'} /></Field></div><Field label={type === 'ADJUST' ? 'Hedef miktar' : 'Miktar'}><Input type="number" min="0" value={form.quantity} onChange={(e) => set('quantity', e.target.value)} /></Field>{type === 'TRANSFER' && <Field label="Hedef raf"><Select value={form.target_location_id} onValueChange={(v) => set('target_location_id', v)}><SelectTrigger><SelectValue placeholder="Hedef rafı seçin" /></SelectTrigger><SelectContent>{locations.map((item: Location) => <SelectItem key={item.id} value={String(item.id)}>{item.warehouse_name} / {item.code}</SelectItem>)}</SelectContent></Select></Field>}<Field label="Referans"><Input value={form.reference} onChange={(e) => set('reference', e.target.value)} /></Field><Field label="Açıklama"><Textarea value={form.note} onChange={(e) => set('note', e.target.value)} /></Field><DialogFooter><Button onClick={onSave}>Uygula</Button></DialogFooter></DialogContent></Dialog>
 }
-function AllocationDialog({ open, product, form, setForm, locations, onClose, onSave }: any) {
-  const set = (key: string, value: any) => setForm((current: any) => ({ ...current, [key]: value }))
-  return <Dialog open={open} onOpenChange={onClose}><DialogContent><DialogHeader><DialogTitle>Açılış stok devri</DialogTitle></DialogHeader><p className="text-sm text-muted-foreground">{product?.sku} · Dağıtılacak toplam: {product?.stock || 0}</p><Field label="Depo / raf"><Select value={form.location_id} onValueChange={(v) => set('location_id', v)}><SelectTrigger><SelectValue placeholder="Raf seçin" /></SelectTrigger><SelectContent>{locations.map((item: Location) => <SelectItem key={item.id} value={String(item.id)}>{item.warehouse_name} / {item.code}</SelectItem>)}</SelectContent></Select></Field><div className="grid gap-3 sm:grid-cols-2"><Field label="Detay-1"><Input value={form.detail_1_override || ''} onChange={(e) => set('detail_1_override', e.target.value)} /></Field><Field label="Detay-2"><Input value={form.detail_2_override || ''} onChange={(e) => set('detail_2_override', e.target.value)} /></Field></div><Field label="Miktar"><Input type="number" value={form.quantity} onChange={(e) => set('quantity', e.target.value)} /></Field><DialogFooter><Button onClick={onSave}>Devral</Button></DialogFooter></DialogContent></Dialog>
+function AllocationDialog({ open, product, setProduct, products, rows, setRows, locations, onClose, onSave }: any) {
+  const total = rows.reduce((sum: number, row: AllocationRow) => sum + Number(row.quantity || 0), 0)
+  const expected = Number(product?.stock || 0)
+  const remaining = expected - total
+  const isReady = Boolean(product) && rows.length > 0 && rows.every((row: AllocationRow) => row.location_id && Number(row.quantity) > 0) && remaining === 0
+  const productOptions = products.map((item: any) => ({ value: String(item.id), label: `${item.sku} · ${item.name}`, searchText: item.categoryName || item.category || '' }))
+  const updateRow = (index: number, key: keyof AllocationRow, value: string) => setRows((current: AllocationRow[]) => current.map((row, rowIndex) => rowIndex === index ? { ...row, [key]: value } : row))
+  const removeRow = (index: number) => setRows((current: AllocationRow[]) => current.filter((_: AllocationRow, rowIndex: number) => rowIndex !== index))
+  const selectProduct = (productId: string) => {
+    setProduct(products.find((item: any) => String(item.id) === productId) || null)
+    setRows([blankAllocationRow()])
+  }
+  return <Dialog open={open} onOpenChange={onClose}><DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto"><DialogHeader><DialogTitle>Eski stokları depolara aktar</DialogTitle></DialogHeader><p className="text-sm text-muted-foreground">Kaynak, eski sistemdeki ürün toplamıdır. Satırlarda bu toplamın başlangıçta hangi depo, raf ve varyantlarda bulunduğunu tanımlayın.</p><Field label="Aktarılacak ürün"><SearchableCombobox value={String(product?.id || '')} options={productOptions} placeholder="Ürün seçin" searchPlaceholder="Ürün kodu veya adı yazın" emptyMessage="Aktarım bekleyen ürün bulunamadı" onValueChange={selectProduct} /></Field>{product && <><div className="grid gap-2 sm:grid-cols-3"><Metric label="Eski toplam stok" value={expected} /><Metric label="Dağıtılan" value={total} /><Metric label="Kalan" value={remaining} /></div><div className="space-y-2">{rows.map((row: AllocationRow, index: number) => <div key={index} className="grid gap-2 rounded-md border border-border/70 p-3 lg:grid-cols-[minmax(180px,1fr)_minmax(120px,0.7fr)_minmax(120px,0.7fr)_110px_auto]"><Select value={row.location_id} onValueChange={(value) => updateRow(index, 'location_id', value)}><SelectTrigger><SelectValue placeholder="Depo / raf" /></SelectTrigger><SelectContent>{locations.map((item: Location) => <SelectItem key={item.id} value={String(item.id)}>{item.warehouse_name} / {item.code}</SelectItem>)}</SelectContent></Select><Input value={row.detail_1_override} onChange={(event) => updateRow(index, 'detail_1_override', event.target.value)} placeholder="Detay-1" /><Input value={row.detail_2_override} onChange={(event) => updateRow(index, 'detail_2_override', event.target.value)} placeholder="Detay-2" /><Input type="number" min="0" value={row.quantity} onChange={(event) => updateRow(index, 'quantity', event.target.value)} placeholder="Miktar" /><Button type="button" size="icon" variant="ghost" disabled={rows.length === 1} onClick={() => removeRow(index)}><Trash2 className="h-4 w-4" /></Button></div>)}</div><Button type="button" variant="outline" size="sm" onClick={() => setRows((current: AllocationRow[]) => [...current, blankAllocationRow()])}><Plus className="mr-2 h-4 w-4" />Dağıtım satırı ekle</Button></>}<DialogFooter><Button onClick={onSave} disabled={!isReady}>Devral</Button></DialogFooter></DialogContent></Dialog>
 }
