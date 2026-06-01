@@ -2578,7 +2578,7 @@ def _prepare_bottom_banner_tail(ws, banner_images):
         return None
     banner = banner_images[0]
     banner = _crop_excel_image_content(banner, padding=12)
-    target_width = int(_worksheet_column_range_width_pixels(ws, 2, 13) * 1.42)
+    target_width = int(_worksheet_column_range_width_pixels(ws, 2, 13) * 1.24)
     banner = _scale_excel_image_to_width(banner, target_width)
     row_height = 22
     banner_height = float(getattr(banner, 'height', 0) or 0) * 0.75
