@@ -869,7 +869,7 @@ def _default_seller_master_template_path():
     merge_range('L3:M3', '{belgeNo}', alignment=center, outline=True)
     merge_range('J4:K4', 'TARİH', fill=soft_fill, font=label_font, alignment=center, outline=True)
     merge_range('L4:M4', '{olusturmaTarihi}', alignment=center, outline=True)
-    merge_range('J5:K5', 'HAZIRLAYAN', fill=soft_fill, font=label_font, alignment=center, outline=True)
+    merge_range('J5:K5', 'TEMSİLCİ', fill=soft_fill, font=label_font, alignment=center, outline=True)
     merge_range('L5:M5', '{hazirlayan}', alignment=center, outline=True)
 
     section_header(7, '{belgeTuru}')
@@ -1282,6 +1282,7 @@ def _build_seller_master_document_export(quote):
     quote._current_export_template = template
     _apply_template_placeholders(worksheet, quote, template)
     _apply_seller_master_header_branding(worksheet, quote)
+    _prepare_seller_master_product_group_heading(worksheet)
     tail_row = _render_dynamic_product_group_tables(worksheet, quote)
     _render_seller_master_tail(worksheet, quote, tail_row, banner_images=banner_images)
     _apply_times_new_roman_font(worksheet)
@@ -1308,7 +1309,10 @@ def _prepare_pdf_print_layout(worksheet):
     worksheet.page_margins.right = 0.2
     worksheet.page_margins.top = 0.2
     worksheet.page_margins.bottom = 0.2
+    worksheet.page_margins.footer = 0.1
     worksheet.print_options.horizontalCentered = True
+    worksheet.oddFooter.center.text = '&P / &N'
+    worksheet.oddFooter.center.size = 8
     worksheet.print_area = f'B1:{get_column_letter(worksheet.max_column)}{worksheet.max_row}'
 
 
@@ -1674,7 +1678,7 @@ def _apply_seller_master_header_branding(ws, quote):
     _tail_merge(ws, 2, 10, 13, 'DETAYLAR', styles['title_fill'], _seller_master_font(color='FFFFFF', bold=True, size=10), title_alignment, styles['section_border'])
     _set_header_detail_box(ws, 3, f'{document_title} NO', quote.number)
     _set_header_detail_box(ws, 4, 'TARİH', _timezone_fallback(quote.created_at).strftime('%d.%m.%Y'))
-    _set_header_detail_box(ws, 5, 'HAZIRLAYAN', _resolve_prepared_by_name(quote))
+    _set_header_detail_box(ws, 5, 'TEMSİLCİ', _resolve_prepared_by_name(quote))
 
 
 def _copy_cell_style(source, target):
@@ -1726,6 +1730,29 @@ def _prepare_seller_master_document_layout(ws):
         _merge_seller_master_box(ws, f'J{row}:M{row}', buyer_value, value_style)
         ws.row_dimensions[row].height = 28
     ws.row_dimensions[9].height = 28
+
+
+def _prepare_seller_master_product_group_heading(ws):
+    anchor = _find_product_group_anchor(ws)
+    if not anchor:
+        return
+    start_row, start_column = anchor
+    heading_row = max(1, start_row - 1)
+    end_column = 13
+    styles = _tail_styles()
+    _unmerge_overlapping_range(ws, heading_row, heading_row, start_column, end_column)
+    _tail_merge(
+        ws,
+        heading_row,
+        start_column,
+        end_column,
+        'ÜRÜN GRUPLARI',
+        styles['title_fill'],
+        styles['white_font'],
+        styles['center'],
+        styles['section_border'],
+    )
+    ws.row_dimensions[heading_row].height = 28
 
 
 def _image_anchor_row(image):
@@ -2285,6 +2312,7 @@ def _render_seller_master_tail(ws, quote, start_row, banner_images=None):
     payment_end = _write_payment_delivery_tail(ws, quote, start_row, start_col=8, end_col=13)
 
     terms_start = max(yekun_end, payment_end) + 1
+    _add_manual_page_break_before(ws, terms_start)
     row = _write_terms_tail(ws, quote, terms_start)
 
     bank_start = row + 1
@@ -2305,9 +2333,6 @@ def _render_seller_master_tail(ws, quote, start_row, banner_images=None):
         row = _write_legal_notice_tail(ws, row + 1)
         banner_start = row
     _write_bottom_banner_tail(ws, banner_start, prepared_banner)
-
-    _add_manual_page_break_before(ws, bank_start)
-
 
 def _reset_seller_master_columns(ws):
     widths = {
@@ -3111,9 +3136,9 @@ def _build_template_placeholder_context(quote, template):
     context = {
         'belgeNo': quote.number,
         'belgeTuru': document_title,
-        'olusturmaTarihi': created_at,
-        'guncellenmeTarihi': updated_at,
-        'gecerlilikTarihi': valid_until,
+        'olusturmaTarihi': created_at.strftime('%d.%m.%Y'),
+        'guncellenmeTarihi': updated_at.strftime('%d.%m.%Y'),
+        'gecerlilikTarihi': valid_until.strftime('%d.%m.%Y') if valid_until else '',
         'teslimTarihi': _parse_date(quote.delivery_terms) or quote.delivery_terms or '',
         'teslimTipi': (config.get('delivery_type') or '').strip(),
         'odemeKosulu': quote.payment_terms or '',
