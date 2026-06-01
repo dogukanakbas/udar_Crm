@@ -313,6 +313,12 @@ class WarehouseSerializer(serializers.ModelSerializer):
         fields = '__all__'
         extra_kwargs = {'organization': {'required': False}}
 
+    def to_internal_value(self, data):
+        mutable = data.copy()
+        org = _ensure_org(self.context.get('request'))
+        mutable['organization'] = getattr(org, 'id', org)
+        return super().to_internal_value(mutable)
+
 
 class InventoryLocationSerializer(serializers.ModelSerializer):
     warehouse_code = serializers.CharField(source='warehouse.code', read_only=True)
@@ -322,6 +328,12 @@ class InventoryLocationSerializer(serializers.ModelSerializer):
         model = InventoryLocation
         fields = '__all__'
         extra_kwargs = {'organization': {'required': False}}
+
+    def to_internal_value(self, data):
+        mutable = data.copy()
+        org = _ensure_org(self.context.get('request'))
+        mutable['organization'] = getattr(org, 'id', org)
+        return super().to_internal_value(mutable)
 
     def validate(self, attrs):
         warehouse = attrs.get('warehouse') or getattr(self.instance, 'warehouse', None)

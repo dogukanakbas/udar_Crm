@@ -73,3 +73,17 @@ class WarehouseApiTests(TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(self.client.get('/api/warehouse-stocks/?q=API').status_code, 200)
         self.assertEqual(self.client.get('/api/warehouse-dashboard/').status_code, 200)
+
+    def test_warehouse_and_location_create_use_authenticated_organization(self):
+        warehouse_response = self.client.post('/api/warehouses/', {'code': 'YENI', 'name': 'Yeni Depo'}, format='json')
+        self.assertEqual(warehouse_response.status_code, 201, warehouse_response.data)
+        warehouse = Warehouse.objects.get(code='YENI')
+        self.assertEqual(warehouse.organization, self.org)
+
+        location_response = self.client.post(
+            '/api/inventory-locations/',
+            {'warehouse': warehouse.id, 'code': 'Y-01', 'name': 'Yeni Raf'},
+            format='json',
+        )
+        self.assertEqual(location_response.status_code, 201, location_response.data)
+        self.assertEqual(InventoryLocation.objects.get(code='Y-01').organization, self.org)

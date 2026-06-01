@@ -27,6 +27,15 @@ type Movement = { id: number; movement_type: string; quantity: number; reference
 const blankWarehouse = { code: '', name: '', city: '', address: '', responsible: '', phone: '', email: '', description: '', capacity: '', capacity_unit: '', is_active: true }
 const blankLocation = { warehouse: '', code: '', name: '', description: '', is_active: true }
 const movementLabels: Record<string, string> = { IN: 'Giriş', OUT: 'Çıkış', ADJUST: 'Sayım', TRANSFER: 'Transfer', OPENING: 'Açılış' }
+const apiErrorMessage = (error: any) => {
+  const data = error?.response?.data
+  if (typeof data?.detail === 'string') return data.detail
+  if (data && typeof data === 'object') {
+    const first = Object.values(data).flat().find((item) => typeof item === 'string')
+    if (typeof first === 'string') return first
+  }
+  return 'İşlem tamamlanamadı. Alanları kontrol edip tekrar deneyin.'
+}
 
 function useWarehouseData() {
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
@@ -55,14 +64,22 @@ export function WarehouseManagementPage() {
   const visibleWarehouses = selectedWarehouse === 'all' ? warehouses : warehouses.filter((item) => String(item.id) === selectedWarehouse)
 
   const saveWarehouse = async () => {
-    await api.post('/warehouses/', { ...warehouseForm, capacity: warehouseForm.capacity || null })
-    setWarehouseOpen(false); setWarehouseForm(blankWarehouse); await reload(); await loadSummary()
-    toast({ title: 'Depo oluşturuldu' })
+    try {
+      await api.post('/warehouses/', { ...warehouseForm, capacity: warehouseForm.capacity || null })
+      setWarehouseOpen(false); setWarehouseForm(blankWarehouse); await reload(); await loadSummary()
+      toast({ title: 'Depo oluşturuldu' })
+    } catch (error) {
+      toast({ title: 'Depo oluşturulamadı', description: apiErrorMessage(error), variant: 'destructive' })
+    }
   }
   const saveLocation = async () => {
-    await api.post('/inventory-locations/', { ...locationForm, warehouse: Number(locationForm.warehouse) })
-    setLocationOpen(false); setLocationForm(blankLocation); await reload()
-    toast({ title: 'Raf oluşturuldu' })
+    try {
+      await api.post('/inventory-locations/', { ...locationForm, warehouse: Number(locationForm.warehouse) })
+      setLocationOpen(false); setLocationForm(blankLocation); await reload()
+      toast({ title: 'Raf oluşturuldu' })
+    } catch (error) {
+      toast({ title: 'Raf oluşturulamadı', description: apiErrorMessage(error), variant: 'destructive' })
+    }
   }
 
   return (
