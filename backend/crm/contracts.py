@@ -816,8 +816,8 @@ def _default_seller_master_template_path():
     ws.page_setup.fitToHeight = 0
 
     widths = {
-        'A': 4, 'B': 15, 'C': 15, 'D': 20, 'E': 15, 'F': 15, 'G': 12,
-        'H': 12, 'I': 12, 'J': 14, 'K': 15, 'L': 18, 'M': 18,
+        'A': 4, 'B': 13, 'C': 14, 'D': 17, 'E': 13, 'F': 13, 'G': 11,
+        'H': 11, 'I': 11, 'J': 13, 'K': 14, 'L': 15, 'M': 16,
     }
     for column, width in widths.items():
         ws.column_dimensions[column].width = width
@@ -832,7 +832,6 @@ def _default_seller_master_template_path():
     soft_fill = PatternFill('solid', fgColor='EAF2F8')
     white_font = Font(color='FFFFFF', bold=True)
     label_font = Font(color='203864', bold=True)
-    blue_font = Font(color='000066', bold=True)
     thin = Side(style='thin', color='000000')
     medium = Side(style='medium', color='000000')
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -865,41 +864,32 @@ def _default_seller_master_template_path():
 
     # Ust kisim mevcut teklif/sözlesme dosyalarina yakin kalir; logo sadece secili saticidan basilir.
     merge_range('B2:E5', '{saticiLogo}', font=Font(color='7A8798', bold=True, italic=True, size=12), alignment=center, draw_border=False)
-    merge_range('J2:M3', '{seciliSatici.resmiUnvan}', font=Font(color='000066', bold=True, size=11), alignment=center, draw_border=False)
-    merge_range('J4:M4', '{seciliSatici.kisaAd}', font=Font(color='000066', bold=True, size=10), alignment=center, draw_border=False)
-    merge_range('J5:M5', '{seciliSatici.email} / {seciliSatici.telefon}', font=Font(color='000066', bold=True, size=8), alignment=center, draw_border=False)
+    merge_range('J2:M2', 'DETAYLAR', fill=title_fill, font=white_font, alignment=center, outline=True)
+    merge_range('J3:K3', '{belgeTuru} NO', fill=soft_fill, font=label_font, alignment=center, outline=True)
+    merge_range('L3:M3', '{belgeNo}', alignment=center, outline=True)
+    merge_range('J4:K4', 'TARİH', fill=soft_fill, font=label_font, alignment=center, outline=True)
+    merge_range('L4:M4', '{olusturmaTarihi}', alignment=center, outline=True)
+    merge_range('J5:K5', 'HAZIRLAYAN', fill=soft_fill, font=label_font, alignment=center, outline=True)
+    merge_range('L5:M5', '{hazirlayan}', alignment=center, outline=True)
 
     section_header(7, '{belgeTuru}')
-    merge_range('K8:L8', 'TARİH', font=blue_font, alignment=center, outline=True)
-    merge_range('M8:M8', '{olusturmaTarihi}', font=Font(color='000066', bold=True), alignment=center, outline=True)
+    merge_range('B9:G9', 'SATICI BİLGİLERİ', fill=title_fill, font=white_font, alignment=center, outline=True)
+    merge_range('H9:M9', 'ALICI BİLGİLERİ', fill=title_fill, font=white_font, alignment=center, outline=True)
+    for row_number, seller_label, seller_value, buyer_label, buyer_value in [
+        (10, 'ÜNVAN', '{seciliSatici.resmiUnvan}', 'CARİ ÜNVANI', '{cariUnvani}'),
+        (11, 'VERGİ DAİRESİ / NO', '{seciliSatici.vergiDairesi} / {seciliSatici.vergiNo}', 'VERGİ DAİRESİ / NO', '{vergiDairesi} / {vergiNo}'),
+        (12, 'ADRES', '{seciliSatici.adres}', 'ADRES', '{adres}'),
+        (13, 'TELEFON / E-POSTA', '{seciliSatici.telefon} / {seciliSatici.email}', 'YETKİLİ', '{yetkili}'),
+        (14, '', '', 'TELEFON / E-POSTA', '{telefon} / {email}'),
+    ]:
+        merge_range(f'B{row_number}:C{row_number}', seller_label, fill=soft_fill, font=label_font, alignment=center, outline=True)
+        merge_range(f'D{row_number}:G{row_number}', seller_value, alignment=left, outline=True)
+        merge_range(f'H{row_number}:I{row_number}', buyer_label, fill=soft_fill, font=label_font, alignment=center, outline=True)
+        merge_range(f'J{row_number}:M{row_number}', buyer_value, alignment=left, outline=True)
 
-    ws.merge_cells('A9:A26')
-    ws['A9'] = 'T\nA\nR\nA\nF\nL\nA\nR'
-    ws['A9'].font = Font(color='000066', bold=True, size=18)
-    ws['A9'].alignment = center
-
-    section_header(9, 'SATIŞI YAPAN FİRMA')
-    label_value(10, 'ÜNVAN', '{seciliSatici.resmiUnvan}')
-    label_value(11, 'VERGİ DAİRESİ / NO', '{seciliSatici.vergiDairesi} / {seciliSatici.vergiNo}')
-    label_value(12, 'ADRES', '{seciliSatici.adres}')
-    label_value(13, 'TELEFON / E-POSTA', '{seciliSatici.telefon} / {seciliSatici.email}')
-
-    section_header(15, 'ALICI BİLGİLERİ')
-    label_value(16, 'CARİ ÜNVANI', '{cariUnvani}')
-    label_value(17, 'VERGİ DAİRESİ / NO', '{vergiDairesi} / {vergiNo}')
-    label_value(18, 'ADRES', '{adres}')
-    label_value(19, 'YETKİLİ', '{yetkili}')
-    label_value(20, 'TELEFON / E-POSTA', '{telefon} / {email}')
-
-    section_header(22, '')
-    label_value(23, '{belgeTuru} NUMARASI', '{belgeNo}')
-    label_value(24, 'HAZIRLAYAN', '{hazirlayan}')
-    label_value(25, 'GEÇERLİLİK TARİHİ', '{gecerlilikTarihi}')
-    label_value(26, 'F.LİSTESİ', '{fiyatListesiEtiketi} - Para Birimi: {paraBirimi}')
-
-    section_header(28, 'KALEMLER')
-    ws['B29'] = '{urunGruplari}'
-    ws['B29'].alignment = left
+    section_header(16, 'KALEMLER')
+    ws['B17'] = '{urunGruplari}'
+    ws['B17'].alignment = left
 
     section_header(45, 'ÖDEME VE TESLİM')
     label_value(46, 'ÖDEME KOŞULU', '{odemeKosulu}')
@@ -1283,6 +1273,7 @@ def _build_seller_master_document_export(quote):
     workbook.template = False
     worksheet = workbook['Belge'] if 'Belge' in workbook.sheetnames else workbook[workbook.sheetnames[0]]
     banner_images = _detach_template_banner_images(worksheet)
+    _prepare_seller_master_document_layout(worksheet)
     template = {
         'template_key': SELLER_MASTER_TEMPLATE_KEY,
         'document_type': quote.document_type,
@@ -1318,7 +1309,7 @@ def _prepare_pdf_print_layout(worksheet):
     worksheet.page_margins.top = 0.2
     worksheet.page_margins.bottom = 0.2
     worksheet.print_options.horizontalCentered = True
-    worksheet.print_area = f'A1:{get_column_letter(worksheet.max_column)}{worksheet.max_row}'
+    worksheet.print_area = f'B1:{get_column_letter(worksheet.max_column)}{worksheet.max_row}'
 
 
 def build_document_pdf_export(quote):
@@ -1630,13 +1621,6 @@ def _fixed_ayka_seller_profile(organization):
     return next((profile for profile in get_default_seller_profiles() if profile.get('key') == ayka_key), profiles[0] if profiles else {})
 
 
-def _set_header_text(ws, coordinate, value, *, bold=False, size=10):
-    cell = _resolve_cell(ws, coordinate)
-    cell.value = value
-    cell.font = _seller_master_font(color='000066', bold=bold, size=size)
-    cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True, shrink_to_fit=True)
-
-
 def _add_header_logo(ws, profile, anchor, max_width, max_height):
     logo_path = _seller_logo_media_path(profile)
     if not logo_path:
@@ -1656,33 +1640,92 @@ def _merge_header_range(ws, cell_range):
 
 
 def _prepare_seller_master_header_layout(ws):
-    for cell_range in ['B2:E5', 'F2:I5', 'J2:M3', 'J2:M2', 'J3:M3', 'J4:M4', 'J5:M5']:
+    for cell_range in ['B2:E5', 'F2:I5', 'J2:M3', 'J2:M2', 'J3:K3', 'L3:M3', 'J4:K4', 'L4:M4', 'J5:K5', 'L5:M5']:
         _safe_unmerge(ws, cell_range)
     _merge_header_range(ws, 'B2:E5')
     _merge_header_range(ws, 'F2:I5')
-    for cell_range in ['J2:M2', 'J3:M3', 'J4:M4', 'J5:M5']:
+    for cell_range in ['J2:M2', 'J3:K3', 'L3:M3', 'J4:K4', 'L4:M4', 'J5:K5', 'L5:M5']:
         _merge_header_range(ws, cell_range)
     for row in range(2, 6):
         ws.row_dimensions[row].height = 22
 
 
+def _set_header_detail_box(ws, row, label, value):
+    styles = _tail_styles()
+    _tail_merge(ws, row, 10, 11, label, styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
+    _tail_merge(ws, row, 12, 13, value, None, styles['text_font'], styles['center'], styles['section_border'])
+
+
 def _apply_seller_master_header_branding(ws, quote):
     fixed_left = _fixed_ayka_seller_profile(quote.organization)
-    selected_seller = _selected_seller_profile(quote)
     _strip_header_logos(ws)
     _prepare_seller_master_header_layout(ws)
 
-    for coordinate in ['B2', 'F2', 'J2', 'J3', 'J4', 'J5']:
+    for coordinate in ['B2', 'F2', 'J2', 'J3', 'L3', 'J4', 'L4', 'J5', 'L5']:
         _set_cell_value(ws, coordinate, '')
 
     _clear_logo_frame(ws, ws['B2'])
     _clear_logo_frame(ws, ws['F2'])
     _add_header_logo(ws, fixed_left, 'B2', 330, 112)
 
-    _set_header_text(ws, 'J2', _normalize_display_name(selected_seller.get('display_name', '')), bold=True, size=9)
-    _set_header_text(ws, 'J3', _join_tax(selected_seller.get('tax_office', ''), selected_seller.get('tax_number', '')), size=8)
-    _set_header_text(ws, 'J4', selected_seller.get('address', ''), size=8)
-    _set_header_text(ws, 'J5', _join_contact(selected_seller.get('phone', ''), selected_seller.get('email', '')), size=8)
+    styles = _tail_styles()
+    document_title = 'SÖZLEŞME' if quote.document_type == 'Contract' else 'TEKLİF'
+    title_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True, shrink_to_fit=True)
+    _tail_merge(ws, 2, 10, 13, 'DETAYLAR', styles['title_fill'], _seller_master_font(color='FFFFFF', bold=True, size=10), title_alignment, styles['section_border'])
+    _set_header_detail_box(ws, 3, f'{document_title} NO', quote.number)
+    _set_header_detail_box(ws, 4, 'TARİH', _timezone_fallback(quote.created_at).strftime('%d.%m.%Y'))
+    _set_header_detail_box(ws, 5, 'HAZIRLAYAN', _resolve_prepared_by_name(quote))
+
+
+def _copy_cell_style(source, target):
+    target.font = copy(source.font)
+    target.fill = copy(source.fill)
+    target.border = copy(source.border)
+    target.alignment = copy(source.alignment)
+    target.number_format = source.number_format
+    target.protection = copy(source.protection)
+
+
+def _merge_seller_master_box(ws, cell_range, value, source):
+    min_col, min_row, max_col, max_row = range_boundaries(cell_range)
+    _unmerge_overlapping_range(ws, min_row, max_row, min_col, max_col)
+    ws.merge_cells(cell_range)
+    for row in range(min_row, max_row + 1):
+        for column in range(min_col, max_col + 1):
+            _copy_cell_style(source, ws.cell(row, column))
+    ws.cell(min_row, min_col).value = value
+
+
+def _prepare_seller_master_document_layout(ws):
+    ws.column_dimensions['A'].hidden = True
+    if str(ws['H9'].value or '').strip() == 'ALICI BİLGİLERİ':
+        return
+
+    header_style = copy(ws['B9'])
+    label_style = copy(ws['B10'])
+    value_style = copy(ws['D10'])
+    _unmerge_overlapping_range(ws, 8, 27, 1, 13)
+    for row in range(8, 28):
+        for column in range(1, 14):
+            ws.cell(row, column).value = ''
+    ws.delete_rows(15, 13)
+
+    _merge_seller_master_box(ws, 'B9:G9', 'SATICI BİLGİLERİ', header_style)
+    _merge_seller_master_box(ws, 'H9:M9', 'ALICI BİLGİLERİ', header_style)
+    rows = [
+        (10, 'ÜNVAN', '{seciliSatici.resmiUnvan}', 'CARİ ÜNVANI', '{cariUnvani}'),
+        (11, 'VERGİ DAİRESİ / NO', '{seciliSatici.vergiDairesi} / {seciliSatici.vergiNo}', 'VERGİ DAİRESİ / NO', '{vergiDairesi} / {vergiNo}'),
+        (12, 'ADRES', '{seciliSatici.adres}', 'ADRES', '{adres}'),
+        (13, 'TELEFON / E-POSTA', '{seciliSatici.telefon} / {seciliSatici.email}', 'YETKİLİ', '{yetkili}'),
+        (14, '', '', 'TELEFON / E-POSTA', '{telefon} / {email}'),
+    ]
+    for row, seller_label, seller_value, buyer_label, buyer_value in rows:
+        _merge_seller_master_box(ws, f'B{row}:C{row}', seller_label, label_style)
+        _merge_seller_master_box(ws, f'D{row}:G{row}', seller_value, value_style)
+        _merge_seller_master_box(ws, f'H{row}:I{row}', buyer_label, label_style)
+        _merge_seller_master_box(ws, f'J{row}:M{row}', buyer_value, value_style)
+        ws.row_dimensions[row].height = 28
+    ws.row_dimensions[9].height = 28
 
 
 def _image_anchor_row(image):
@@ -2559,7 +2602,7 @@ def _write_bottom_banner_tail(ws, row, prepared_banner):
     for offset in range(row_count):
         ws.row_dimensions[row + offset].height = row_height
     ws.cell(row + row_count - 1, 13).value = ' '
-    ws.add_image(banner, f'A{row}')
+    ws.add_image(banner, f'B{row}')
     return row + row_count
 
 
