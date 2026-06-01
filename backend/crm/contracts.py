@@ -1648,7 +1648,7 @@ def _prepare_seller_master_header_layout(ws):
         _safe_unmerge(ws, cell_range)
     _merge_header_range(ws, 'B2:E5')
     _merge_header_range(ws, 'F2:I5')
-    for cell_range in ['J2:M2', 'J3:K3', 'L3:M3', 'J4:K4', 'L4:M4', 'J5:K5', 'L5:M5']:
+    for cell_range in ['J2:K2', 'L2:M2', 'J3:K3', 'L3:M3', 'J4:K4', 'L4:M4']:
         _merge_header_range(ws, cell_range)
     for row in range(2, 6):
         ws.row_dimensions[row].height = 22
@@ -1656,8 +1656,10 @@ def _prepare_seller_master_header_layout(ws):
 
 def _set_header_detail_box(ws, row, label, value):
     styles = _tail_styles()
-    _tail_merge(ws, row, 10, 11, label, styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
-    _tail_merge(ws, row, 12, 13, value, None, styles['text_font'], styles['center'], styles['section_border'])
+    label_cell = _tail_merge(ws, row, 10, 11, label, None, styles['label_font'], styles['center'], styles['section_border'])
+    value_cell = _tail_merge(ws, row, 12, 13, value, None, styles['text_font'], styles['center'], styles['section_border'])
+    label_cell.fill = PatternFill(fill_type=None)
+    value_cell.fill = PatternFill(fill_type=None)
 
 
 def _apply_seller_master_header_branding(ws, quote):
@@ -1665,7 +1667,7 @@ def _apply_seller_master_header_branding(ws, quote):
     _strip_header_logos(ws)
     _prepare_seller_master_header_layout(ws)
 
-    for coordinate in ['B2', 'F2', 'J2', 'J3', 'L3', 'J4', 'L4', 'J5', 'L5', 'K8', 'M8']:
+    for coordinate in ['B2', 'F2', 'J2', 'L2', 'J3', 'L3', 'J4', 'L4']:
         _set_cell_value(ws, coordinate, '')
 
     _clear_logo_frame(ws, ws['B2'])
@@ -1674,15 +1676,24 @@ def _apply_seller_master_header_branding(ws, quote):
 
     styles = _tail_styles()
     document_title = 'SÖZLEŞME' if quote.document_type == 'Contract' else 'TEKLİF'
-    title_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True, shrink_to_fit=True)
-    _tail_merge(ws, 2, 10, 13, 'DETAYLAR', styles['title_fill'], _seller_master_font(color='FFFFFF', bold=True, size=10), title_alignment, styles['section_border'])
-    _set_header_detail_box(ws, 3, f'{document_title} NO', quote.number)
     document_date = _timezone_fallback(quote.created_at).strftime('%d.%m.%Y')
-    _set_header_detail_box(ws, 4, 'TARİH', document_date)
-    _set_header_detail_box(ws, 5, 'TEMSİLCİ', _resolve_prepared_by_name(quote))
-    _tail_merge(ws, 8, 11, 12, 'TARİH', styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
-    _tail_merge(ws, 8, 13, 13, document_date, None, styles['text_font'], styles['center'], styles['section_border'])
-    ws.row_dimensions[8].height = 24
+    _set_header_detail_box(ws, 2, f'{document_title} NO', quote.number)
+    _set_header_detail_box(ws, 3, 'TARİH', document_date)
+    _set_header_detail_box(ws, 4, 'FİYAT LİSTESİ', get_quote_price_list_label(quote))
+    _clear_seller_master_spacer_row(ws, 5, start_col=10)
+    _clear_seller_master_spacer_row(ws, 8)
+    _tail_merge(ws, 14, 2, 3, 'TEMSİLCİ', styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
+    _tail_merge(ws, 14, 4, 7, _resolve_prepared_by_name(quote), None, styles['text_font'], styles['left'], styles['section_border'])
+
+
+def _clear_seller_master_spacer_row(ws, row, start_col=2, end_col=13):
+    _unmerge_overlapping_range(ws, row, row, start_col, end_col)
+    for column in range(start_col, end_col + 1):
+        cell = ws.cell(row, column)
+        cell.value = ''
+        cell.fill = PatternFill(fill_type=None)
+        cell.border = EMPTY_BORDER
+    ws.row_dimensions[row].height = 6
 
 
 def _copy_cell_style(source, target):
@@ -1725,7 +1736,7 @@ def _prepare_seller_master_document_layout(ws):
         (11, 'VERGİ DAİRESİ / NO', '{seciliSatici.vergiDairesi} / {seciliSatici.vergiNo}', 'VERGİ DAİRESİ / NO', '{vergiDairesi} / {vergiNo}'),
         (12, 'ADRES', '{seciliSatici.adres}', 'ADRES', '{adres}'),
         (13, 'TELEFON / E-POSTA', '{seciliSatici.telefon} / {seciliSatici.email}', 'YETKİLİ', '{yetkili}'),
-        (14, '', '', 'TELEFON / E-POSTA', '{telefon} / {email}'),
+        (14, 'TEMSİLCİ', '{hazirlayan}', 'TELEFON / E-POSTA', '{telefon} / {email}'),
     ]
     for row, seller_label, seller_value, buyer_label, buyer_value in rows:
         _merge_seller_master_box(ws, f'B{row}:C{row}', seller_label, label_style)
@@ -2317,10 +2328,9 @@ def _render_seller_master_tail(ws, quote, start_row, banner_images=None):
 
     terms_start = max(yekun_end, payment_end) + 1
     _add_manual_page_break_before(ws, terms_start)
-    row = _write_terms_tail(ws, quote, terms_start)
-
-    bank_start = row + 1
-    row = _write_bank_tail(ws, quote, bank_start)
+    terms_end = _write_terms_tail(ws, quote, terms_start, start_col=2, end_col=7)
+    bank_end = _write_bank_tail(ws, quote, terms_start, start_col=8, end_col=13)
+    row = max(terms_end, bank_end)
 
     signature_start = row + 2
     row = _write_signature_tail(ws, quote, signature_start)
@@ -2328,7 +2338,7 @@ def _render_seller_master_tail(ws, quote, start_row, banner_images=None):
     prepared_banner = _prepare_bottom_banner_tail(ws, banner_images or [])
     legal_notice_rows = 2
     if prepared_banner:
-        banner_start = _bottom_banner_footer_start_row(ws, bank_start, row + 1 + legal_notice_rows, prepared_banner)
+        banner_start = _bottom_banner_footer_start_row(ws, terms_start, row + 1 + legal_notice_rows, prepared_banner)
         legal_start = max(row + 1, banner_start - legal_notice_rows)
         if legal_start + legal_notice_rows > banner_start:
             banner_start = legal_start + legal_notice_rows
@@ -2487,7 +2497,7 @@ def _write_payment_delivery_tail(ws, quote, row, start_col=2, end_col=13):
     return row + 4
 
 
-def _write_terms_tail(ws, quote, row):
+def _write_terms_tail(ws, quote, row, start_col=2, end_col=13):
     config = quote.contract_config or {}
     raw_terms = _config_text(config, 'termsText', 'terms_text') or _default_terms_text_for_quote(quote)
     terms = parse_terms_text(raw_terms)
@@ -2496,48 +2506,51 @@ def _write_terms_tail(ws, quote, row):
         terms = terms + notes
 
     title = 'SÖZLEŞME KOŞULLARI' if quote.document_type == 'Contract' else 'TEKLİF KOŞULLARI'
-    _tail_section_header(ws, row, title)
+    _tail_section_header(ws, row, title, start_col, end_col)
     styles = _tail_styles()
     current_row = row + 1
     for term in terms:
-        _tail_merge(ws, current_row, 2, 13, term, None, styles['text_font'], styles['left'], styles['thin_border'])
-        ws.row_dimensions[current_row].height = max(26, min(72, 22 + (len(str(term)) // 90) * 15))
+        _tail_merge(ws, current_row, start_col, end_col, term, None, styles['text_font'], styles['left'], styles['thin_border'])
+        ws.row_dimensions[current_row].height = max(22, min(58, 20 + (len(str(term)) // 58) * 12))
         current_row += 1
     if quote.document_type == 'Contract':
         contract_date = _parse_date(config.get('contract_date')) or _timezone_fallback(quote.created_at)
         closing = f'İşbu sözleşme {contract_date.strftime("%d.%m.%Y")} tarihinde iki nüsha olarak imzalanmış ve yürürlüğe girmiştir.'
-        _tail_merge(ws, current_row, 2, 13, closing, None, styles['text_font'], styles['left'], styles['thin_border'])
-        ws.row_dimensions[current_row].height = max(26, min(72, 22 + (len(closing) // 90) * 15))
+        _tail_merge(ws, current_row, start_col, end_col, closing, None, styles['text_font'], styles['left'], styles['thin_border'])
+        ws.row_dimensions[current_row].height = max(22, min(58, 20 + (len(closing) // 58) * 12))
         current_row += 1
     return current_row
 
 
-def _write_bank_tail(ws, quote, row):
+def _write_bank_tail(ws, quote, row, start_col=2, end_col=13):
     seller = _selected_seller_profile(quote)
     styles = _tail_styles()
     text_alignment = Alignment(horizontal='left', vertical='center', wrap_text=True, shrink_to_fit=True)
     bank_accounts = _seller_bank_accounts_with_ibans(seller)
     has_second_iban = _seller_has_second_iban(bank_accounts)
 
-    _tail_section_header(ws, row, 'FİRMA ÜNVANI & IBANLAR')
-    _tail_merge(ws, row + 1, 2, 13, _normalize_display_name(seller.get('display_name', '')), None, styles['label_font'], styles['center'], styles['section_border'])
-    _tail_merge(ws, row + 2, 2, 4, 'BANKA', styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
+    bank_end_col = min(end_col - 1, start_col + 1)
+    iban_start_col = bank_end_col + 1
+    _tail_section_header(ws, row, 'FİRMA ÜNVANI & IBANLAR', start_col, end_col)
+    _tail_merge(ws, row + 1, start_col, end_col, _normalize_display_name(seller.get('display_name', '')), None, styles['label_font'], styles['center'], styles['section_border'])
+    _tail_merge(ws, row + 2, start_col, bank_end_col, 'BANKA', styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
     if has_second_iban:
-        _tail_merge(ws, row + 2, 5, 8, _seller_bank_iban_label(seller, 1), styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
-        _tail_merge(ws, row + 2, 9, 13, _seller_bank_iban_label(seller, 2), styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
+        iban_mid_col = min(end_col - 1, iban_start_col + 1)
+        _tail_merge(ws, row + 2, iban_start_col, iban_mid_col, _seller_bank_iban_label(seller, 1), styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
+        _tail_merge(ws, row + 2, iban_mid_col + 1, end_col, _seller_bank_iban_label(seller, 2), styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
     else:
-        _tail_merge(ws, row + 2, 5, 13, 'IBAN', styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
+        _tail_merge(ws, row + 2, iban_start_col, end_col, 'IBAN', styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
     ws.row_dimensions[row + 1].height = 28
     ws.row_dimensions[row + 2].height = 24
 
     current_row = row + 3
     for account in bank_accounts or [{}]:
-        _tail_merge(ws, current_row, 2, 4, _normalize_bank_name(account.get('bank', '')), None, styles['text_font'], text_alignment, styles['thin_border'])
+        _tail_merge(ws, current_row, start_col, bank_end_col, _normalize_bank_name(account.get('bank', '')), None, styles['text_font'], text_alignment, styles['thin_border'])
         if has_second_iban:
-            _tail_merge(ws, current_row, 5, 8, _bank_iban_display(account, 1), None, styles['text_font'], text_alignment, styles['thin_border'])
-            _tail_merge(ws, current_row, 9, 13, _bank_iban_display(account, 2), None, styles['text_font'], text_alignment, styles['thin_border'])
+            _tail_merge(ws, current_row, iban_start_col, iban_mid_col, _bank_iban_display(account, 1), None, styles['text_font'], text_alignment, styles['thin_border'])
+            _tail_merge(ws, current_row, iban_mid_col + 1, end_col, _bank_iban_display(account, 2), None, styles['text_font'], text_alignment, styles['thin_border'])
         else:
-            _tail_merge(ws, current_row, 5, 13, _bank_iban_display(account, 1, show_currency=False), None, styles['text_font'], text_alignment, styles['thin_border'])
+            _tail_merge(ws, current_row, iban_start_col, end_col, _bank_iban_display(account, 1, show_currency=False), None, styles['text_font'], text_alignment, styles['thin_border'])
         ws.row_dimensions[current_row].height = 26
         current_row += 1
     return current_row
@@ -2551,7 +2564,7 @@ def _write_signature_tail(ws, quote, row):
     signature_alignment = Alignment(horizontal='center', vertical='top', wrap_text=True)
     _tail_merge(ws, row + 1, 2, 7, f"SATICI\n{_normalize_display_name(seller.get('display_name', ''))}", None, styles['text_font'], signature_alignment, styles['section_border'])
     _tail_merge(ws, row + 1, 8, 13, f"ALICI\n{customer.get('name') or getattr(quote.customer, 'name', '') or ''}", None, styles['text_font'], signature_alignment, styles['section_border'])
-    ws.row_dimensions[row + 1].height = 170
+    ws.row_dimensions[row + 1].height = 145
     return row + 2
 
 
