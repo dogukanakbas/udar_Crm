@@ -1665,7 +1665,7 @@ def _apply_seller_master_header_branding(ws, quote):
     _strip_header_logos(ws)
     _prepare_seller_master_header_layout(ws)
 
-    for coordinate in ['B2', 'F2', 'J2', 'J3', 'L3', 'J4', 'L4', 'J5', 'L5']:
+    for coordinate in ['B2', 'F2', 'J2', 'J3', 'L3', 'J4', 'L4', 'J5', 'L5', 'K8', 'M8']:
         _set_cell_value(ws, coordinate, '')
 
     _clear_logo_frame(ws, ws['B2'])
@@ -1677,8 +1677,12 @@ def _apply_seller_master_header_branding(ws, quote):
     title_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True, shrink_to_fit=True)
     _tail_merge(ws, 2, 10, 13, 'DETAYLAR', styles['title_fill'], _seller_master_font(color='FFFFFF', bold=True, size=10), title_alignment, styles['section_border'])
     _set_header_detail_box(ws, 3, f'{document_title} NO', quote.number)
-    _set_header_detail_box(ws, 4, 'TARİH', _timezone_fallback(quote.created_at).strftime('%d.%m.%Y'))
+    document_date = _timezone_fallback(quote.created_at).strftime('%d.%m.%Y')
+    _set_header_detail_box(ws, 4, 'TARİH', document_date)
     _set_header_detail_box(ws, 5, 'TEMSİLCİ', _resolve_prepared_by_name(quote))
+    _tail_merge(ws, 8, 11, 12, 'TARİH', styles['soft_fill'], styles['label_font'], styles['center'], styles['section_border'])
+    _tail_merge(ws, 8, 13, 13, document_date, None, styles['text_font'], styles['center'], styles['section_border'])
+    ws.row_dimensions[8].height = 24
 
 
 def _copy_cell_style(source, target):
