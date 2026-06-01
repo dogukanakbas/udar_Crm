@@ -506,7 +506,7 @@ export const useAppStore = create<AppState>()(
             meRes.data.username ||
             meRes.data.email ||
             `user-${meRes.data.id}`,
-          permissions: [],
+          permissions: effectivePermissions,
           canPrepareQuotes: false,
         } as any)
       }

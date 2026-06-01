@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
 import api from '@/lib/api'
 import { useToast } from '@/components/ui/use-toast'
+import { useAppStore } from '@/state/use-app-store'
 
 type RolePerms = Record<string, string[]>
 type PermissionCatalogModule = {
@@ -53,6 +54,7 @@ export function RolesPermissionPanel({ embedded = false }: { embedded?: boolean 
   const save = async () => {
     try {
       await api.post('/auth/role-perms/', { role: selectedRole, permissions: rolePerms[selectedRole] || [] })
+      await useAppStore.getState().hydrateFromApi({ force: true })
       toast({ title: 'İzinler güncellendi' })
     } catch {
       toast({ title: 'Kaydedilemedi', variant: 'destructive' })
