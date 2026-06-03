@@ -764,7 +764,7 @@ export function ProductionManagementPage() {
                     <SelectTrigger><SelectValue placeholder="Kullanıcı seç" /></SelectTrigger>
                     <SelectContent>{users.map((user) => <SelectItem key={user.id} value={String(user.id)}>{userLabel(user)}{user.role ? ` · ${user.role}` : ''}</SelectItem>)}</SelectContent>
                   </Select>
-                  <Input type="password" placeholder="Tablet PIN" value={pinDraft.pin} onChange={(e) => setPinDraft((current) => ({ ...current, pin: e.target.value }))} />
+                  <Input type="text" inputMode="numeric" pattern="[0-9]*" style={{ WebkitTextSecurity: 'disc' } as any} placeholder="Tablet PIN" value={pinDraft.pin} onChange={(e) => setPinDraft((current) => ({ ...current, pin: e.target.value.replace(/\D/g, '') }))} />
                   <Button onClick={saveOperatorPin} disabled={!pinDraft.user || !pinDraft.pin}>PIN kaydet</Button>
                 </CardContent>
               </Card>
@@ -1499,11 +1499,10 @@ export function ProductionTabletPage() {
   const selectedWork = ctx.work_items?.find((item) => String(item.line_id) === selectedLineId) || ctx.work_items?.[0]
   const activeSlots = slots.filter(Boolean) as TabletSlot[]
   const startedSlots = activeSlots.filter((slot) => slot.status === 'started')
-  const suggestedCheckpoint = String(n(ctx.active_window?.start_total) + n(ctx.active_window?.machine_delta) || n(selectedWork?.machine_quantity) || 0)
 
   const requestCheckpoint = (title: string, action: (total: string, note: string) => Promise<void>) => {
     setCheckpointTitle(title)
-    setCheckpointTotal(suggestedCheckpoint)
+    setCheckpointTotal('')
     setCheckpointNote('')
     checkpointActionRef.current = action
     setCheckpointOpen(true)
@@ -1763,7 +1762,7 @@ export function ProductionTabletPage() {
                       disabled={submitting}
                       onClick={() => {
                         setClosingSlot(slot)
-                        setClosingQty(String(slot.machine_quantity || 0))
+                        setClosingQty('')
                         setClosingPin('')
                         setNote('')
                       }}
@@ -1807,7 +1806,7 @@ export function ProductionTabletPage() {
               <SelectTrigger><SelectValue placeholder="Çalışan seç" /></SelectTrigger>
               <SelectContent>{(ctx.operators || []).map((operator) => <SelectItem key={operator.id} value={String(operator.id)}>{operator.name}{operator.has_pin ? '' : ' · PIN yok'}</SelectItem>)}</SelectContent>
             </Select>
-            <Input type="password" placeholder="Üretim PIN’i" value={pin} onChange={(e) => setPin(e.target.value)} disabled={submitting} />
+            <Input type="text" inputMode="numeric" pattern="[0-9]*" style={{ WebkitTextSecurity: 'disc' } as any} placeholder="Üretim PIN’i" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} disabled={submitting} />
           </div>
           <DialogFooter><Button onClick={login} disabled={!loginUser || !pin || submitting}>Başlat</Button></DialogFooter>
         </DialogContent>
@@ -1822,9 +1821,9 @@ export function ProductionTabletPage() {
             </div>
             <div className="grid gap-2">
               <Label>Yapılan Üretim Miktarı (Adet)</Label>
-              <Input value={closingQty} onChange={(e) => setClosingQty(e.target.value)} inputMode="decimal" disabled={submitting} />
+              <Input type="text" inputMode="numeric" pattern="[0-9]*" value={closingQty} onChange={(e) => setClosingQty(e.target.value)} disabled={submitting} />
             </div>
-            <Input type="password" placeholder="Üretim PIN’i" value={closingPin} onChange={(e) => setClosingPin(e.target.value)} disabled={submitting} />
+            <Input type="text" inputMode="numeric" pattern="[0-9]*" style={{ WebkitTextSecurity: 'disc' } as any} placeholder="Üretim PIN’i" value={closingPin} onChange={(e) => setClosingPin(e.target.value.replace(/\D/g, ''))} disabled={submitting} />
             <Textarea placeholder="Varsa notunuz" value={note} onChange={(e) => setNote(e.target.value)} disabled={submitting} />
           </div>
           <DialogFooter><Button onClick={logout} disabled={!closingQty || !closingPin || submitting}>Çıkışı tamamla</Button></DialogFooter>
@@ -1842,7 +1841,7 @@ export function ProductionTabletPage() {
           <div className="space-y-3">
             <div className="grid gap-2">
               <Label>Yapılan Üretim Miktarı (Adet)</Label>
-              <Input value={checkpointTotal} onChange={(e) => setCheckpointTotal(e.target.value)} inputMode="decimal" autoFocus disabled={submitting} />
+              <Input type="text" inputMode="numeric" pattern="[0-9]*" value={checkpointTotal} onChange={(e) => setCheckpointTotal(e.target.value)} autoFocus disabled={submitting} />
             </div>
             <Textarea placeholder="Varsa notunuz" value={checkpointNote} onChange={(e) => setCheckpointNote(e.target.value)} disabled={submitting} />
           </div>
