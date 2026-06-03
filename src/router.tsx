@@ -24,6 +24,7 @@ import AccessLogsPage from '@/pages/access-logs'
 import { MdfHistoryPage } from '@/pages/mdf-history'
 import { MdfManagementPage } from '@/pages/mdf-management'
 import { WarehouseManagementPage, WarehouseOperationsPage } from '@/pages/warehouses'
+import { ProductionConsolePage, ProductionManagementPage, ProductionReportsPage, ProductionWorkOrdersPage } from '@/pages/production'
 import { getTokens } from '@/lib/auth'
 import { useAppStore } from '@/state/use-app-store'
 import { hasPermission } from '@/lib/permissions'
@@ -159,6 +160,30 @@ const warehouseOperationsRoute = new Route({
   component: secured(WarehouseOperationsPage, 'warehouse_stock.view'),
 })
 
+const productionManagementRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/erp/production',
+  component: secured(ProductionManagementPage, 'production.view'),
+})
+
+const productionWorkOrdersRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/erp/production/orders',
+  component: secured(ProductionWorkOrdersPage, 'production.work_orders.view'),
+})
+
+const productionConsoleRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/erp/production/console',
+  component: secured(ProductionConsolePage, 'production.station.operate'),
+})
+
+const productionReportsRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/erp/production/reports',
+  component: secured(ProductionReportsPage, 'production.reports.view'),
+})
+
 const invoicingRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/erp/invoicing',
@@ -281,10 +306,14 @@ const routeTree = rootRoute.addChildren([
   sellerCompaniesRoute,
   salesOrdersRoute,
   purchasesRoute,
-  inventoryRoute,
-  warehouseManagementRoute,
-  warehouseOperationsRoute,
-  invoicingRoute,
+    inventoryRoute,
+    warehouseManagementRoute,
+    warehouseOperationsRoute,
+    productionManagementRoute,
+    productionWorkOrdersRoute,
+    productionConsoleRoute,
+    productionReportsRoute,
+    invoicingRoute,
   accountingRoute,
   ticketsRoute,
   logisticsRoute,

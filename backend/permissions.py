@@ -26,11 +26,29 @@ class HasAPIPermission(permissions.BasePermission):
     permission_map can be a dict keyed by action name -> permission code.
     If no map entry is found:
       - SAFE_METHODS use required_perm
-      - non-safe default to required_perm with '.edit' fallback (quotes.view -> quotes.edit)
+      - non-safe methods use write_perm/default_write_perm when defined
+      - otherwise common write/manage variants are tried before falling back to required_perm
     """
 
     required_perm = ''
     permission_map = {}
+
+    def _candidate_write_perms(self, view, base):
+        explicit = (
+            getattr(view, 'write_perm', None)
+            or getattr(view, 'default_write_perm', None)
+            or getattr(view, 'required_write_perm', None)
+        )
+        if explicit:
+            return [explicit] if isinstance(explicit, str) else list(explicit)
+        if not base:
+            return []
+        candidates = []
+        if base.endswith('.view'):
+            root = base[:-5]
+            candidates.extend([f'{root}.manage', f'{root}.edit', f'{root}.operate'])
+        candidates.append(base)
+        return list(dict.fromkeys(candidates))
 
     def has_permission(self, request, view):
         user = request.user
@@ -38,20 +56,20 @@ class HasAPIPermission(permissions.BasePermission):
             return False
         action = getattr(view, 'action', None)
         perm_map = getattr(view, 'permission_map', {}) or self.permission_map
-        perm = None
         if action and action in perm_map:
             perm = perm_map[action]
-        else:
-            base = getattr(view, 'required_perm', self.required_perm)
-            if not base:
+            if not perm:
                 return True
-            if request.method in permissions.SAFE_METHODS:
-                perm = base
-            else:
-                perm = base.replace('.view', '.edit')
-        if not perm:
+            if isinstance(perm, (list, tuple, set)):
+                return any(user_has_perm(user, code) for code in perm)
+            return user_has_perm(user, perm)
+
+        base = getattr(view, 'required_perm', self.required_perm)
+        if not base:
             return True
-        return user_has_perm(user, perm)
+        if request.method in permissions.SAFE_METHODS:
+            return user_has_perm(user, base)
+        return any(user_has_perm(user, code) for code in self._candidate_write_perms(view, base))
 
 
 class CommentOnlyRestriction(permissions.BasePermission):

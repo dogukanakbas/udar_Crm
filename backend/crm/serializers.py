@@ -14,6 +14,7 @@ from accounts.price_lists import (
 )
 from audit.utils import log_entity_action
 from erp.models import Product
+from production.automation import schedule_contract_production_if_approved
 
 from .contracts import (
     DEFAULT_CONTRACT_NOTES_TEXT,
@@ -408,6 +409,7 @@ class QuoteSerializer(serializers.ModelSerializer):
         quote._audit_user = self.context.get('request').user if self.context.get('request') else None
         self._create_lines(quote, lines_data)
         self._recalc(quote)
+        schedule_contract_production_if_approved(quote)
         return quote
 
     def validate(self, attrs):
@@ -456,6 +458,7 @@ class QuoteSerializer(serializers.ModelSerializer):
             if previous_lines_snapshot != next_lines_snapshot:
                 log_entity_action(instance, 'updated', user=request_user, field='lines', old_value=previous_lines_snapshot, new_value=next_lines_snapshot)
         self._recalc(instance)
+        schedule_contract_production_if_approved(instance)
         return instance
 
     def _serialize_quote_lines(self, lines):

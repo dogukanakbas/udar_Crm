@@ -39,6 +39,7 @@ from .serializers import QuoteListSerializer, QuoteSerializer, PricingRuleSerial
 from permissions import IsOrgMember, IsOwnerOrManager, HasAPIPermission
 from accounts.utils import user_has_perm
 from audit.utils import log_entity_action
+from production.automation import schedule_contract_production_if_approved
 
 EXCEL_TEMPLATE_CONTENT_TYPES = {
     '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -399,6 +400,7 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             approval.status = 'Waiting'
         quote.save(update_fields=['status'])
         approval.save(update_fields=['status'])
+        schedule_contract_production_if_approved(quote)
         log_entity_action(quote, f'approved_{role}', user=request.user)
         return Response({'status': 'approved', 'role': role})
 

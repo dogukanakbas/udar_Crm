@@ -96,6 +96,10 @@ const nav: Array<{
       { label: 'Stok', to: '/erp/inventory', perm: 'inventory.view' },
       { label: 'Depo Yönetimi', to: '/erp/warehouse-management', perm: 'warehouses.manage' },
       { label: 'Depo', to: '/erp/warehouse', perm: 'warehouse_stock.view' },
+      { label: 'İmalat Yönetimi', to: '/erp/production', perm: 'production.view' },
+      { label: 'İş Emirleri', to: '/erp/production/orders', perm: 'production.work_orders.view' },
+      { label: 'İstasyon Konsolu', to: '/erp/production/console', perm: 'production.station.operate' },
+      { label: 'İmalat Raporları', to: '/erp/production/reports', perm: 'production.reports.view' },
       { label: 'Faturalama', to: '/erp/invoicing', perm: 'invoices.view' },
       { label: 'Muhasebe', to: '/erp/accounting', perm: 'accounting.view' },
       { label: 'Lojistik Takip', to: '/logistics/tracking', perm: 'logistics.view' },
@@ -165,7 +169,8 @@ export function AppShell() {
   const isQuoteTemplateWorkspace = activePath.startsWith('/crm/quote-templates')
   const isInventoryWorkspace = activePath.startsWith('/erp/inventory')
   const isWarehouseWorkspace = activePath.startsWith('/erp/warehouse')
-  const isWideWorkspace = isQuotesWorkspace || isSellerCompanyWorkspace || isQuoteTemplateWorkspace || isInventoryWorkspace || isWarehouseWorkspace
+  const isProductionWorkspace = activePath.startsWith('/erp/production')
+  const isWideWorkspace = isQuotesWorkspace || isSellerCompanyWorkspace || isQuoteTemplateWorkspace || isInventoryWorkspace || isWarehouseWorkspace || isProductionWorkspace
 
   useEffect(() => {
     const faviconUrl = resolveBrandingUrl(data.organization?.favicon_url, 'favicon')

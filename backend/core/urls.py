@@ -24,6 +24,26 @@ from rest_framework import routers
 from crm.views import QuoteViewSet, PricingRuleViewSet, SellerCompanyViewSet, BusinessPartnerViewSet, LeadViewSet, OpportunityViewSet, ContactViewSet
 from erp.views import ProductViewSet as ERPProductViewSet, CategoryViewSet, InvoiceViewSet, SalesOrderViewSet, PurchaseOrderViewSet, StockMovementViewSet, VehicleViewSet, WarehouseViewSet, InventoryLocationViewSet, WarehouseStockViewSet, WarehouseDashboardView
 from mdf.views import MdfSkuViewSet
+from production.views import (
+    ProductionDataFieldViewSet,
+    ProductionDepartmentViewSet,
+    ProductionDeviceViewSet,
+    ProductionDevicePayloadMapViewSet,
+    ProductionDocumentViewSet,
+    ProductionEventViewSet,
+    ProductionPiEventView,
+    ProductionReportExportView,
+    ProductionReportSummaryView,
+    ProductionRuleBlockViewSet,
+    ProductionRuleSetViewSet,
+    ProductionRouteViewSet,
+    ProductionSettingsView,
+    ProductionStationConsoleView,
+    ProductionStationUserViewSet,
+    ProductionStationViewSet,
+    ProductionTemplatePresetViewSet,
+    ProductionWorkOrderViewSet,
+)
 from accounts.views import TeamViewSet, TeamAssociateViewSet
 from core.views import DashboardKPIView, GlobalSearchView, CalendarICSView, SSEView
 from workflow.views import PendingApprovalsView, ApprovalInstanceViewSet, ApprovalActionView
@@ -67,6 +87,19 @@ router.register(r'inventory-locations', InventoryLocationViewSet, basename='inve
 router.register(r'warehouse-stocks', WarehouseStockViewSet, basename='warehouse-stocks')
 router.register(r'mdf-skus', MdfSkuViewSet, basename='mdf-skus')
 router.register(r'vehicles', VehicleViewSet, basename='vehicles')
+router.register(r'production/departments', ProductionDepartmentViewSet, basename='production-departments')
+router.register(r'production/stations', ProductionStationViewSet, basename='production-stations')
+router.register(r'production/station-users', ProductionStationUserViewSet, basename='production-station-users')
+router.register(r'production/devices', ProductionDeviceViewSet, basename='production-devices')
+router.register(r'production/device-maps', ProductionDevicePayloadMapViewSet, basename='production-device-maps')
+router.register(r'production/data-fields', ProductionDataFieldViewSet, basename='production-data-fields')
+router.register(r'production/routes', ProductionRouteViewSet, basename='production-routes')
+router.register(r'production/rules', ProductionRuleSetViewSet, basename='production-rules')
+router.register(r'production/rule-blocks', ProductionRuleBlockViewSet, basename='production-rule-blocks')
+router.register(r'production/template-presets', ProductionTemplatePresetViewSet, basename='production-template-presets')
+router.register(r'production/work-orders', ProductionWorkOrderViewSet, basename='production-work-orders')
+router.register(r'production/events', ProductionEventViewSet, basename='production-events')
+router.register(r'production/documents', ProductionDocumentViewSet, basename='production-documents')
 router.register(r'tickets', TicketViewSet, basename='tickets')
 router.register(r'ticket-messages', TicketMessageViewSet, basename='ticket-messages')
 router.register(r'audit', AuditLogViewSet, basename='audit-logs')
@@ -106,6 +139,12 @@ urlpatterns = [
     path('api/', include(router.urls)),
     path('api/dashboard/kpis/', DashboardKPIView.as_view(), name='dashboard-kpis'),
     path('api/warehouse-dashboard/', WarehouseDashboardView.as_view(), name='warehouse-dashboard'),
+    path('api/production/settings/', ProductionSettingsView.as_view(), name='production-settings'),
+    path('api/production/station-console/context/', ProductionStationConsoleView.as_view(), name='production-station-context'),
+    path('api/production/station-console/event/', ProductionStationConsoleView.as_view(), name='production-station-event'),
+    path('api/production/pi/events/', ProductionPiEventView.as_view(), name='production-pi-events'),
+    path('api/production/reports/summary/', ProductionReportSummaryView.as_view(), name='production-report-summary'),
+    path('api/production/reports/export/', ProductionReportExportView.as_view(), name='production-report-export'),
     path('api/search/', GlobalSearchView.as_view(), name='global-search'),
     path('api/uploads/presign/', UploadPresignView.as_view(), name='upload-presign'),
     path('api/calendar/ics/', CalendarICSView.as_view(), name='calendar-ics'),
