@@ -13,6 +13,14 @@ PERMISSION_CATALOG = [
         ],
     },
     {
+        "key": "addons",
+        "label": "Add-on sistemi",
+        "description": "XenForo benzeri eklenti keşfi, kurulum ve metadata yönetimi.",
+        "permissions": [
+            ("addons.manage", "Add-on keşfet, yükle ve yönet"),
+        ],
+    },
+    {
         "key": "partners",
         "label": "Cari kartı",
         "description": "Müşteri/cari kartları ve dışa aktarım işlemleri.",
@@ -131,6 +139,9 @@ PERMISSION_CATALOG = [
             ("production.rules.manage", "Üretim akış kurallarını yönet"),
             ("production.work_orders.view", "Üretim iş emirlerini görüntüle"),
             ("production.work_orders.manage", "Üretim iş emirlerini yönet"),
+            ("production.sessions.view", "Üretim oturumlarını görüntüle"),
+            ("production.sessions.review", "Üretim oturumu farklarını incele"),
+            ("production.sessions.manage", "Üretim oturumlarını yönet"),
             ("production.station.operate", "İstasyon konsolunda işlem yap"),
             ("production.pi.ingest", "Pi cihazlarından üretim verisi al"),
             ("production.pi_events.view", "Pi olaylarını görüntüle"),
@@ -236,7 +247,7 @@ DEFAULT_ROLE_PERMS = {
         "templates.view", "templates.products.edit", "templates.seller_companies.edit", "templates.document_terms.edit", "templates.pricing.edit", "templates.payment_options.edit", "templates.service_tax.edit", "templates.excel.upload",
         "products.view", "products.create", "products.edit", "products.import", "products.export",
         "erp.view", "orders.view", "orders.create", "orders.edit", "orders.receive", "inventory.view", "inventory.edit", "warehouses.view", "warehouses.manage", "warehouse_locations.manage", "warehouse_stock.view", "warehouse_stock.operate", "warehouse_stock.transfer", "warehouse_stock.allocate", "warehouse_stock.import", "warehouse_stock.export", "warehouse_movements.view", "logistics.view", "logistics.edit", "vehicles.view", "vehicles.edit",
-        "production.view", "production.manage", "production.templates.manage", "production.station_users.manage", "production.device_maps.manage", "production.rules.manage", "production.work_orders.view", "production.work_orders.manage", "production.pi_events.view", "production.reports.view", "production.documents.manage",
+        "production.view", "production.manage", "production.templates.manage", "production.station_users.manage", "production.device_maps.manage", "production.rules.manage", "production.work_orders.view", "production.work_orders.manage", "production.sessions.view", "production.sessions.review", "production.sessions.manage", "production.pi_events.view", "production.reports.view", "production.documents.manage",
         "tickets.view", "tickets.edit", "tasks.view", "tasks.create", "tasks.edit", "tasks.assign", "teams.view", "teams.edit", "worker_tracking.view", "reports.view", "audit.view",
         "settings.view", "settings.organization.edit",
     ],

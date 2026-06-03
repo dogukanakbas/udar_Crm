@@ -1,0 +1,35 @@
+[
+  {
+    "key": "crm",
+    "label": "CRM",
+    "icon": "Gauge",
+    "display_order": 100
+  },
+  {
+    "key": "quotes",
+    "label": "Teklif & Sözleşmeler",
+    "parent": "crm",
+    "route": "/crm/quotes",
+    "icon": "FileText",
+    "permission": "quotes.view.own",
+    "display_order": 140
+  },
+  {
+    "key": "seller_companies",
+    "label": "Satıcı Firmalar",
+    "parent": "crm",
+    "route": "/crm/seller-companies",
+    "icon": "Building2",
+    "permission": "templates.seller_companies.edit",
+    "display_order": 150
+  },
+  {
+    "key": "quote_templates",
+    "label": "Şablon Yönetimi",
+    "parent": "crm",
+    "route": "/crm/quote-templates",
+    "icon": "Settings2",
+    "permission": "templates.view",
+    "display_order": 160
+  }
+]

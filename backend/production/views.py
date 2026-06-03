@@ -27,6 +27,7 @@ from .models import (
     ProductionTemplatePreset,
     ProductionWorkOrder,
     ProductionWorkOrderLine,
+    ProductionWorkSession,
 )
 from .serializers import (
     PiEventSerializer,
@@ -44,6 +45,11 @@ from .serializers import (
     ProductionStationUserSerializer,
     ProductionTemplatePresetSerializer,
     ProductionWorkOrderSerializer,
+    ProductionWorkSessionSerializer,
+    SessionCloseSerializer,
+    SessionReviewSerializer,
+    SessionStartSerializer,
+    SessionStateSerializer,
     StationEventSerializer,
 )
 from .services import (
@@ -55,8 +61,16 @@ from .services import (
     create_work_order_from_contract,
     dashboard_summary,
     ensure_default_template_presets,
+    _previous_step_summary,
+    handover_work_session,
     make_pi_idempotency_key,
+    pause_work_session,
+    record_machine_session_event,
     record_station_event,
+    resume_work_session,
+    review_session_discrepancy,
+    start_work_session,
+    close_work_session,
 )
 
 
@@ -304,12 +318,34 @@ class ProductionWorkOrderViewSet(OrgScopedMixin, viewsets.ModelViewSet):
 
 class ProductionEventViewSet(OrgScopedMixin, viewsets.ReadOnlyModelViewSet):
     serializer_class = ProductionEventSerializer
-    queryset = ProductionEvent.objects.select_related('work_order', 'line', 'step', 'station', 'user')
+    queryset = ProductionEvent.objects.select_related('work_order', 'line', 'step', 'station', 'session', 'user')
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
     required_perm = 'production.pi_events.view'
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['work_order__number', 'line__product_name', 'station__code', 'event_type']
     ordering_fields = ['created_at']
+
+
+class ProductionWorkSessionViewSet(OrgScopedMixin, viewsets.ReadOnlyModelViewSet):
+    serializer_class = ProductionWorkSessionSerializer
+    queryset = ProductionWorkSession.objects.select_related('work_order', 'line', 'step', 'station', 'user', 'reviewed_by')
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.sessions.view'
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['work_order__number', 'line__product_name', 'station__code', 'user__username', 'user__first_name', 'user__last_name']
+    ordering_fields = ['started_at', 'ended_at', 'declared_good_quantity', 'machine_quantity', 'discrepancy_quantity']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if not user_has_perm(self.request.user, 'production.sessions.view'):
+            qs = qs.filter(user=self.request.user)
+        status_param = self.request.query_params.get('status')
+        discrepancy = self.request.query_params.get('discrepancy_status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+        if discrepancy:
+            qs = qs.filter(discrepancy_status=discrepancy)
+        return qs
 
 
 class ProductionDocumentViewSet(OrgScopedMixin, viewsets.ModelViewSet):
@@ -348,6 +384,12 @@ class ProductionStationConsoleView(APIView):
             active_step = line.steps.filter(status__in=open_statuses).select_related('station__department').order_by('order').first()
             if not active_step:
                 continue
+            active_session = (
+                active_step.sessions.filter(status__in=['started', 'paused'])
+                .select_related('user')
+                .order_by('-started_at', '-id')
+                .first()
+            )
             rows.append({
                 'line_id': line.id,
                 'work_order_id': line.work_order_id,
@@ -364,6 +406,17 @@ class ProductionStationConsoleView(APIView):
                 'status': active_step.status,
                 'target_quantity': active_step.target_quantity,
                 'completed_quantity': active_step.completed_quantity,
+                'machine_quantity': active_step.machine_quantity,
+                'remaining_quantity': max(active_step.target_quantity - active_step.completed_quantity, 0),
+                'active_session': ProductionWorkSessionSerializer(active_session).data if active_session else None,
+                'current_user_session': (
+                    ProductionWorkSessionSerializer(active_session).data
+                    if active_session and active_session.user_id == request.user.id
+                    else None
+                ),
+                'can_start': not active_session and active_step.status in ['ready', 'in_progress', 'waiting_handover'],
+                'can_take_over': not active_session and active_step.status == 'waiting_handover',
+                'previous_summary': _previous_step_summary(active_step),
             })
         return Response({'items': rows})
 
@@ -393,6 +446,114 @@ class ProductionStationConsoleView(APIView):
         return Response(ProductionEventSerializer(event).data, status=status.HTTP_201_CREATED)
 
 
+class ProductionSessionStartView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.station.operate'
+
+    def post(self, request):
+        serializer = SessionStartSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            session = start_work_session(
+                organization=request.user.organization,
+                user=request.user,
+                allow_unassigned=user_has_perm(request.user, 'production.manage') or user_has_perm(request.user, 'production.sessions.manage'),
+                **serializer.validated_data,
+            )
+        except (ProductionError, ProductionWorkOrderLine.DoesNotExist, ProductionStation.DoesNotExist) as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ProductionWorkSessionSerializer(session).data, status=status.HTTP_201_CREATED)
+
+
+class ProductionSessionPauseView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.station.operate'
+
+    def post(self, request):
+        serializer = SessionStateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            event = pause_work_session(organization=request.user.organization, user=request.user, **serializer.validated_data)
+        except (ProductionError, ProductionWorkSession.DoesNotExist) as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ProductionEventSerializer(event).data, status=status.HTTP_201_CREATED)
+
+
+class ProductionSessionResumeView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.station.operate'
+
+    def post(self, request):
+        serializer = SessionStateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            event = resume_work_session(organization=request.user.organization, user=request.user, **serializer.validated_data)
+        except (ProductionError, ProductionWorkSession.DoesNotExist) as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ProductionEventSerializer(event).data, status=status.HTTP_201_CREATED)
+
+
+class ProductionSessionHandoverView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.station.operate'
+
+    def post(self, request):
+        serializer = SessionStateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            event = handover_work_session(organization=request.user.organization, user=request.user, **serializer.validated_data)
+        except (ProductionError, ProductionWorkSession.DoesNotExist) as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ProductionEventSerializer(event).data, status=status.HTTP_201_CREATED)
+
+
+class ProductionSessionCloseView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.station.operate'
+
+    def post(self, request):
+        serializer = SessionCloseSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            event = close_work_session(organization=request.user.organization, user=request.user, **serializer.validated_data)
+        except (ProductionError, ProductionWorkSession.DoesNotExist) as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ProductionEventSerializer(event).data, status=status.HTTP_201_CREATED)
+
+
+class ProductionSessionReviewView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.sessions.review'
+
+    def post(self, request, session_id):
+        serializer = SessionReviewSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            session = review_session_discrepancy(
+                organization=request.user.organization,
+                user=request.user,
+                session_id=session_id,
+                **serializer.validated_data,
+            )
+        except (ProductionError, ProductionWorkSession.DoesNotExist) as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ProductionWorkSessionSerializer(session).data)
+
+
+class MyDailyProductionSessionsView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.station.operate'
+
+    def get(self, request):
+        day = request.query_params.get('date') or timezone.localdate().isoformat()
+        rows = ProductionWorkSession.objects.filter(
+            organization=request.user.organization,
+            user=request.user,
+            started_at__date=day,
+        ).select_related('work_order', 'line', 'step', 'station', 'user', 'reviewed_by')
+        return Response({'items': ProductionWorkSessionSerializer(rows, many=True).data})
+
+
 class ProductionPiEventView(APIView):
     permission_classes = []
 
@@ -416,14 +577,11 @@ class ProductionPiEventView(APIView):
             return Response({'detail': 'line_id mapping veya payload icinde zorunludur.', 'mapping_errors': mapping_errors}, status=status.HTTP_400_BAD_REQUEST)
         idempotency_key = merged.get('idempotency_key') or make_pi_idempotency_key(device, raw_payload, normalized_payload)
         try:
-            event = record_station_event(
+            event = record_machine_session_event(
                 organization=device.organization,
-                user=None,
                 device=device,
-                source='pi',
                 station_code=station_code,
                 line_id=line_id,
-                event_type=event_type,
                 quantity_delta=merged.get('quantity_delta', 0),
                 counter_value=merged.get('counter_value'),
                 note=merged.get('note', ''),
@@ -446,22 +604,34 @@ class ProductionReportSummaryView(APIView):
         start = request.query_params.get('start')
         end = request.query_params.get('end')
         events = ProductionEvent.objects.filter(organization=org)
+        sessions = ProductionWorkSession.objects.filter(organization=org)
         if start:
             events = events.filter(created_at__date__gte=start)
+            sessions = sessions.filter(started_at__date__gte=start)
         if end:
             events = events.filter(created_at__date__lte=end)
+            sessions = sessions.filter(started_at__date__lte=end)
         by_station = list(
             events.values('station__code', 'station__name', 'station__department__name')
             .annotate(total=Sum('quantity_delta'))
             .order_by('station__department__order', 'station__order')
         )
         by_worker = list(
-            events.values('user_id', 'user__username')
-            .annotate(total=Sum('quantity_delta'))
+            sessions.values('user_id', 'user__username')
+            .annotate(
+                total=Sum('declared_good_quantity'),
+                machine_total=Sum('machine_quantity'),
+                discrepancy_total=Sum('discrepancy_quantity'),
+            )
             .order_by('-total')[:50]
         )
         data = dashboard_summary(org)
-        data.update({'by_station': by_station, 'by_worker': by_worker})
+        data.update({
+            'by_station': by_station,
+            'by_worker': by_worker,
+            'open_sessions': sessions.filter(status__in=['started', 'paused']).count(),
+            'discrepancies_pending': sessions.filter(discrepancy_status='needs_review').count(),
+        })
         return Response(data)
 
 
@@ -471,18 +641,21 @@ class ProductionReportExportView(APIView):
 
     def get(self, request):
         org = request.user.organization
-        rows = ProductionEvent.objects.filter(organization=org).select_related('work_order', 'line', 'station', 'user').order_by('-created_at')[:2000]
-        lines = ['Tarih,Is Emri,Istasyon,Urun,Islem,Miktar,Kullanici,Not']
-        for event in rows:
+        rows = ProductionWorkSession.objects.filter(organization=org).select_related('work_order', 'line', 'station', 'user').order_by('-started_at')[:2000]
+        lines = ['Baslangic,Bitis,Is Emri,Istasyon,Urun,Saglam Adet,Makine Adedi,Fark,Fark Durumu,Kullanici,Not']
+        for session in rows:
             lines.append(','.join([
-                event.created_at.strftime('%d.%m.%Y %H:%M'),
-                event.work_order.number,
-                event.station.code,
-                event.line.product_name.replace(',', ' '),
-                event.event_type,
-                str(event.quantity_delta),
-                (event.user.username if event.user else ''),
-                (event.note or '').replace(',', ' '),
+                session.started_at.strftime('%d.%m.%Y %H:%M'),
+                session.ended_at.strftime('%d.%m.%Y %H:%M') if session.ended_at else '',
+                session.work_order.number,
+                session.station.code,
+                session.line.product_name.replace(',', ' '),
+                str(session.declared_good_quantity),
+                str(session.machine_quantity),
+                str(session.discrepancy_quantity),
+                session.discrepancy_status,
+                session.user.username,
+                (session.note or '').replace(',', ' '),
             ]))
         response = HttpResponse('\n'.join(lines), content_type='text/csv; charset=utf-8')
         response['Content-Disposition'] = 'attachment; filename="imalat_raporu.csv"'

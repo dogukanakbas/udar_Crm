@@ -1,0 +1,12 @@
+[
+  {
+    "type": "frontend",
+    "title": "quotes.status_badge",
+    "content": "<span class=\"quote-status quote-status--{{ status }}\">{{ phrase('quotes.status.' ~ status) }}</span>"
+  },
+  {
+    "type": "document",
+    "title": "quotes.document_footer_notice",
+    "content": "Bu teklif, firmamız bünyesinde kullanılan Udar CRM ERP üretim ve yönetim sistemi üzerinden oluşturulmuştur."
+  }
+]

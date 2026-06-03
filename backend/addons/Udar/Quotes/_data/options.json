@@ -1,0 +1,11 @@
+[
+  {
+    "key": "status_flow",
+    "title": "Teklif durum akışı",
+    "type": "json",
+    "default": {
+      "statuses": ["pending", "approved", "rejected"]
+    },
+    "display_order": 10
+  }
+]

@@ -1,0 +1,12 @@
+[
+  {
+    "type": "document",
+    "template": "quotes.document_footer_notice",
+    "modification_key": "udar_quotes_footer_notice_rights_reserved",
+    "description": "Teklif footer uyarısına tüm hakları saklıdır ifadesi ekler.",
+    "execution_order": 10,
+    "enabled": true,
+    "action": "append",
+    "replace": " Tüm hakları saklıdır."
+  }
+]

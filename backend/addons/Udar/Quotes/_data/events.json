@@ -1,0 +1,16 @@
+[
+  {
+    "event": "quote.approved",
+    "handler": "production.tasks.enqueue_contract_for_production",
+    "priority": 100,
+    "config": {
+      "countdown": 60
+    }
+  },
+  {
+    "event": "quote.converted",
+    "handler": "crm.events.quote_converted",
+    "priority": 100,
+    "config": {}
+  }
+]

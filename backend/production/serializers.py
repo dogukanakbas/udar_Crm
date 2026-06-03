@@ -18,6 +18,7 @@ from .models import (
     ProductionTemplatePreset,
     ProductionWorkOrder,
     ProductionWorkOrderLine,
+    ProductionWorkSession,
 )
 from .services import make_device_token
 
@@ -184,6 +185,7 @@ class ProductionStepProgressSerializer(serializers.ModelSerializer):
             'order',
             'target_quantity',
             'completed_quantity',
+            'machine_quantity',
             'status',
             'started_at',
             'completed_at',
@@ -238,6 +240,7 @@ class ProductionEventSerializer(serializers.ModelSerializer):
             'line',
             'step',
             'station',
+            'session',
             'event_type',
             'quantity_delta',
             'counter_value',
@@ -258,11 +261,83 @@ class ProductionEventSerializer(serializers.ModelSerializer):
         return obj.user.get_full_name() or obj.user.username
 
 
+class ProductionWorkSessionSerializer(serializers.ModelSerializer):
+    station_code = serializers.CharField(source='station.code', read_only=True)
+    station_name = serializers.CharField(source='station.name', read_only=True)
+    work_order_number = serializers.CharField(source='work_order.number', read_only=True)
+    product_sku = serializers.CharField(source='line.product_sku', read_only=True)
+    product_name = serializers.CharField(source='line.product_name', read_only=True)
+    user_name = serializers.SerializerMethodField()
+    reviewed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductionWorkSession
+        fields = '__all__'
+        read_only_fields = [
+            'organization',
+            'work_order',
+            'line',
+            'step',
+            'station',
+            'user',
+            'previous_session',
+            'status',
+            'started_at',
+            'ended_at',
+            'machine_quantity',
+            'declared_good_quantity',
+            'discrepancy_quantity',
+            'discrepancy_status',
+            'reviewed_by',
+            'reviewed_at',
+            'created_at',
+            'updated_at',
+            'station_code',
+            'station_name',
+            'work_order_number',
+            'product_sku',
+            'product_name',
+            'user_name',
+            'reviewed_by_name',
+        ]
+
+    def get_user_name(self, obj):
+        return obj.user.get_full_name() or obj.user.username
+
+    def get_reviewed_by_name(self, obj):
+        if not obj.reviewed_by:
+            return ''
+        return obj.reviewed_by.get_full_name() or obj.reviewed_by.username
+
+
 class ProductionDocumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductionDocument
         fields = '__all__'
         read_only_fields = ['organization', 'uploaded_by', 'uploaded_at']
+
+
+class SessionStartSerializer(serializers.Serializer):
+    line_id = serializers.IntegerField()
+    station_code = serializers.CharField()
+    start_counter = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+    note = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class SessionStateSerializer(serializers.Serializer):
+    session_id = serializers.IntegerField()
+    note = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class SessionCloseSerializer(SessionStateSerializer):
+    declared_good_quantity = serializers.DecimalField(max_digits=14, decimal_places=2)
+    end_counter = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+
+
+class SessionReviewSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=['approved', 'corrected'])
+    corrected_good_quantity = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
+    note = serializers.CharField(required=False, allow_blank=True, default='')
 
 
 class StationEventSerializer(serializers.Serializer):

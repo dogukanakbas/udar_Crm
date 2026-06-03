@@ -1,0 +1,13 @@
+{
+  "id": "Udar/Quotes",
+  "title": "Teklif ve Sözleşme Sistemi",
+  "vendor": "Udar",
+  "version": "1.0.0",
+  "version_id": 1000000,
+  "min_core_version": "1.0.0",
+  "dependencies": [],
+  "entrypoints": {
+    "backend": "crm",
+    "frontend": "quotes"
+  }
+}

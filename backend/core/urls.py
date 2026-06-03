@@ -39,12 +39,34 @@ from production.views import (
     ProductionRouteViewSet,
     ProductionSettingsView,
     ProductionStationConsoleView,
+    ProductionSessionCloseView,
+    ProductionSessionHandoverView,
+    ProductionSessionPauseView,
+    ProductionSessionResumeView,
+    ProductionSessionReviewView,
+    ProductionSessionStartView,
     ProductionStationUserViewSet,
     ProductionStationViewSet,
     ProductionTemplatePresetViewSet,
     ProductionWorkOrderViewSet,
+    ProductionWorkSessionViewSet,
+    MyDailyProductionSessionsView,
 )
-from accounts.views import TeamViewSet, TeamAssociateViewSet
+from accounts.views import TeamViewSet, TeamAssociateViewSet, UserGroupPermissionView, UserGroupViewSet
+from addons.views import (
+    AddonCompiledTemplateView,
+    AddonNavigationView,
+    AddonPhraseView,
+    AddonRoutesView,
+    AddonStyleBundleView,
+    AddonStyleAssetView,
+    AddonTemplateModificationView,
+    AddonTemplateView,
+    AddonUploadView,
+    AddonViewSet,
+    PermissionCatalogView,
+    PhraseBundleView,
+)
 from core.views import DashboardKPIView, GlobalSearchView, CalendarICSView, SSEView
 from workflow.views import PendingApprovalsView, ApprovalInstanceViewSet, ApprovalActionView
 from audit.views import AuditLogViewSet
@@ -98,6 +120,7 @@ router.register(r'production/rules', ProductionRuleSetViewSet, basename='product
 router.register(r'production/rule-blocks', ProductionRuleBlockViewSet, basename='production-rule-blocks')
 router.register(r'production/template-presets', ProductionTemplatePresetViewSet, basename='production-template-presets')
 router.register(r'production/work-orders', ProductionWorkOrderViewSet, basename='production-work-orders')
+router.register(r'production/sessions', ProductionWorkSessionViewSet, basename='production-sessions')
 router.register(r'production/events', ProductionEventViewSet, basename='production-events')
 router.register(r'production/documents', ProductionDocumentViewSet, basename='production-documents')
 router.register(r'tickets', TicketViewSet, basename='tickets')
@@ -114,6 +137,8 @@ router.register(r'task-time-entries', TaskTimeEntryViewSet, basename='task-time-
 router.register(r'task-workflow-templates', TaskWorkflowTemplateViewSet, basename='task-workflow-templates')
 router.register(r'teams', TeamViewSet, basename='teams')
 router.register(r'team-associates', TeamAssociateViewSet, basename='team-associates')
+router.register(r'addons', AddonViewSet, basename='addons')
+router.register(r'user-groups', UserGroupViewSet, basename='user-groups-public')
 
 # NEW: Public APIs (no auth required)
 router.register(r'v1/blog', PublicBlogViewSet, basename='public-blog')
@@ -133,6 +158,18 @@ urlpatterns = [
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='docs'),
     path('api/auth/', include('accounts.urls')),
+    path('api/addons/upload/', AddonUploadView.as_view(), name='addons-upload'),
+    path('api/addons/navigation/', AddonNavigationView.as_view(), name='addons-navigation'),
+    path('api/addons/routes/', AddonRoutesView.as_view(), name='addons-routes'),
+    path('api/addons/templates/', AddonTemplateView.as_view(), name='addons-templates'),
+    path('api/addons/template-modifications/', AddonTemplateModificationView.as_view(), name='addons-template-modifications'),
+    path('api/addons/compiled-templates/', AddonCompiledTemplateView.as_view(), name='addons-compiled-templates'),
+    path('api/addons/phrases/', AddonPhraseView.as_view(), name='addons-phrases'),
+    path('api/addons/style-assets/', AddonStyleAssetView.as_view(), name='addons-style-assets'),
+    path('api/addons/styles.css', AddonStyleBundleView.as_view(), name='addons-style-bundle'),
+    path('api/permissions/catalog/', PermissionCatalogView.as_view(), name='permissions-catalog'),
+    path('api/phrases/', PhraseBundleView.as_view(), name='phrases'),
+    path('api/user-groups/<int:pk>/permissions/', UserGroupPermissionView.as_view(), name='user-group-permissions'),
     # approvals/* sabit yollar router'dan ÖNCE olmalı; yoksa approvals/pending "pk=pending" sanılır
     path('api/approvals/pending/', PendingApprovalsView.as_view(), name='approvals-pending'),
     path('api/approvals/step/<int:pk>/action/', ApprovalActionView.as_view(), name='approval-action'),
@@ -142,6 +179,13 @@ urlpatterns = [
     path('api/production/settings/', ProductionSettingsView.as_view(), name='production-settings'),
     path('api/production/station-console/context/', ProductionStationConsoleView.as_view(), name='production-station-context'),
     path('api/production/station-console/event/', ProductionStationConsoleView.as_view(), name='production-station-event'),
+    path('api/production/station-sessions/start/', ProductionSessionStartView.as_view(), name='production-session-start'),
+    path('api/production/station-sessions/pause/', ProductionSessionPauseView.as_view(), name='production-session-pause'),
+    path('api/production/station-sessions/resume/', ProductionSessionResumeView.as_view(), name='production-session-resume'),
+    path('api/production/station-sessions/handover/', ProductionSessionHandoverView.as_view(), name='production-session-handover'),
+    path('api/production/station-sessions/close/', ProductionSessionCloseView.as_view(), name='production-session-close'),
+    path('api/production/station-sessions/<int:session_id>/review-discrepancy/', ProductionSessionReviewView.as_view(), name='production-session-review'),
+    path('api/production/my-daily-sessions/', MyDailyProductionSessionsView.as_view(), name='production-my-daily-sessions'),
     path('api/production/pi/events/', ProductionPiEventView.as_view(), name='production-pi-events'),
     path('api/production/reports/summary/', ProductionReportSummaryView.as_view(), name='production-report-summary'),
     path('api/production/reports/export/', ProductionReportExportView.as_view(), name='production-report-export'),

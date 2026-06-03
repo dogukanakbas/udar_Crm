@@ -1,0 +1,9 @@
+[
+  { "language_id": "tr-TR", "title": "addon.udar_quotes.title", "text": "Teklif ve Sözleşme Sistemi" },
+  { "language_id": "tr-TR", "title": "nav.quotes", "text": "Teklif & Sözleşmeler" },
+  { "language_id": "tr-TR", "title": "quotes.status.pending", "text": "Beklemede" },
+  { "language_id": "tr-TR", "title": "quotes.status.approved", "text": "Onaylandı" },
+  { "language_id": "tr-TR", "title": "quotes.status.rejected", "text": "Ret" },
+  { "language_id": "en-US", "title": "addon.udar_quotes.title", "text": "Quotes and Contracts" },
+  { "language_id": "en-US", "title": "nav.quotes", "text": "Quotes & Contracts" }
+]

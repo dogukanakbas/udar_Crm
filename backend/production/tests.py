@@ -11,8 +11,28 @@ from erp.models import Category, InventoryLocation, Product, StockMovement, Ware
 from organizations.models import Organization, Warehouse
 
 from .automation import schedule_contract_production_if_approved
-from .models import ProductionDevice, ProductionDevicePayloadMap, ProductionEvent, ProductionSettings, ProductionStepProgress, ProductionTemplatePreset, ProductionWorkOrder
-from .services import ProductionError, clone_template_preset, create_work_order_from_contract, ensure_default_template_presets, record_station_event
+from .models import (
+    ProductionDevice,
+    ProductionDevicePayloadMap,
+    ProductionEvent,
+    ProductionSettings,
+    ProductionStationUser,
+    ProductionStepProgress,
+    ProductionTemplatePreset,
+    ProductionWorkOrder,
+    ProductionWorkSession,
+)
+from .services import (
+    ProductionError,
+    clone_template_preset,
+    close_work_session,
+    create_work_order_from_contract,
+    ensure_default_template_presets,
+    handover_work_session,
+    record_machine_session_event,
+    record_station_event,
+    start_work_session,
+)
 
 
 class ProductionAutomationTests(TestCase):
@@ -325,3 +345,113 @@ class ProductionAutomationTests(TestCase):
         self.assertEqual(event.raw_payload['line'], line.id)
         self.assertEqual(event.normalized_payload['line_id'], float(line.id))
         self.assertEqual(event.mapping_errors[0]['source_path'], '$.missing.required')
+
+    def test_unassigned_worker_cannot_start_station_session(self):
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        line = order.lines.get()
+        first_step = line.steps.select_related('station').order_by('order').first()
+        worker = User.objects.create_user(username='worker-no-station', password='x', organization=self.org, role='Worker')
+        client = APIClient()
+        client.force_authenticate(worker)
+
+        response = client.post(
+            '/api/production/station-sessions/start/',
+            {'line_id': line.id, 'station_code': first_step.station.code},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('atanmış kullanıcı', response.data['detail'])
+
+    def test_machine_data_attaches_to_open_session_without_official_completion(self):
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        line = order.lines.get()
+        first_step = line.steps.select_related('station').order_by('order').first()
+        ProductionStationUser.objects.create(organization=self.org, station=first_step.station, user=self.user)
+        session = start_work_session(
+            organization=self.org,
+            user=self.user,
+            line_id=line.id,
+            station_code=first_step.station.code,
+        )
+
+        event = record_machine_session_event(
+            organization=self.org,
+            line_id=line.id,
+            station_code=first_step.station.code,
+            quantity_delta=Decimal('3'),
+            idempotency_key='machine-open-session',
+        )
+
+        session.refresh_from_db()
+        first_step.refresh_from_db()
+        self.assertEqual(event.session_id, session.id)
+        self.assertEqual(session.machine_quantity, Decimal('3.00'))
+        self.assertEqual(first_step.machine_quantity, Decimal('3.00'))
+        self.assertEqual(first_step.completed_quantity, Decimal('0.00'))
+
+    def test_session_close_declares_official_quantity_and_flags_discrepancy(self):
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        line = order.lines.get()
+        first_step = line.steps.select_related('station').order_by('order').first()
+        ProductionStationUser.objects.create(organization=self.org, station=first_step.station, user=self.user)
+        session = start_work_session(
+            organization=self.org,
+            user=self.user,
+            line_id=line.id,
+            station_code=first_step.station.code,
+        )
+        record_machine_session_event(
+            organization=self.org,
+            line_id=line.id,
+            station_code=first_step.station.code,
+            quantity_delta=Decimal('2'),
+            idempotency_key='machine-two',
+        )
+
+        close_work_session(
+            organization=self.org,
+            user=self.user,
+            session_id=session.id,
+            declared_good_quantity=Decimal('1'),
+            note='Vardiya kapandı',
+        )
+
+        session.refresh_from_db()
+        first_step.refresh_from_db()
+        self.assertEqual(session.declared_good_quantity, Decimal('1.00'))
+        self.assertEqual(session.discrepancy_quantity, Decimal('1.00'))
+        self.assertEqual(session.discrepancy_status, 'needs_review')
+        self.assertEqual(first_step.completed_quantity, Decimal('1.00'))
+        self.assertEqual(first_step.status, 'waiting_handover')
+
+    def test_shift_handover_allows_next_user_to_continue_same_step(self):
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        line = order.lines.get()
+        first_step = line.steps.select_related('station').order_by('order').first()
+        next_worker = User.objects.create_user(username='next-worker', password='x', organization=self.org, role='Worker')
+        ProductionStationUser.objects.create(organization=self.org, station=first_step.station, user=self.user)
+        ProductionStationUser.objects.create(organization=self.org, station=first_step.station, user=next_worker)
+        first_session = start_work_session(
+            organization=self.org,
+            user=self.user,
+            line_id=line.id,
+            station_code=first_step.station.code,
+        )
+
+        handover_work_session(organization=self.org, user=self.user, session_id=first_session.id, note='Vardiya değişimi')
+        second_session = start_work_session(
+            organization=self.org,
+            user=next_worker,
+            line_id=line.id,
+            station_code=first_step.station.code,
+        )
+
+        first_session.refresh_from_db()
+        self.assertEqual(first_session.status, 'handover')
+        self.assertEqual(second_session.previous_session_id, first_session.id)
+        self.assertEqual(ProductionWorkSession.objects.filter(step=first_step, status__in=['started', 'paused']).count(), 1)

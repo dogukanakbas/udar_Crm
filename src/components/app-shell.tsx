@@ -5,6 +5,8 @@ import {
   CalendarClock,
   BarChart3,
   Bell,
+  Building2,
+  FileText,
   FolderKanban,
   Gauge,
   Home,
@@ -14,6 +16,7 @@ import {
   Package,
   Search,
   Settings,
+  Settings2,
   Shield,
   SunMedium,
   LogOut,
@@ -41,6 +44,7 @@ import { cn } from '@/lib/utils'
 import { getTokens, clearTokens } from '@/lib/auth'
 import { hasPermission } from '@/lib/permissions'
 import { resolveBrandingUrl } from '@/lib/branding'
+import { api } from '@/lib/api'
 
 type PageHeaderProps = {
   title: string
@@ -62,64 +66,138 @@ export const PageHeader = ({ title, description, actions, breadcrumb }: PageHead
   </div>
 )
 
-const nav: Array<{
+type NavChild = { key?: string; label: string; to: string; perm?: string; roles?: string[]; displayOrder?: number }
+type NavItem = {
+  key?: string
   label: string
   to?: string
   icon: React.ComponentType<any>
   roles?: string[]
   perm?: string
-  children?: Array<{ label: string; to: string; perm?: string; roles?: string[] }>
-}> = [
-  { label: 'Kontrol Paneli', to: '/', icon: Home, perm: 'settings.view' },
-  { label: 'Görevlerim', to: '/', icon: Home, roles: ['Worker'] },
-  { label: 'Geçmiş görevler', to: '/task-history', icon: CalendarClock, perm: 'tasks.view.own' },
-  { label: 'Şifre değiştir', to: '/change-password', icon: KeyRound },
+  displayOrder?: number
+  children?: NavChild[]
+}
+
+const iconMap: Record<string, React.ComponentType<any>> = {
+  Activity,
+  BarChart3,
+  Building2,
+  CalendarClock,
+  FileText,
+  FolderKanban,
+  Gauge,
+  Home,
+  KeyRound,
+  Package,
+  Settings,
+  Settings2,
+}
+
+const fallbackNav: NavItem[] = [
+  { key: 'dashboard', label: 'Kontrol Paneli', to: '/', icon: Home, perm: 'settings.view' },
+  { key: 'worker_home', label: 'Görevlerim', to: '/', icon: Home, roles: ['Worker'] },
+  { key: 'task_history', label: 'Geçmiş görevler', to: '/task-history', icon: CalendarClock, perm: 'tasks.view.own' },
+  { key: 'change_password', label: 'Şifre değiştir', to: '/change-password', icon: KeyRound },
   {
+    key: 'crm',
     label: 'CRM',
     icon: Gauge,
     children: [
-      { label: 'Fırsatlar', to: '/crm/opportunities', perm: 'opportunities.view' },
-      { label: 'Cari Kartı', to: '/crm/companies', perm: 'partners.view' },
-      { label: 'Kişiler', to: '/crm/contacts', perm: 'contacts.view' },
-      { label: 'Teklif & Sözleşmeler', to: '/crm/quotes', perm: 'quotes.view.own' },
-      { label: 'Satıcı Firmalar', to: '/crm/seller-companies', perm: 'templates.seller_companies.edit' },
-      { label: 'Şablon Yönetimi', to: '/crm/quote-templates', perm: 'templates.view' },
+      { key: 'opportunities', label: 'Fırsatlar', to: '/crm/opportunities', perm: 'opportunities.view' },
+      { key: 'partners', label: 'Cari Kartı', to: '/crm/companies', perm: 'partners.view' },
+      { key: 'contacts', label: 'Kişiler', to: '/crm/contacts', perm: 'contacts.view' },
+      { key: 'quotes', label: 'Teklif & Sözleşmeler', to: '/crm/quotes', perm: 'quotes.view.own' },
+      { key: 'seller_companies', label: 'Satıcı Firmalar', to: '/crm/seller-companies', perm: 'templates.seller_companies.edit' },
+      { key: 'quote_templates', label: 'Şablon Yönetimi', to: '/crm/quote-templates', perm: 'templates.view' },
     ],
   },
   {
+    key: 'erp',
     label: 'ERP',
     icon: Package,
     perm: 'erp.view',
     children: [
-      { label: 'Satış Siparişleri', to: '/erp/sales-orders', perm: 'orders.view' },
-      { label: 'Satınalma', to: '/erp/purchases', perm: 'orders.view' },
-      { label: 'Stok', to: '/erp/inventory', perm: 'inventory.view' },
-      { label: 'Depo Yönetimi', to: '/erp/warehouse-management', perm: 'warehouses.manage' },
-      { label: 'Depo', to: '/erp/warehouse', perm: 'warehouse_stock.view' },
-      { label: 'İmalat Yönetimi', to: '/erp/production', perm: 'production.view' },
-      { label: 'İş Emirleri', to: '/erp/production/orders', perm: 'production.work_orders.view' },
-      { label: 'İstasyon Konsolu', to: '/erp/production/console', perm: 'production.station.operate' },
-      { label: 'İmalat Raporları', to: '/erp/production/reports', perm: 'production.reports.view' },
-      { label: 'Faturalama', to: '/erp/invoicing', perm: 'invoices.view' },
-      { label: 'Muhasebe', to: '/erp/accounting', perm: 'accounting.view' },
-      { label: 'Lojistik Takip', to: '/logistics/tracking', perm: 'logistics.view' },
-      { label: 'MDF Yönetimi', to: '/mdf', perm: 'inventory.view' },
-      { label: 'MDF Giriş / Çıkış', to: '/mdf/history', perm: 'inventory.view' },
+      { key: 'sales_orders', label: 'Satış Siparişleri', to: '/erp/sales-orders', perm: 'orders.view' },
+      { key: 'purchases', label: 'Satınalma', to: '/erp/purchases', perm: 'orders.view' },
+      { key: 'inventory', label: 'Stok', to: '/erp/inventory', perm: 'inventory.view' },
+      { key: 'warehouse_management', label: 'Depo Yönetimi', to: '/erp/warehouse-management', perm: 'warehouses.manage' },
+      { key: 'warehouse', label: 'Depo', to: '/erp/warehouse', perm: 'warehouse_stock.view' },
+      { key: 'production', label: 'İmalat Yönetimi', to: '/erp/production', perm: 'production.view' },
+      { key: 'production_orders', label: 'İş Emirleri', to: '/erp/production/orders', perm: 'production.work_orders.view' },
+      { key: 'production_console', label: 'İstasyon Konsolu', to: '/erp/production/console', perm: 'production.station.operate' },
+      { key: 'production_reports', label: 'İmalat Raporları', to: '/erp/production/reports', perm: 'production.reports.view' },
+      { key: 'invoicing', label: 'Faturalama', to: '/erp/invoicing', perm: 'invoices.view' },
+      { key: 'accounting', label: 'Muhasebe', to: '/erp/accounting', perm: 'accounting.view' },
+      { key: 'logistics', label: 'Lojistik Takip', to: '/logistics/tracking', perm: 'logistics.view' },
+      { key: 'mdf', label: 'MDF Yönetimi', to: '/mdf', perm: 'inventory.view' },
+      { key: 'mdf_history', label: 'MDF Giriş / Çıkış', to: '/mdf/history', perm: 'inventory.view' },
     ],
   },
   {
+    key: 'support',
     label: 'Destek',
     icon: HeadsetIcon,
-    children: [{ label: 'Destek talepleri', to: '/support/tickets', perm: 'tickets.view' }],
+    children: [{ key: 'tickets', label: 'Destek talepleri', to: '/support/tickets', perm: 'tickets.view' }],
   },
-  { label: 'Görevler', to: '/tasks', icon: ClipboardCheckIcon, perm: 'tasks.view' },
-  { label: 'Çalışan Takibi', to: '/worker-tracking', icon: Activity, perm: 'worker_tracking.view' },
-  { label: 'Takvim', to: '/calendar', icon: CalendarIconMini, perm: 'tasks.calendar.view' },
-  { label: 'Raporlar', to: '/reports', icon: BarChart3, perm: 'reports.view' },
-  { label: 'Ayarlar', to: '/settings', icon: Settings, perm: 'settings.view' },
+  { key: 'tasks', label: 'Görevler', to: '/tasks', icon: ClipboardCheckIcon, perm: 'tasks.view' },
+  { key: 'worker_tracking', label: 'Çalışan Takibi', to: '/worker-tracking', icon: Activity, perm: 'worker_tracking.view' },
+  { key: 'calendar', label: 'Takvim', to: '/calendar', icon: CalendarIconMini, perm: 'tasks.calendar.view' },
+  { key: 'reports', label: 'Raporlar', to: '/reports', icon: BarChart3, perm: 'reports.view' },
+  { key: 'settings', label: 'Ayarlar', to: '/settings', icon: Settings, perm: 'settings.view' },
 ]
 
-const isNavItemVisible = (item: (typeof nav)[number], role: string, permissions: string[]) => {
+type AddonNavRow = {
+  key: string
+  label: string
+  parent?: string
+  route?: string
+  icon?: string
+  permission?: string
+  display_order?: number
+}
+
+const mergeAddonNavigation = (rows: AddonNavRow[]) => {
+  const merged: NavItem[] = fallbackNav.map((item) => ({
+    ...item,
+    children: item.children ? item.children.map((child) => ({ ...child })) : undefined,
+  }))
+  const findGroup = (key?: string, label?: string) => merged.find((item) => item.key === key || item.label === label)
+  rows
+    .slice()
+    .sort((a, b) => Number(a.display_order || 0) - Number(b.display_order || 0))
+    .forEach((row) => {
+      const Icon = iconMap[row.icon || ''] || FolderKanban
+      if (!row.parent) {
+        const existing = findGroup(row.key, row.label)
+        if (existing) {
+          existing.label = row.label
+          existing.icon = Icon
+          existing.perm = row.permission || existing.perm
+          existing.displayOrder = row.display_order
+        } else {
+          merged.push({ key: row.key, label: row.label, to: row.route || undefined, icon: Icon, perm: row.permission, displayOrder: row.display_order })
+        }
+        return
+      }
+      let parent = findGroup(row.parent)
+      if (!parent) {
+        parent = { key: row.parent, label: row.parent, icon: FolderKanban, children: [] }
+        merged.push(parent)
+      }
+      parent.children = parent.children || []
+      const existingChild = parent.children.find((child) => child.key === row.key || child.to === row.route)
+      const child = { key: row.key, label: row.label, to: row.route || '#', perm: row.permission, displayOrder: row.display_order }
+      if (existingChild) {
+        Object.assign(existingChild, child)
+      } else {
+        parent.children.push(child)
+      }
+      parent.children.sort((a, b) => Number(a.displayOrder || 0) - Number(b.displayOrder || 0))
+    })
+  return merged.sort((a, b) => Number(a.displayOrder || 0) - Number(b.displayOrder || 0))
+}
+
+const isNavItemVisible = (item: NavItem, role: string, permissions: string[]) => {
   if (item.roles && !item.roles.includes(role)) return false
   if (item.children) {
     return item.children.some((child) => isNavChildVisible(child, role, permissions))
@@ -127,7 +205,7 @@ const isNavItemVisible = (item: (typeof nav)[number], role: string, permissions:
   return hasPermission(role, permissions, item.perm)
 }
 
-const isNavChildVisible = (child: NonNullable<(typeof nav)[number]['children']>[number], role: string, permissions: string[]) => {
+const isNavChildVisible = (child: NavChild, role: string, permissions: string[]) => {
   if (child.roles && !child.roles.includes(role)) return false
   return hasPermission(role, permissions, child.perm)
 }
@@ -148,6 +226,7 @@ export function AppShell() {
   const { data, resetDemo, setRole } = useAppStore()
   const { theme, setTheme } = useTheme()
   const [searchOpen, setSearchOpen] = useState(false)
+  const [addonNavigation, setAddonNavigation] = useState<AddonNavRow[]>([])
   const routerState = useRouterState()
   const loggedIn = !!getTokens()
   const isPublic = !loggedIn
@@ -162,6 +241,15 @@ export function AppShell() {
     window.addEventListener('keydown', down)
     return () => window.removeEventListener('keydown', down)
   }, [])
+
+  useEffect(() => {
+    if (!loggedIn) return
+    api.get('/addons/navigation/', { suppressAuthToast: true } as any)
+      .then((res) => setAddonNavigation(Array.isArray(res.data?.navigation) ? res.data.navigation : []))
+      .catch(() => setAddonNavigation([]))
+  }, [loggedIn, data.rolePermissions])
+
+  const nav = useMemo(() => mergeAddonNavigation(addonNavigation), [addonNavigation])
 
   const activePath = routerState.location.pathname
   const isQuotesWorkspace = activePath.startsWith('/crm/quotes')
@@ -268,7 +356,7 @@ export function AppShell() {
         <main className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
           <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-border/70 bg-background/90 px-3 py-3 shadow-[0_14px_42px_-36px_rgba(15,23,42,0.45)] backdrop-blur supports-[backdrop-filter]:bg-background/80 md:px-5">
             <div className="lg:hidden">
-              <MobileMenu />
+              <MobileMenu nav={nav} />
             </div>
             <div className="relative flex-1 max-w-xl">
               <Input
@@ -329,7 +417,7 @@ function ChevronRightMini(props: React.ComponentProps<'svg'>) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={props.className}><path d="M10 6l6 6-6 6" /></svg>
 }
 
-function MobileMenu() {
+function MobileMenu({ nav }: { nav: NavItem[] }) {
   const [open, setOpen] = useState(false)
   const { data } = useAppStore()
   const routerState = useRouterState()

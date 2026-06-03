@@ -25,10 +25,12 @@ from .models import (
     ProductionRouteTemplate,
     ProductionSettings,
     ProductionStation,
+    ProductionStationUser,
     ProductionStepProgress,
     ProductionTemplatePreset,
     ProductionWorkOrder,
     ProductionWorkOrderLine,
+    ProductionWorkSession,
 )
 
 
@@ -55,6 +57,9 @@ class ProductionError(ValueError):
     pass
 
 
+ACTIVE_SESSION_STATUSES = ['started', 'paused']
+
+
 def _norm(value: object) -> str:
     return str(value or '').strip()
 
@@ -78,6 +83,25 @@ def _decimal(value, label='Miktar') -> Decimal:
     if result < 0:
         raise ProductionError(f'{label} negatif olamaz.')
     return result
+
+
+def _signed_decimal(value, label='Miktar') -> Decimal:
+    try:
+        return Decimal(str(value or 0))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ProductionError(f'{label} sayisal olmalidir.') from exc
+
+
+def _is_station_user(organization, user, station):
+    if not user:
+        return False
+    return ProductionStationUser.objects.filter(
+        organization=organization,
+        user=user,
+        station=station,
+        station__is_active=True,
+        is_active=True,
+    ).exists()
 
 
 def quote_line_product_group_key(line) -> str:
@@ -574,6 +598,347 @@ def _next_step(step):
     )
 
 
+def _previous_step_summary(step):
+    previous = (
+        ProductionStepProgress.objects.filter(line=step.line, order__lt=step.order)
+        .select_related('station')
+        .order_by('-order', '-id')
+        .first()
+    )
+    if not previous:
+        return None
+    last_session = (
+        ProductionWorkSession.objects.filter(step=previous, status__in=['closed', 'handover'])
+        .select_related('user', 'station')
+        .order_by('-ended_at', '-id')
+        .first()
+    )
+    return {
+        'station_code': previous.station.code,
+        'station_name': previous.station.name,
+        'completed_quantity': previous.completed_quantity,
+        'machine_quantity': previous.machine_quantity,
+        'status': previous.status,
+        'last_user': (last_session.user.get_full_name() or last_session.user.username) if last_session else '',
+        'last_closed_at': last_session.ended_at if last_session else previous.completed_at,
+        'has_discrepancy': bool(last_session and last_session.discrepancy_status == 'needs_review'),
+    }
+
+
+def _step_for_session_action(organization, line_id, station_code):
+    line = (
+        ProductionWorkOrderLine.objects.select_for_update()
+        .select_related('work_order')
+        .get(pk=line_id, work_order__organization=organization)
+    )
+    station = ProductionStation.objects.get(organization=organization, code=station_code, is_active=True)
+    step = (
+        ProductionStepProgress.objects.select_for_update()
+        .select_related('station', 'line__work_order')
+        .get(line=line, station=station)
+    )
+    return line, station, step
+
+
+def _active_session_for_step(step):
+    return (
+        ProductionWorkSession.objects.select_for_update()
+        .filter(step=step, status__in=ACTIVE_SESSION_STATUSES)
+        .select_related('user')
+        .order_by('-started_at', '-id')
+        .first()
+    )
+
+
+def _latest_handover_session(step):
+    return (
+        ProductionWorkSession.objects.filter(step=step, status='handover')
+        .select_related('user')
+        .order_by('-ended_at', '-id')
+        .first()
+    )
+
+
+def _create_session_event(*, session, event_type, quantity_delta=0, counter_value=None, note='', idempotency_key='', source='ui',
+                          device=None, raw_payload=None, normalized_payload=None, mapping_errors=None):
+    if idempotency_key:
+        existing = ProductionEvent.objects.filter(organization=session.organization, idempotency_key=idempotency_key).first()
+        if existing:
+            return existing
+    return ProductionEvent.objects.create(
+        organization=session.organization,
+        work_order=session.work_order,
+        line=session.line,
+        step=session.step,
+        station=session.station,
+        session=session,
+        event_type=event_type,
+        quantity_delta=_signed_decimal(quantity_delta),
+        counter_value=counter_value,
+        note=note or '',
+        idempotency_key=idempotency_key or '',
+        source=source,
+        device=device,
+        user=session.user if source != 'pi' else None,
+        raw_payload=raw_payload or {},
+        normalized_payload=normalized_payload or {},
+        mapping_errors=mapping_errors or [],
+    )
+
+
+def _create_unmatched_machine_event(*, organization, line, step, station, quantity_delta=0, counter_value=None, note='', idempotency_key='',
+                                    device=None, raw_payload=None, normalized_payload=None, mapping_errors=None):
+    if idempotency_key:
+        existing = ProductionEvent.objects.filter(organization=organization, idempotency_key=idempotency_key).first()
+        if existing:
+            return existing
+    return ProductionEvent.objects.create(
+        organization=organization,
+        work_order=line.work_order,
+        line=line,
+        step=step,
+        station=station,
+        session=None,
+        event_type='quantity',
+        quantity_delta=_signed_decimal(quantity_delta),
+        counter_value=counter_value,
+        note=note or 'Eşleşmemiş makine verisi: açık kullanıcı oturumu yok.',
+        idempotency_key=idempotency_key or '',
+        source='pi',
+        device=device,
+        user=None,
+        raw_payload=raw_payload or {},
+        normalized_payload=normalized_payload or {},
+        mapping_errors=mapping_errors or [],
+    )
+
+
+@transaction.atomic
+def start_work_session(*, organization, user, line_id, station_code, start_counter=None, note='', allow_unassigned=False):
+    line, station, step = _step_for_session_action(organization, line_id, station_code)
+    if not allow_unassigned and not _is_station_user(organization, user, station):
+        raise ProductionError('Bu istasyonda işlem yapmaya atanmış kullanıcı değilsiniz.')
+    if step.status == 'locked':
+        raise ProductionError('Bu istasyon henuz acik degil.')
+    if step.status in ('completed', 'skipped'):
+        raise ProductionError('Tamamlanan istasyonda yeni oturum acilamaz.')
+    active = _active_session_for_step(step)
+    if active:
+        if active.user_id == user.id:
+            return active
+        raise ProductionError(f'Bu istasyonda {active.user.get_full_name() or active.user.username} için aktif oturum var.')
+    previous = _latest_handover_session(step)
+    session = ProductionWorkSession.objects.create(
+        organization=organization,
+        work_order=line.work_order,
+        line=line,
+        step=step,
+        station=station,
+        user=user,
+        previous_session=previous,
+        start_counter=start_counter,
+        note=note or '',
+    )
+    if step.status in ('ready', 'waiting_handover'):
+        step.status = 'in_progress'
+        step.started_at = step.started_at or timezone.now()
+        step.save(update_fields=['status', 'started_at'])
+    line.work_order.status = 'in_progress'
+    line.work_order.save(update_fields=['status', 'updated_at'])
+    _create_session_event(session=session, event_type='start', counter_value=start_counter, note=note)
+    return session
+
+
+@transaction.atomic
+def pause_work_session(*, organization, user, session_id, note=''):
+    session = ProductionWorkSession.objects.select_for_update().select_related('step').get(pk=session_id, organization=organization)
+    if session.user_id != user.id:
+        raise ProductionError('Yalnızca kendi oturumunuzu molaya alabilirsiniz.')
+    if session.status != 'started':
+        raise ProductionError('Yalniz aktif oturum molaya alinabilir.')
+    session.status = 'paused'
+    session.note = note or session.note
+    session.save(update_fields=['status', 'note', 'updated_at'])
+    return _create_session_event(session=session, event_type='pause', note=note)
+
+
+@transaction.atomic
+def resume_work_session(*, organization, user, session_id, note=''):
+    session = ProductionWorkSession.objects.select_for_update().select_related('step').get(pk=session_id, organization=organization)
+    if session.user_id != user.id:
+        raise ProductionError('Yalnızca kendi oturumunuzu devam ettirebilirsiniz.')
+    if session.status != 'paused':
+        raise ProductionError('Yalniz moladaki oturum devam ettirilebilir.')
+    session.status = 'started'
+    session.note = note or session.note
+    session.save(update_fields=['status', 'note', 'updated_at'])
+    return _create_session_event(session=session, event_type='resume', note=note)
+
+
+@transaction.atomic
+def handover_work_session(*, organization, user, session_id, note=''):
+    session = ProductionWorkSession.objects.select_for_update().select_related('step').get(pk=session_id, organization=organization)
+    if session.user_id != user.id:
+        raise ProductionError('Yalnızca kendi oturumunuzu devredebilirsiniz.')
+    if session.status not in ACTIVE_SESSION_STATUSES:
+        raise ProductionError('Yalniz acik oturum devredilebilir.')
+    session.status = 'handover'
+    session.ended_at = timezone.now()
+    session.note = note or session.note
+    session.save(update_fields=['status', 'ended_at', 'note', 'updated_at'])
+    step = session.step
+    if step.status == 'in_progress':
+        step.status = 'waiting_handover'
+        step.save(update_fields=['status'])
+    return _create_session_event(session=session, event_type='handover', note=note)
+
+
+@transaction.atomic
+def close_work_session(*, organization, user, session_id, declared_good_quantity, end_counter=None, note=''):
+    session = (
+        ProductionWorkSession.objects.select_for_update()
+        .select_related('step', 'line__work_order')
+        .get(pk=session_id, organization=organization)
+    )
+    if session.user_id != user.id:
+        raise ProductionError('Yalnızca kendi oturumunuzu kapatabilirsiniz.')
+    if session.status not in ACTIVE_SESSION_STATUSES:
+        raise ProductionError('Yalniz acik oturum kapatilabilir.')
+    good = _decimal(declared_good_quantity, 'Saglam adet')
+    if end_counter is not None and session.start_counter is not None:
+        counter_delta = _signed_decimal(end_counter, 'Bitis sayaci') - session.start_counter
+        if counter_delta >= 0:
+            session.machine_quantity = counter_delta
+    discrepancy = session.machine_quantity - good
+    session.status = 'closed'
+    session.ended_at = timezone.now()
+    session.end_counter = end_counter
+    session.declared_good_quantity = good
+    session.discrepancy_quantity = discrepancy
+    session.discrepancy_status = 'needs_review' if discrepancy != 0 else 'none'
+    session.note = note or session.note
+    session.save(update_fields=[
+        'status',
+        'ended_at',
+        'end_counter',
+        'machine_quantity',
+        'declared_good_quantity',
+        'discrepancy_quantity',
+        'discrepancy_status',
+        'note',
+        'updated_at',
+    ])
+
+    step = ProductionStepProgress.objects.select_for_update().get(pk=session.step_id)
+    step.completed_quantity = min(step.target_quantity, step.completed_quantity + good)
+    if step.completed_quantity >= step.target_quantity:
+        step.status = 'completed'
+        step.completed_at = timezone.now()
+        step.completed_by = user
+    else:
+        step.status = 'waiting_handover'
+    step.save(update_fields=['completed_quantity', 'status', 'completed_at', 'completed_by'])
+
+    event = _create_session_event(session=session, event_type='complete', quantity_delta=good, counter_value=end_counter, note=note)
+    if step.status == 'completed':
+        nxt = _next_step(step)
+        if nxt and nxt.status == 'locked':
+            nxt.status = 'ready'
+            nxt.save(update_fields=['status'])
+    _refresh_line_and_order(session.line)
+    return event
+
+
+@transaction.atomic
+def review_session_discrepancy(*, organization, user, session_id, action, corrected_good_quantity=None, note=''):
+    session = (
+        ProductionWorkSession.objects.select_for_update()
+        .select_related('step', 'line')
+        .get(pk=session_id, organization=organization)
+    )
+    if session.discrepancy_status != 'needs_review':
+        raise ProductionError('Bu oturumda incelenecek fark yok.')
+    if action == 'corrected':
+        if corrected_good_quantity is None:
+            raise ProductionError('Duzeltme icin saglam adet zorunludur.')
+        corrected = _decimal(corrected_good_quantity, 'Duzeltilmis saglam adet')
+        delta = corrected - session.declared_good_quantity
+        step = ProductionStepProgress.objects.select_for_update().get(pk=session.step_id)
+        step.completed_quantity = max(Decimal('0'), min(step.target_quantity, step.completed_quantity + delta))
+        if step.completed_quantity >= step.target_quantity:
+            step.status = 'completed'
+            step.completed_at = step.completed_at or timezone.now()
+            step.completed_by = step.completed_by or user
+        elif step.status == 'completed':
+            step.status = 'waiting_handover'
+            step.completed_at = None
+            step.completed_by = None
+        step.save(update_fields=['completed_quantity', 'status', 'completed_at', 'completed_by'])
+        session.declared_good_quantity = corrected
+        session.discrepancy_quantity = session.machine_quantity - corrected
+        session.discrepancy_status = 'corrected'
+        _refresh_line_and_order(session.line)
+    else:
+        session.discrepancy_status = 'approved'
+    session.reviewed_by = user
+    session.reviewed_at = timezone.now()
+    session.review_note = note or ''
+    session.save(update_fields=[
+        'declared_good_quantity',
+        'discrepancy_quantity',
+        'discrepancy_status',
+        'reviewed_by',
+        'reviewed_at',
+        'review_note',
+        'updated_at',
+    ])
+    return session
+
+
+@transaction.atomic
+def record_machine_session_event(*, organization, line_id, station_code, quantity_delta=0, counter_value=None, note='',
+                                 idempotency_key='', device=None, raw_payload=None, normalized_payload=None, mapping_errors=None):
+    if idempotency_key:
+        existing = ProductionEvent.objects.filter(organization=organization, idempotency_key=idempotency_key).first()
+        if existing:
+            return existing
+    line, station, step = _step_for_session_action(organization, line_id, station_code)
+    qty = _decimal(quantity_delta)
+    active = _active_session_for_step(step)
+    if not active:
+        return _create_unmatched_machine_event(
+            organization=organization,
+            line=line,
+            step=step,
+            station=station,
+            quantity_delta=qty,
+            counter_value=counter_value,
+            note=note,
+            idempotency_key=idempotency_key,
+            device=device,
+            raw_payload=raw_payload,
+            normalized_payload=normalized_payload,
+            mapping_errors=mapping_errors,
+        )
+    active.machine_quantity = active.machine_quantity + qty
+    active.save(update_fields=['machine_quantity', 'updated_at'])
+    step.machine_quantity = step.machine_quantity + qty
+    step.save(update_fields=['machine_quantity'])
+    return _create_session_event(
+        session=active,
+        event_type='quantity',
+        quantity_delta=qty,
+        counter_value=counter_value,
+        note=note,
+        idempotency_key=idempotency_key,
+        source='pi',
+        device=device,
+        raw_payload=raw_payload,
+        normalized_payload=normalized_payload,
+        mapping_errors=mapping_errors,
+    )
+
+
 def _refresh_line_and_order(line):
     final_step = line.steps.filter(station__is_final=True).order_by('-order').first()
     if final_step and final_step.status == 'completed':
@@ -764,8 +1129,8 @@ def dashboard_summary(organization):
         'stations': ProductionStation.objects.filter(organization=organization, is_active=True).count(),
         'active_orders': ProductionWorkOrder.objects.filter(organization=organization, status__in=['waiting', 'in_progress']).count(),
         'completed_today': float(
-            ProductionEvent.objects.filter(organization=organization, event_type__in=['quantity', 'complete'], created_at__date=today)
-            .aggregate(total=Sum('quantity_delta'))['total']
+            ProductionWorkSession.objects.filter(organization=organization, status='closed', ended_at__date=today)
+            .aggregate(total=Sum('declared_good_quantity'))['total']
             or Decimal('0')
         ),
         'station_load': list(

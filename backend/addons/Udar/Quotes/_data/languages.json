@@ -1,0 +1,4 @@
+[
+  { "language_id": "tr-TR", "title": "Türkçe", "is_default": true },
+  { "language_id": "en-US", "title": "English", "fallback_language_id": "tr-TR" }
+]

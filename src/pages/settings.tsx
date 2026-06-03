@@ -115,6 +115,9 @@ export function SettingsPage() {
   const [assocTeamIds, setAssocTeamIds] = useState<number[]>([])
   const canEditUsers = hasPermission(data.settings.role, data.rolePermissions || [], 'users.edit')
   const canDeleteUsers = hasPermission(data.settings.role, data.rolePermissions || [], 'users.delete')
+  const canManageAddons = hasPermission(data.settings.role, data.rolePermissions || [], 'addons.manage')
+  const [addons, setAddons] = useState<Array<{ id: number; addon_id: string; title: string; version: string; is_installed: boolean; is_enabled: boolean; can_delete?: boolean; counts?: Record<string, number> }>>([])
+  const [addonUploading, setAddonUploading] = useState(false)
   const [editingUser, setEditingUser] = useState<UserLite | null>(null)
   const [editUserOpen, setEditUserOpen] = useState(false)
   const [editUserUsername, setEditUserUsername] = useState('')
@@ -131,6 +134,37 @@ export function SettingsPage() {
       setTeamAssociates(Array.isArray(raw) ? raw : [])
     } catch {
       setTeamAssociates([])
+    }
+  }
+
+  const loadAddons = async () => {
+    if (!canManageAddons) return
+    try {
+      const res = await api.get('/addons/', { suppressAuthToast: true } as any)
+      setAddons(Array.isArray(res.data) ? res.data : [])
+    } catch {
+      setAddons([])
+    }
+  }
+
+  const uploadAddonZip = async (file?: File | null) => {
+    if (!file) return
+    setAddonUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await api.post('/addons/upload/', formData)
+      const addonId = res.data?.addon_id
+      if (addonId) {
+        await api.post('/addons/install/', { addon_id: addonId })
+      }
+      await loadAddons()
+      await useAppStore.getState().hydrateFromApi({ force: true })
+      toast({ title: 'Add-on yüklendi', description: addonId || file.name })
+    } catch (err) {
+      toast({ title: 'Add-on yüklenemedi', description: formatApiError(err), variant: 'destructive' })
+    } finally {
+      setAddonUploading(false)
     }
   }
 
@@ -259,6 +293,10 @@ export function SettingsPage() {
   }, [])
 
   useEffect(() => {
+    loadAddons()
+  }, [canManageAddons])
+
+  useEffect(() => {
     loadTaskModels()
   }, [])
 
@@ -351,6 +389,87 @@ export function SettingsPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="Ayarlar" description="Çalışma alanı tercihleri, kullanıcılar, tema" />
+      {canManageAddons && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Add-on yönetimi</CardTitle>
+            <CardDescription>Manifest tabanlı modül, menü, route ve izin kayıtlarını yönetin.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex flex-wrap justify-end gap-2">
+              <label className="inline-flex">
+                <input
+                  type="file"
+                  accept=".zip"
+                  className="sr-only"
+                  onChange={(e) => uploadAddonZip(e.target.files?.[0])}
+                />
+                <span className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm hover:bg-muted">
+                  <Upload className="h-4 w-4" />
+                  {addonUploading ? 'Yükleniyor...' : 'ZIP yükle'}
+                </span>
+              </label>
+              <Button variant="outline" onClick={loadAddons}>Yenile</Button>
+            </div>
+            <div className="divide-y rounded-md border">
+              {addons.map((addon) => (
+                <div key={addon.addon_id} className="flex flex-col gap-3 p-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-medium">{addon.title}</p>
+                      <Badge variant="secondary">{addon.addon_id}</Badge>
+                      <Badge variant={addon.is_enabled ? 'default' : 'outline'}>{addon.is_enabled ? 'Aktif' : addon.is_installed ? 'Pasif' : 'Kurulu değil'}</Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Versiyon {addon.version || '-'} · İzin {addon.counts?.permissions || 0} · Phrase {addon.counts?.phrases || 0} · Şablon {addon.counts?.templates || 0} · Mod {addon.counts?.template_modifications || 0} · LESS/CSS {addon.counts?.style_assets || 0}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        await api.post('/addons/install/', { addon_id: addon.addon_id })
+                        await loadAddons()
+                        toast({ title: 'Add-on kuruldu' })
+                      }}
+                    >
+                      Kur / Güncelle
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        await api.post(addon.is_enabled ? '/addons/disable/' : '/addons/enable/', { addon_id: addon.addon_id })
+                        await loadAddons()
+                        await useAppStore.getState().hydrateFromApi()
+                      }}
+                    >
+                      {addon.is_enabled ? 'Pasifleştir' : 'Etkinleştir'}
+                    </Button>
+                    {addon.can_delete && (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={async () => {
+                          if (!window.confirm(`${addon.title} add-on'u silinsin mi?`)) return
+                          await api.post('/addons/delete/', { addon_id: addon.addon_id })
+                          await loadAddons()
+                          await useAppStore.getState().hydrateFromApi({ force: true })
+                          toast({ title: 'Add-on silindi' })
+                        }}
+                      >
+                        Sil
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {addons.length === 0 && <div className="p-4 text-sm text-muted-foreground">Kayıtlı add-on bulunamadı.</div>}
+            </div>
+          </CardContent>
+        </Card>
+      )}
       <RbacGuard perm="roles.view">
         <RolesPermissionPanel embedded />
       </RbacGuard>

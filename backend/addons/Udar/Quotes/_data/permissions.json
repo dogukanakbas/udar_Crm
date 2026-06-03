@@ -1,0 +1,29 @@
+{
+  "groups": [
+    { "id": "quotes", "title": "Teklif ve sözleşmeler", "display_order": 100 },
+    { "id": "quote_templates", "title": "Teklif şablon yönetimi", "display_order": 110 }
+  ],
+  "permissions": [
+    { "code": "quotes.view.own", "title": "Kendi teklif/sözleşmelerini görüntüle", "group": "quotes", "display_order": 10 },
+    { "code": "quotes.view.all", "title": "Tüm teklif/sözleşmeleri görüntüle", "group": "quotes", "display_order": 20 },
+    { "code": "quotes.create", "title": "Teklif/sözleşme oluştur", "group": "quotes", "display_order": 30 },
+    { "code": "quotes.edit.own", "title": "Kendi teklif/sözleşmelerini düzenle", "group": "quotes", "display_order": 40 },
+    { "code": "quotes.edit.all", "title": "Tüm teklif/sözleşmeleri düzenle", "group": "quotes", "display_order": 50 },
+    { "code": "quotes.delete", "title": "Teklif/sözleşme sil", "group": "quotes", "display_order": 60 },
+    { "code": "quotes.status.change", "title": "Durum değiştir", "group": "quotes", "display_order": 70 },
+    { "code": "quotes.convert", "title": "Teklifi sözleşmeye dönüştür", "group": "quotes", "display_order": 80 },
+    { "code": "quotes.download", "title": "Belge indir", "group": "quotes", "display_order": 90 },
+    { "code": "quotes.bulk.delete", "title": "Toplu sil", "group": "quotes", "display_order": 100 },
+    { "code": "quotes.bulk.status", "title": "Toplu durum değiştir", "group": "quotes", "display_order": 110 },
+    { "code": "quotes.prepare", "title": "Teklif hazırlayan olarak seçilebilir", "group": "quotes", "display_order": 120 },
+    { "code": "quotes.approve", "title": "Eski onay akışı işlemleri", "group": "quotes", "display_order": 130 },
+    { "code": "templates.view", "title": "Şablon yönetimini görüntüle", "group": "quote_templates", "display_order": 10 },
+    { "code": "templates.products.edit", "title": "Ürün grubu/şablon ürünlerini düzenle", "group": "quote_templates", "display_order": 20 },
+    { "code": "templates.seller_companies.edit", "title": "Satıcı firmaları düzenle", "group": "quote_templates", "display_order": 30 },
+    { "code": "templates.document_terms.edit", "title": "Teklif/sözleşme koşullarını düzenle", "group": "quote_templates", "display_order": 40 },
+    { "code": "templates.pricing.edit", "title": "Fiyat listelerini düzenle", "group": "quote_templates", "display_order": 50 },
+    { "code": "templates.payment_options.edit", "title": "Ödeme tiplerini düzenle", "group": "quote_templates", "display_order": 60 },
+    { "code": "templates.service_tax.edit", "title": "Hizmet KDV oranını düzenle", "group": "quote_templates", "display_order": 70 },
+    { "code": "templates.excel.upload", "title": "Excel şablonu yükle", "group": "quote_templates", "display_order": 80 }
+  ]
+}

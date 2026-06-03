@@ -19,9 +19,33 @@ DEFAULT_DOCUMENT_TERMS_TEXT = '\n'.join([
 class Permission(models.Model):
     code = models.CharField(max_length=100, unique=True)
     description = models.CharField(max_length=255, blank=True)
+    addon_id = models.CharField(max_length=120, blank=True, default="")
+    permission_group = models.ForeignKey(
+        "PermissionGroup",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="permissions",
+    )
+    permission_type = models.CharField(max_length=40, blank=True, default="boolean")
+    display_order = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=True)
 
     def __str__(self):
         return self.code
+
+
+class PermissionGroup(models.Model):
+    group_id = models.CharField(max_length=100, unique=True)
+    title = models.CharField(max_length=180)
+    addon_id = models.CharField(max_length=120, blank=True, default="")
+    display_order = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ["display_order", "title"]
+
+    def __str__(self):
+        return self.title
 
 
 class RolePermission(models.Model):
@@ -33,6 +57,63 @@ class RolePermission(models.Model):
 
     def __str__(self):
         return f"{self.role} -> {self.permission.code}"
+
+
+class UserGroup(models.Model):
+    group_id = models.CharField(max_length=80, unique=True)
+    title = models.CharField(max_length=160)
+    description = models.CharField(max_length=255, blank=True, default="")
+    is_system = models.BooleanField(default=False)
+    display_order = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["display_order", "title"]
+
+    def __str__(self):
+        return self.title
+
+
+class UserGroupMembership(models.Model):
+    user = models.ForeignKey("User", on_delete=models.CASCADE, related_name="group_memberships")
+    group = models.ForeignKey(UserGroup, on_delete=models.CASCADE, related_name="memberships")
+    is_primary = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "group")
+        ordering = ["-is_primary", "group__display_order", "group__title"]
+
+    def __str__(self):
+        return f"{self.user_id} -> {self.group.group_id}"
+
+
+class UserGroupPermission(models.Model):
+    VALUE_CHOICES = [
+        ("unset", "Unset"),
+        ("allow", "Allow"),
+        ("deny", "Deny"),
+    ]
+    group = models.ForeignKey(UserGroup, on_delete=models.CASCADE, related_name="permission_values")
+    permission = models.ForeignKey(Permission, on_delete=models.CASCADE, related_name="group_values")
+    value = models.CharField(max_length=10, choices=VALUE_CHOICES, default="unset")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("group", "permission")
+
+    def __str__(self):
+        return f"{self.group.group_id} {self.permission.code}={self.value}"
+
+
+class EffectivePermissionCache(models.Model):
+    user = models.OneToOneField("User", on_delete=models.CASCADE, related_name="effective_permission_cache")
+    permissions = models.JSONField(default=list, blank=True)
+    rebuilt_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"permissions:{self.user_id}"
 
 
 class User(AbstractUser):

@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 from organizations.models import Organization, Warehouse
 
@@ -266,6 +267,7 @@ class ProductionStepProgress(models.Model):
     order = models.PositiveIntegerField(default=0, db_index=True)
     target_quantity = models.DecimalField(max_digits=14, decimal_places=2)
     completed_quantity = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    machine_quantity = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     status = models.CharField(max_length=20, choices=STATUSES, default='locked')
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -277,6 +279,60 @@ class ProductionStepProgress(models.Model):
 
     def __str__(self):
         return f'{self.line_id} - {self.station.code}'
+
+
+class ProductionWorkSession(models.Model):
+    STATUSES = [
+        ('started', 'Basladi'),
+        ('paused', 'Molada'),
+        ('handover', 'Devredildi'),
+        ('closed', 'Kapandi'),
+    ]
+    DISCREPANCY_STATUSES = [
+        ('none', 'Fark yok'),
+        ('needs_review', 'Inceleme gerekli'),
+        ('approved', 'Onaylandi'),
+        ('corrected', 'Duzeltildi'),
+    ]
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_work_sessions')
+    work_order = models.ForeignKey(ProductionWorkOrder, on_delete=models.CASCADE, related_name='sessions')
+    line = models.ForeignKey(ProductionWorkOrderLine, on_delete=models.CASCADE, related_name='sessions')
+    step = models.ForeignKey(ProductionStepProgress, on_delete=models.CASCADE, related_name='sessions')
+    station = models.ForeignKey(ProductionStation, on_delete=models.PROTECT, related_name='sessions')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='production_work_sessions')
+    previous_session = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='handover_sessions')
+    status = models.CharField(max_length=20, choices=STATUSES, default='started')
+    started_at = models.DateTimeField(default=timezone.now)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    start_counter = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    end_counter = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    machine_quantity = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    declared_good_quantity = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    discrepancy_quantity = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    discrepancy_status = models.CharField(max_length=20, choices=DISCREPANCY_STATUSES, default='none')
+    note = models.TextField(blank=True, default='')
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reviewed_production_work_sessions',
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_note = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-started_at', '-id']
+        indexes = [
+            models.Index(fields=['organization', 'status']),
+            models.Index(fields=['line', 'station', 'status']),
+            models.Index(fields=['user', 'started_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.user} - {self.station.code} - {self.status}'
 
 
 class ProductionEvent(models.Model):
@@ -295,6 +351,7 @@ class ProductionEvent(models.Model):
     line = models.ForeignKey(ProductionWorkOrderLine, on_delete=models.CASCADE, related_name='events')
     step = models.ForeignKey(ProductionStepProgress, on_delete=models.CASCADE, related_name='events')
     station = models.ForeignKey(ProductionStation, on_delete=models.PROTECT, related_name='events')
+    session = models.ForeignKey(ProductionWorkSession, on_delete=models.SET_NULL, null=True, blank=True, related_name='events')
     event_type = models.CharField(max_length=20, choices=EVENT_TYPES)
     quantity_delta = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     counter_value = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)

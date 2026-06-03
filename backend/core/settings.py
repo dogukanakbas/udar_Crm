@@ -25,6 +25,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'organizations',
     'accounts',
+    'addons',
     'crm',
     'erp',
     'production',

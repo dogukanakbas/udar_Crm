@@ -16,7 +16,7 @@ import os
 import pyotp
 import secrets
 from .serializers import TwoFATokenObtainPairSerializer
-from .models import Permission, RolePermission
+from .models import Permission, RolePermission, UserGroup, UserGroupPermission
 from .permissions_map import PERMISSION_CATALOG
 from rest_framework import status
 from django.contrib.auth.hashers import check_password
@@ -697,8 +697,12 @@ class PermissionListView(APIView):
     ensure_permissions_seeded()
     if not user_has_perm(request.user, "roles.view"):
       return Response({"detail": "Yetki kataloğunu görüntüleme yetkiniz yok"}, status=status.HTTP_403_FORBIDDEN)
-    perms = list(Permission.objects.all().order_by("code").values("code", "description"))
-    return Response({"permissions": [item["code"] for item in perms], "catalog": PERMISSION_CATALOG})
+    try:
+      from addons.services import permission_catalog_payload
+      return Response(permission_catalog_payload())
+    except Exception:
+      perms = list(Permission.objects.all().order_by("code").values("code", "description"))
+      return Response({"permissions": [item["code"] for item in perms], "catalog": PERMISSION_CATALOG})
 
 
 class RolePermissionView(APIView):
@@ -725,7 +729,100 @@ class RolePermissionView(APIView):
     # Replace mappings
     RolePermission.objects.filter(role=role).delete()
     RolePermission.objects.bulk_create([RolePermission(role=role, permission=p) for p in perms])
+    from .utils import rebuild_effective_permissions, sync_user_groups
+    sync_user_groups()
+    rebuild_effective_permissions()
     return Response({"role": role, "permissions": [p.code for p in perms]})
+
+
+class UserGroupViewSet(viewsets.ModelViewSet):
+  permission_classes = [permissions.IsAuthenticated, IsOrgMember]
+  queryset = UserGroup.objects.all().order_by("display_order", "title")
+
+  def list(self, request):
+    ensure_permissions_seeded()
+    if not user_has_perm(request.user, "roles.view"):
+      return Response({"detail": "Kullanıcı gruplarını görüntüleme yetkiniz yok"}, status=status.HTTP_403_FORBIDDEN)
+    data = [
+      {
+        "id": group.id,
+        "group_id": group.group_id,
+        "title": group.title,
+        "description": group.description,
+        "is_system": group.is_system,
+        "display_order": group.display_order,
+      }
+      for group in self.get_queryset()
+    ]
+    return Response(data)
+
+  def create(self, request):
+    ensure_permissions_seeded()
+    if not user_has_perm(request.user, "roles.edit"):
+      return Response({"detail": "Kullanıcı grubu oluşturma yetkiniz yok"}, status=status.HTTP_403_FORBIDDEN)
+    group_id = (request.data.get("group_id") or request.data.get("title") or "").strip()
+    title = (request.data.get("title") or group_id).strip()
+    if not group_id or not title:
+      return Response({"detail": "group_id ve title zorunludur"}, status=status.HTTP_400_BAD_REQUEST)
+    group, _ = UserGroup.objects.get_or_create(
+      group_id=group_id,
+      defaults={
+        "title": title,
+        "description": request.data.get("description") or "",
+        "display_order": int(request.data.get("display_order") or 100),
+      },
+    )
+    return Response({"id": group.id, "group_id": group.group_id, "title": group.title}, status=status.HTTP_201_CREATED)
+
+  def partial_update(self, request, pk=None):
+    ensure_permissions_seeded()
+    if not user_has_perm(request.user, "roles.edit"):
+      return Response({"detail": "Kullanıcı grubu düzenleme yetkiniz yok"}, status=status.HTTP_403_FORBIDDEN)
+    group = self.get_object()
+    for field in ("title", "description"):
+      if field in request.data:
+        setattr(group, field, request.data.get(field) or "")
+    if "display_order" in request.data:
+      group.display_order = int(request.data.get("display_order") or 0)
+    group.save()
+    return Response({"id": group.id, "group_id": group.group_id, "title": group.title})
+
+
+class UserGroupPermissionView(APIView):
+  permission_classes = [IsAuthenticated]
+
+  def get(self, request, pk):
+    ensure_permissions_seeded()
+    if not user_has_perm(request.user, "roles.view"):
+      return Response({"detail": "Grup yetkilerini görüntüleme yetkiniz yok"}, status=status.HTTP_403_FORBIDDEN)
+    group = UserGroup.objects.get(pk=pk)
+    values = {
+      row.permission.code: row.value
+      for row in UserGroupPermission.objects.filter(group=group).select_related("permission")
+    }
+    return Response({"group_id": group.group_id, "permissions": values})
+
+  def patch(self, request, pk):
+    ensure_permissions_seeded()
+    if not user_has_perm(request.user, "roles.edit"):
+      return Response({"detail": "Grup yetkilerini düzenleme yetkiniz yok"}, status=status.HTTP_403_FORBIDDEN)
+    group = UserGroup.objects.get(pk=pk)
+    values = request.data.get("permissions") or {}
+    if not isinstance(values, dict):
+      return Response({"detail": "permissions obje olmalı"}, status=status.HTTP_400_BAD_REQUEST)
+    permissions = Permission.objects.filter(code__in=list(values.keys()))
+    for permission in permissions:
+      value = values.get(permission.code)
+      if value not in {"unset", "allow", "deny"}:
+        value = "unset"
+      UserGroupPermission.objects.update_or_create(
+        group=group,
+        permission=permission,
+        defaults={"value": value},
+      )
+    from .utils import rebuild_effective_permissions
+    rebuild_effective_permissions()
+    return Response({"group_id": group.group_id, "permissions": values})
 
 
 class NotificationPrefView(APIView):

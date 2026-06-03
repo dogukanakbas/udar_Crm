@@ -1,0 +1,8 @@
+[
+  { "kind": "frontend", "key": "quotes.list", "path": "/crm/quotes", "binding": "pages/quotes", "permission": "quotes.view.own" },
+  { "kind": "frontend", "key": "quotes.new", "path": "/crm/quotes/new", "binding": "pages/quote-create", "permission": "quotes.create" },
+  { "kind": "frontend", "key": "quotes.detail", "path": "/crm/quotes/:quoteId", "binding": "pages/quotes", "permission": "quotes.view.own" },
+  { "kind": "frontend", "key": "quotes.templates", "path": "/crm/quote-templates", "binding": "pages/quote-templates", "permission": "templates.view" },
+  { "kind": "frontend", "key": "quotes.seller_companies", "path": "/crm/seller-companies", "binding": "pages/seller-companies", "permission": "templates.seller_companies.edit" },
+  { "kind": "backend", "key": "quotes.api", "path": "/api/quotes/", "binding": "crm.views.QuoteViewSet", "permission": "quotes.view.own" }
+]

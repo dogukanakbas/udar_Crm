@@ -58,7 +58,28 @@ type StepProgress = {
   department_color?: string
   target_quantity: string | number
   completed_quantity: string | number
+  machine_quantity?: string | number
   status: string
+}
+type WorkSession = {
+  id: number
+  status: string
+  user_name?: string
+  started_at?: string
+  ended_at?: string
+  machine_quantity: string | number
+  declared_good_quantity: string | number
+  discrepancy_quantity: string | number
+  discrepancy_status: string
+}
+type PreviousSummary = {
+  station_code?: string
+  station_name?: string
+  completed_quantity?: string | number
+  machine_quantity?: string | number
+  last_user?: string
+  last_closed_at?: string
+  has_discrepancy?: boolean
 }
 type ConsoleItem = {
   line_id: number
@@ -73,7 +94,14 @@ type ConsoleItem = {
   department_name: string
   target_quantity: string | number
   completed_quantity: string | number
+  machine_quantity: string | number
+  remaining_quantity?: string | number
   status: string
+  active_session?: WorkSession | null
+  current_user_session?: WorkSession | null
+  can_start?: boolean
+  can_take_over?: boolean
+  previous_summary?: PreviousSummary | null
 }
 
 const statusLabel: Record<string, string> = {
@@ -676,8 +704,8 @@ export function ProductionConsolePage() {
   const [items, setItems] = useState<ConsoleItem[]>([])
   const [stations, setStations] = useState<Station[]>([])
   const [station, setStation] = useState('all')
-  const [active, setActive] = useState<ConsoleItem | null>(null)
-  const [quantity, setQuantity] = useState('1')
+  const [closing, setClosing] = useState<ConsoleItem | null>(null)
+  const [goodQuantity, setGoodQuantity] = useState('0')
   const [note, setNote] = useState('')
 
   const load = async () => {
@@ -693,26 +721,33 @@ export function ProductionConsolePage() {
     void load()
   }, [station])
 
-  const sendEvent = async (eventType: string) => {
-    if (!active) return
-    await api.post('/production/station-console/event/', {
-      line_id: active.line_id,
-      station_code: active.station_code,
-      event_type: eventType,
-      quantity_delta: eventType === 'quantity' || eventType === 'adjust' ? quantity : 0,
-      note,
-      idempotency_key: `${eventType}-${active.line_id}-${Date.now()}`,
+  const startSession = async (item: ConsoleItem) => {
+    await api.post('/production/station-sessions/start/', {
+      line_id: item.line_id,
+      station_code: item.station_code,
     })
-    toast({ title: 'İstasyon kaydı işlendi' })
-    setActive(null)
-    setQuantity('1')
-    setNote('')
+    toast({ title: item.can_take_over ? 'İş devralındı' : 'İş başlatıldı' })
     await load()
+  }
+
+  const sendSessionAction = async (endpoint: string, sessionId?: number, title = 'Oturum güncellendi') => {
+    if (!sessionId) return
+    await api.post(`/production/station-sessions/${endpoint}/`, {
+      session_id: sessionId,
+    })
+    toast({ title })
+    await load()
+  }
+
+  const openClose = (item: ConsoleItem) => {
+    setClosing(item)
+    setGoodQuantity(String(item.remaining_quantity ?? Math.max(n(item.target_quantity) - n(item.completed_quantity), 0)))
+    setNote('')
   }
 
   return (
     <div className="space-y-4">
-      <PageHeader title="İstasyon Konsolu" description="Pi/kiosk uyumlu iş başlatma, adet girişi, mola ve devir ekranı." />
+      <PageHeader title="İstasyon Konsolu" description="Kullanıcı oturumu başlatın, vardiya devredin ve iş bitiminde sağlam adedi kapatın." />
       <Card>
         <CardContent className="grid gap-3 pt-6 md:grid-cols-[1fr_auto]">
           <Select value={station} onValueChange={setStation}>
@@ -734,39 +769,82 @@ export function ProductionConsolePage() {
                   <CardTitle>{item.station_code} · {item.product_name}</CardTitle>
                   <p className="text-sm text-muted-foreground">{item.work_order_number} · {item.customer_name || '-'} · {item.detail_1 || '-'} / {item.detail_2 || '-'}</p>
                 </div>
-                <Badge>{statusLabel[item.status] || item.status}</Badge>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Badge>{statusLabel[item.status] || item.status}</Badge>
+                  {item.previous_summary?.has_discrepancy && <Badge variant="outline" className="border-amber-400 text-amber-600">Fark incelemede</Badge>}
+                </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
               <ProgressBar done={item.completed_quantity} target={item.target_quantity} />
-              <div className="flex items-center justify-between text-sm">
+              <div className="grid gap-2 text-sm sm:grid-cols-4">
                 <span>Hedef: {formatNumber(n(item.target_quantity))}</span>
-                <span>Tamamlanan: {formatNumber(n(item.completed_quantity))}</span>
+                <span>Sağlam: {formatNumber(n(item.completed_quantity))}</span>
+                <span>Makine: {formatNumber(n(item.machine_quantity))}</span>
+                <span>Kalan: {formatNumber(n(item.remaining_quantity))}</span>
               </div>
-              <Button className="w-full" onClick={() => setActive(item)}><Play className="mr-2 h-4 w-4" /> İşlem yap</Button>
+              {item.previous_summary && (
+                <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+                  Önceki: {item.previous_summary.station_code || '-'} · Sağlam {formatNumber(n(item.previous_summary.completed_quantity))} · {item.previous_summary.last_user || 'Kullanıcı yok'}
+                </div>
+              )}
+              {item.current_user_session ? (
+                <div className="grid gap-2 sm:grid-cols-4">
+                  {item.current_user_session.status === 'paused' ? (
+                    <Button variant="outline" onClick={() => sendSessionAction('resume', item.current_user_session?.id, 'İşe devam edildi')}>Devam</Button>
+                  ) : (
+                    <Button variant="outline" onClick={() => sendSessionAction('pause', item.current_user_session?.id, 'Mola başlatıldı')}>Mola</Button>
+                  )}
+                  <Button variant="outline" onClick={() => sendSessionAction('handover', item.current_user_session?.id, 'İş devredildi')}>Devret</Button>
+                  <Button className="sm:col-span-2" onClick={() => openClose(item)}><Send className="mr-2 h-4 w-4" /> İşi / vardiyayı kapat</Button>
+                </div>
+              ) : item.active_session ? (
+                <div className="rounded-md border p-3 text-sm text-muted-foreground">
+                  Aktif oturum: {item.active_session.user_name || 'Başka kullanıcı'} · Makine {formatNumber(n(item.active_session.machine_quantity))}
+                </div>
+              ) : (
+                <Button className="w-full" onClick={() => startSession(item)}>
+                  <Play className="mr-2 h-4 w-4" /> {item.can_take_over ? 'Devral ve başlat' : 'Başlat'}
+                </Button>
+              )}
             </CardContent>
           </Card>
         ))}
       </div>
-      <Dialog open={!!active} onOpenChange={(open) => !open && setActive(null)}>
+      <Dialog open={!!closing} onOpenChange={(open) => !open && setClosing(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{active?.station_code} istasyon işlemi</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{closing?.station_code} işi / vardiyası kapat</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div className="grid gap-2">
-              <Label>Adet</Label>
-              <Input value={quantity} onChange={(event) => setQuantity(event.target.value)} inputMode="decimal" />
+              <Label>Sağlam adet</Label>
+              <Input value={goodQuantity} onChange={(event) => setGoodQuantity(event.target.value)} inputMode="decimal" />
             </div>
             <div className="grid gap-2">
-              <Label>Not / eksik bitirme gerekçesi</Label>
+              <Label>Not</Label>
               <Textarea value={note} onChange={(event) => setNote(event.target.value)} />
             </div>
+            {closing?.current_user_session && n(closing.current_user_session.machine_quantity) !== n(goodQuantity) && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                Makine adedi {formatNumber(n(closing.current_user_session.machine_quantity))}; beyan farkı yönetici incelemesine düşecek.
+              </div>
+            )}
           </div>
-          <DialogFooter className="flex-wrap gap-2">
-            <Button variant="outline" onClick={() => sendEvent('start')}>Başlat</Button>
-            <Button variant="outline" onClick={() => sendEvent('pause')}>Mola</Button>
-            <Button variant="outline" onClick={() => sendEvent('resume')}>Devam</Button>
-            <Button onClick={() => sendEvent('quantity')}>Adet gir</Button>
-            <Button onClick={() => sendEvent('complete')}><Send className="mr-2 h-4 w-4" /> Tamamla / devret</Button>
+          <DialogFooter>
+            <Button
+              onClick={async () => {
+                if (!closing?.current_user_session) return
+                await api.post('/production/station-sessions/close/', {
+                  session_id: closing.current_user_session.id,
+                  declared_good_quantity: goodQuantity,
+                  note,
+                })
+                toast({ title: 'Oturum kapatıldı' })
+                setClosing(null)
+                await load()
+              }}
+            >
+              Kapat
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

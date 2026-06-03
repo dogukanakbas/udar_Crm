@@ -1,4 +1,5 @@
 from django.urls import path
+from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 from .views import (
     MeView,
@@ -15,6 +16,8 @@ from .views import (
     OTPDisableView,
     RolePermissionView,
     PermissionListView,
+    UserGroupPermissionView,
+    UserGroupViewSet,
     ChangePasswordView,
     InviteUserView,
     ActivateUserView,
@@ -23,6 +26,9 @@ from .views import (
     BrandingAssetView,
     BrandingView,
 )
+
+router = DefaultRouter()
+router.register(r'user-groups', UserGroupViewSet, basename='user-groups')
 
 urlpatterns = [
     path('branding/', BrandingView.as_view(), name='branding'),
@@ -42,9 +48,10 @@ urlpatterns = [
     path('otp/disable/', OTPDisableView.as_view(), name='otp_disable'),
     path('role-perms/', RolePermissionView.as_view(), name='role_perms'),
     path('permissions/', PermissionListView.as_view(), name='permissions'),
+    path('user-groups/<int:pk>/permissions/', UserGroupPermissionView.as_view(), name='user_group_permissions'),
     path('change-password/', ChangePasswordView.as_view(), name='change_password'),
     path('invite/', InviteUserView.as_view(), name='invite_user'),
     path('activate/', ActivateUserView.as_view(), name='activate_user'),
     path('organization-settings/', OrganizationSettingsView.as_view(), name='organization_settings'),
     path('organization-branding-upload/', OrganizationBrandingUploadView.as_view(), name='organization_branding_upload'),
-]
+] + router.urls
