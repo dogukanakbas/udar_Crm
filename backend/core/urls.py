@@ -26,11 +26,13 @@ from erp.views import ProductViewSet as ERPProductViewSet, CategoryViewSet, Invo
 from mdf.views import MdfSkuViewSet
 from production.views import (
     ProductionDataFieldViewSet,
+    ProductionCountingWindowViewSet,
     ProductionDepartmentViewSet,
     ProductionDeviceViewSet,
     ProductionDevicePayloadMapViewSet,
     ProductionDocumentViewSet,
     ProductionEventViewSet,
+    ProductionOperatorProfileViewSet,
     ProductionPiEventView,
     ProductionReportExportView,
     ProductionReportSummaryView,
@@ -38,7 +40,18 @@ from production.views import (
     ProductionRuleSetViewSet,
     ProductionRouteViewSet,
     ProductionSettingsView,
+    ProductionStationAlertAckView,
+    ProductionStationAlertViewSet,
     ProductionStationConsoleView,
+    ProductionStationTabletViewSet,
+    ProductionStationTargetViewSet,
+    ProductionTabletBreakEndView,
+    ProductionTabletBreakStartView,
+    ProductionTabletCheckpointView,
+    ProductionTabletCompleteWorkItemView,
+    ProductionTabletContextView,
+    ProductionTabletLoginSlotView,
+    ProductionTabletLogoutSlotView,
     ProductionSessionCloseView,
     ProductionSessionHandoverView,
     ProductionSessionPauseView,
@@ -47,6 +60,7 @@ from production.views import (
     ProductionSessionStartView,
     ProductionStationUserViewSet,
     ProductionStationViewSet,
+    ProductionStepTabletAssignmentViewSet,
     ProductionTemplatePresetViewSet,
     ProductionWorkOrderViewSet,
     ProductionWorkSessionViewSet,
@@ -113,6 +127,10 @@ router.register(r'production/departments', ProductionDepartmentViewSet, basename
 router.register(r'production/stations', ProductionStationViewSet, basename='production-stations')
 router.register(r'production/station-users', ProductionStationUserViewSet, basename='production-station-users')
 router.register(r'production/devices', ProductionDeviceViewSet, basename='production-devices')
+router.register(r'production/operator-profiles', ProductionOperatorProfileViewSet, basename='production-operator-profiles')
+router.register(r'production/tablets', ProductionStationTabletViewSet, basename='production-tablets')
+router.register(r'production/station-targets', ProductionStationTargetViewSet, basename='production-station-targets')
+router.register(r'production/step-tablet-assignments', ProductionStepTabletAssignmentViewSet, basename='production-step-tablet-assignments')
 router.register(r'production/device-maps', ProductionDevicePayloadMapViewSet, basename='production-device-maps')
 router.register(r'production/data-fields', ProductionDataFieldViewSet, basename='production-data-fields')
 router.register(r'production/routes', ProductionRouteViewSet, basename='production-routes')
@@ -121,7 +139,9 @@ router.register(r'production/rule-blocks', ProductionRuleBlockViewSet, basename=
 router.register(r'production/template-presets', ProductionTemplatePresetViewSet, basename='production-template-presets')
 router.register(r'production/work-orders', ProductionWorkOrderViewSet, basename='production-work-orders')
 router.register(r'production/sessions', ProductionWorkSessionViewSet, basename='production-sessions')
+router.register(r'production/counting-windows', ProductionCountingWindowViewSet, basename='production-counting-windows')
 router.register(r'production/events', ProductionEventViewSet, basename='production-events')
+router.register(r'production/station-alerts', ProductionStationAlertViewSet, basename='production-station-alerts')
 router.register(r'production/documents', ProductionDocumentViewSet, basename='production-documents')
 router.register(r'tickets', TicketViewSet, basename='tickets')
 router.register(r'ticket-messages', TicketMessageViewSet, basename='ticket-messages')
@@ -179,12 +199,20 @@ urlpatterns = [
     path('api/production/settings/', ProductionSettingsView.as_view(), name='production-settings'),
     path('api/production/station-console/context/', ProductionStationConsoleView.as_view(), name='production-station-context'),
     path('api/production/station-console/event/', ProductionStationConsoleView.as_view(), name='production-station-event'),
+    path('api/production/tablet/context/', ProductionTabletContextView.as_view(), name='production-tablet-context'),
+    path('api/production/tablet/login-slot/', ProductionTabletLoginSlotView.as_view(), name='production-tablet-login-slot'),
+    path('api/production/tablet/logout-slot/', ProductionTabletLogoutSlotView.as_view(), name='production-tablet-logout-slot'),
+    path('api/production/tablet/break/start/', ProductionTabletBreakStartView.as_view(), name='production-tablet-break-start'),
+    path('api/production/tablet/break/end/', ProductionTabletBreakEndView.as_view(), name='production-tablet-break-end'),
+    path('api/production/tablet/checkpoint/', ProductionTabletCheckpointView.as_view(), name='production-tablet-checkpoint'),
+    path('api/production/tablet/complete-work-item/', ProductionTabletCompleteWorkItemView.as_view(), name='production-tablet-complete-work-item'),
     path('api/production/station-sessions/start/', ProductionSessionStartView.as_view(), name='production-session-start'),
     path('api/production/station-sessions/pause/', ProductionSessionPauseView.as_view(), name='production-session-pause'),
     path('api/production/station-sessions/resume/', ProductionSessionResumeView.as_view(), name='production-session-resume'),
     path('api/production/station-sessions/handover/', ProductionSessionHandoverView.as_view(), name='production-session-handover'),
     path('api/production/station-sessions/close/', ProductionSessionCloseView.as_view(), name='production-session-close'),
     path('api/production/station-sessions/<int:session_id>/review-discrepancy/', ProductionSessionReviewView.as_view(), name='production-session-review'),
+    path('api/production/station-alerts/<int:alert_id>/ack/', ProductionStationAlertAckView.as_view(), name='production-station-alert-ack'),
     path('api/production/my-daily-sessions/', MyDailyProductionSessionsView.as_view(), name='production-my-daily-sessions'),
     path('api/production/pi/events/', ProductionPiEventView.as_view(), name='production-pi-events'),
     path('api/production/reports/summary/', ProductionReportSummaryView.as_view(), name='production-report-summary'),

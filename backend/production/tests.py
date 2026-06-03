@@ -1,6 +1,7 @@
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.db.models import Max
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -15,9 +16,16 @@ from .models import (
     ProductionDevice,
     ProductionDevicePayloadMap,
     ProductionEvent,
+    ProductionCountingParticipant,
+    ProductionCountingWindow,
+    ProductionOperatorProfile,
+    ProductionSessionBreak,
     ProductionSettings,
+    ProductionStationTarget,
+    ProductionStationTablet,
     ProductionStationUser,
     ProductionStepProgress,
+    ProductionStepTabletAssignment,
     ProductionTemplatePreset,
     ProductionWorkOrder,
     ProductionWorkSession,
@@ -32,6 +40,13 @@ from .services import (
     record_machine_session_event,
     record_station_event,
     start_work_session,
+    tablet_login_slot,
+    tablet_logout_slot,
+    tablet_pause_session,
+    tablet_resume_session,
+    tablet_checkpoint,
+    tablet_complete_work_item,
+    tablet_context,
 )
 
 
@@ -455,3 +470,278 @@ class ProductionAutomationTests(TestCase):
         self.assertEqual(first_session.status, 'handover')
         self.assertEqual(second_session.previous_session_id, first_session.id)
         self.assertEqual(ProductionWorkSession.objects.filter(step=first_step, status__in=['started', 'paused']).count(), 1)
+
+    def test_tablet_slots_allow_multiple_assigned_workers_with_pin(self):
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        line = order.lines.get()
+        first_step = line.steps.select_related('station').order_by('order').first()
+        first_step.station.max_workers = 2
+        first_step.station.save(update_fields=['max_workers'])
+        worker_one = User.objects.create_user(username='tablet-one', password='x', organization=self.org, role='Worker')
+        worker_two = User.objects.create_user(username='tablet-two', password='x', organization=self.org, role='Worker')
+        worker_three = User.objects.create_user(username='tablet-three', password='x', organization=self.org, role='Worker')
+        for worker, pin in [(worker_one, '1111'), (worker_two, '2222'), (worker_three, '3333')]:
+            ProductionStationUser.objects.create(organization=self.org, station=first_step.station, user=worker)
+            profile = ProductionOperatorProfile.objects.create(organization=self.org, user=worker)
+            profile.set_pin(pin)
+            profile.save()
+        tablet = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=first_step.station,
+            name='Tablet 1',
+            token='tablet-token-1',
+        )
+
+        first_session = tablet_login_slot(token=tablet.token, user_id=worker_one.id, pin='1111', line_id=line.id, slot_index=0)
+        with self.assertRaisesMessage(ProductionError, 'ortak uretim toplamı'):
+            tablet_login_slot(token=tablet.token, user_id=worker_two.id, pin='2222', line_id=line.id, slot_index=1)
+        second_session = tablet_login_slot(
+            token=tablet.token,
+            user_id=worker_two.id,
+            pin='2222',
+            line_id=line.id,
+            slot_index=1,
+            checkpoint_total=Decimal('0'),
+        )
+
+        self.assertEqual(first_session.slot_index, 0)
+        self.assertEqual(second_session.slot_index, 1)
+        self.assertEqual(ProductionWorkSession.objects.filter(step=first_step, status__in=['started', 'paused']).count(), 2)
+        with self.assertRaises(ProductionError):
+            tablet_login_slot(token=tablet.token, user_id=worker_three.id, pin='3333', line_id=line.id, slot_index=0)
+
+    def test_tablet_break_resume_and_logout_declare_official_quantity(self):
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        line = order.lines.get()
+        first_step = line.steps.select_related('station').order_by('order').first()
+        worker = User.objects.create_user(username='tablet-break', password='x', organization=self.org, role='Worker')
+        ProductionStationUser.objects.create(organization=self.org, station=first_step.station, user=worker)
+        profile = ProductionOperatorProfile.objects.create(organization=self.org, user=worker)
+        profile.set_pin('1234')
+        profile.save()
+        tablet = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=first_step.station,
+            name='Tablet 1',
+            token='tablet-token-2',
+        )
+        session = tablet_login_slot(token=tablet.token, user_id=worker.id, pin='1234', line_id=line.id, slot_index=0)
+
+        tablet_pause_session(token=tablet.token, session_id=session.id, note='Çay molası', checkpoint_total=Decimal('0'))
+        self.assertEqual(ProductionSessionBreak.objects.filter(session=session, ended_at__isnull=True).count(), 1)
+        tablet_resume_session(token=tablet.token, session_id=session.id)
+        self.assertEqual(ProductionSessionBreak.objects.filter(session=session, ended_at__isnull=True).count(), 0)
+        tablet_logout_slot(
+            token=tablet.token,
+            user_id=worker.id,
+            pin='1234',
+            session_id=session.id,
+            declared_good_quantity=Decimal('1'),
+        )
+
+        session.refresh_from_db()
+        first_step.refresh_from_db()
+        self.assertEqual(session.status, 'closed')
+        self.assertEqual(session.declared_good_quantity, Decimal('1.00'))
+        self.assertEqual(first_step.completed_quantity, Decimal('1.00'))
+
+    def test_shared_tablet_checkpoint_credits_people_without_double_counting_station_output(self):
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        line = order.lines.get()
+        first_step = line.steps.select_related('station').order_by('order').first()
+        first_step.target_quantity = Decimal('100')
+        first_step.save(update_fields=['target_quantity'])
+        first_step.station.max_workers = 2
+        first_step.station.save(update_fields=['max_workers'])
+        ali = User.objects.create_user(username='ali-operator', password='x', organization=self.org, role='Worker')
+        veli = User.objects.create_user(username='veli-operator', password='x', organization=self.org, role='Worker')
+        for worker, pin in [(ali, '1111'), (veli, '2222')]:
+            ProductionStationUser.objects.create(organization=self.org, station=first_step.station, user=worker)
+            profile = ProductionOperatorProfile.objects.create(organization=self.org, user=worker)
+            profile.set_pin(pin)
+            profile.save()
+        tablet = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=first_step.station,
+            name='Ortak Tablet',
+            token='shared-window-tablet',
+        )
+
+        ali_session = tablet_login_slot(token=tablet.token, user_id=ali.id, pin='1111', line_id=line.id, slot_index=0)
+        veli_session = tablet_login_slot(
+            token=tablet.token,
+            user_id=veli.id,
+            pin='2222',
+            line_id=line.id,
+            slot_index=1,
+            checkpoint_total=Decimal('0'),
+        )
+        tablet_pause_session(
+            token=tablet.token,
+            session_id=ali_session.id,
+            checkpoint_total=Decimal('60'),
+            note='Ali molaya çıktı',
+        )
+        first_step.refresh_from_db()
+        ali_session.refresh_from_db()
+        veli_session.refresh_from_db()
+        self.assertEqual(first_step.completed_quantity, Decimal('60.00'))
+        self.assertEqual(ali_session.declared_good_quantity, Decimal('60.00'))
+        self.assertEqual(veli_session.declared_good_quantity, Decimal('60.00'))
+
+        tablet_checkpoint(token=tablet.token, line_id=line.id, checkpoint_total=Decimal('70'), reason='manual')
+
+        first_step.refresh_from_db()
+        ali_session.refresh_from_db()
+        veli_session.refresh_from_db()
+        self.assertEqual(first_step.completed_quantity, Decimal('70.00'))
+        self.assertEqual(ali_session.declared_good_quantity, Decimal('60.00'))
+        self.assertEqual(veli_session.declared_good_quantity, Decimal('70.00'))
+        self.assertEqual(ProductionCountingWindow.objects.filter(step=first_step, status='closed').count(), 3)
+        self.assertEqual(
+            ProductionCountingParticipant.objects.filter(session=veli_session).aggregate(total=Max('credited_quantity'))['total'],
+            Decimal('70.00'),
+        )
+
+    def test_station_daily_target_is_independent_from_work_order_quantity(self):
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        line = order.lines.get()
+        first_step = line.steps.select_related('station').order_by('order').first()
+        first_step.target_quantity = Decimal('100')
+        first_step.save(update_fields=['target_quantity'])
+        worker = User.objects.create_user(username='target-worker', password='x', organization=self.org, role='Worker')
+        ProductionStationUser.objects.create(organization=self.org, station=first_step.station, user=worker)
+        profile = ProductionOperatorProfile.objects.create(organization=self.org, user=worker)
+        profile.set_pin('4444')
+        profile.save()
+        ProductionStationTarget.objects.create(
+            organization=self.org,
+            station=first_step.station,
+            target_date=timezone.localdate(),
+            target_quantity=Decimal('250'),
+        )
+        tablet = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=first_step.station,
+            name='Hedef Tablet',
+            token='daily-target-tablet',
+        )
+        session = tablet_login_slot(token=tablet.token, user_id=worker.id, pin='4444', line_id=line.id, slot_index=0)
+        tablet_logout_slot(
+            token=tablet.token,
+            user_id=worker.id,
+            pin='4444',
+            session_id=session.id,
+            declared_good_quantity=Decimal('25'),
+        )
+
+        context = tablet_context(tablet.token)
+
+        self.assertEqual(context['daily_target']['target_quantity'], Decimal('250.00'))
+        self.assertEqual(context['daily_target']['actual_quantity'], Decimal('25.00'))
+        self.assertEqual(context['daily_target']['remaining_quantity'], Decimal('225.00'))
+
+    def test_station_work_queue_is_broadcast_to_all_station_tablets_by_default(self):
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        line = order.lines.get()
+        first_step = line.steps.select_related('station').order_by('order').first()
+        tablet_one = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=first_step.station,
+            name='Pres Tablet 1',
+            token='broadcast-tablet-1',
+        )
+        tablet_two = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=first_step.station,
+            name='Pres Tablet 2',
+            token='broadcast-tablet-2',
+        )
+
+        first_context = tablet_context(tablet_one.token)
+        second_context = tablet_context(tablet_two.token)
+
+        self.assertEqual(first_context['work_items'][0]['line_id'], line.id)
+        self.assertEqual(second_context['work_items'][0]['line_id'], line.id)
+        self.assertEqual(first_context['work_items'][0]['visibility'], 'all_tablets')
+        self.assertFalse(first_context['work_items'][0]['is_pinned'])
+
+    def test_station_work_queue_can_be_targeted_to_a_specific_tablet(self):
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        line = order.lines.get()
+        first_step = line.steps.select_related('station').order_by('order').first()
+        tablet_one = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=first_step.station,
+            name='Hedef Tablet',
+            token='target-tablet-1',
+        )
+        tablet_two = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=first_step.station,
+            name='Normal Tablet',
+            token='target-tablet-2',
+        )
+        ProductionStepTabletAssignment.objects.create(
+            organization=self.org,
+            step=first_step,
+            tablet=tablet_one,
+            priority=0,
+            is_pinned=True,
+            note='Acil iş',
+        )
+
+        targeted_context = tablet_context(tablet_one.token)
+        other_context = tablet_context(tablet_two.token)
+
+        self.assertEqual(targeted_context['work_items'][0]['line_id'], line.id)
+        self.assertEqual(targeted_context['work_items'][0]['visibility'], 'selected_tablets')
+        self.assertTrue(targeted_context['work_items'][0]['is_pinned'])
+        self.assertEqual(targeted_context['work_items'][0]['assigned_tablet_ids'], [tablet_one.id])
+        self.assertEqual(other_context['work_items'], [])
+
+    def test_parallel_route_step_is_visible_before_previous_step_completes(self):
+        route = self.org.production_route_templates.first()
+        second_route_step = route.steps.order_by('order', 'id')[1]
+        second_route_step.start_policy = 'parallel'
+        second_route_step.save(update_fields=['start_policy'])
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        line = order.lines.get()
+        first_step, second_step = list(line.steps.select_related('station', 'route_step').order_by('order')[:2])
+        tablet = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=second_step.station,
+            name='Paralel Tablet',
+            token='parallel-tablet-1',
+        )
+
+        context = tablet_context(tablet.token)
+
+        self.assertEqual(first_step.status, 'ready')
+        self.assertEqual(second_step.status, 'ready')
+        self.assertEqual(context['work_items'][0]['line_id'], line.id)
+        self.assertEqual(context['work_items'][0]['start_policy'], 'parallel')
+
+    def test_after_previous_route_step_stays_hidden_until_previous_completion(self):
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        line = order.lines.get()
+        second_step = line.steps.select_related('station').order_by('order')[1]
+        tablet = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=second_step.station,
+            name='Sıralı Tablet',
+            token='after-previous-tablet-1',
+        )
+
+        context = tablet_context(tablet.token)
+
+        self.assertEqual(second_step.status, 'locked')
+        self.assertEqual(context['work_items'], [])

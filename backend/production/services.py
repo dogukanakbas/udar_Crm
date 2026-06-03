@@ -7,26 +7,38 @@ from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
+from django.contrib.auth import get_user_model
 from django.db import IntegrityError, models, transaction
 from django.db.models import Max, Sum
 from django.utils import timezone
 
+from accounts.utils import user_has_perm
+from core.events import push_event
 from erp.inventory_service import InventoryError, stock_in
 from erp.models import InventoryLocation, Product
 
 from .models import (
     ProductionDataField,
+    ProductionCountingParticipant,
+    ProductionCountingWindow,
     ProductionDepartment,
     ProductionDevice,
     ProductionDevicePayloadMap,
     ProductionEvent,
+    ProductionOperatorProfile,
     ProductionRuleSet,
     ProductionRouteStep,
     ProductionRouteTemplate,
     ProductionSettings,
+    ProductionSessionBreak,
     ProductionStation,
+    ProductionStationTarget,
+    ProductionStationAlert,
+    ProductionStationAlertAck,
+    ProductionStationTablet,
     ProductionStationUser,
     ProductionStepProgress,
+    ProductionStepTabletAssignment,
     ProductionTemplatePreset,
     ProductionWorkOrder,
     ProductionWorkOrderLine,
@@ -58,6 +70,7 @@ class ProductionError(ValueError):
 
 
 ACTIVE_SESSION_STATUSES = ['started', 'paused']
+User = get_user_model()
 
 
 def _norm(value: object) -> str:
@@ -102,6 +115,45 @@ def _is_station_user(organization, user, station):
         station__is_active=True,
         is_active=True,
     ).exists()
+
+
+def _has_tablet_operator_perm(user):
+    return bool(
+        user
+        and user.is_active
+        and (
+            user_has_perm(user, 'production.tablet.operate')
+            or user_has_perm(user, 'production.station.operate')
+            or getattr(user, 'role', '') in {'Worker', 'Manager', 'Admin'}
+        )
+    )
+
+
+def _tablet_by_token(token):
+    tablet = (
+        ProductionStationTablet.objects.select_related('station__department', 'organization')
+        .filter(token=token, is_active=True, station__is_active=True)
+        .first()
+    )
+    if not tablet:
+        raise ProductionError('Geçersiz veya pasif istasyon tableti.')
+    tablet.last_seen_at = timezone.now()
+    tablet.save(update_fields=['last_seen_at'])
+    return tablet
+
+
+def _operator_from_pin(*, organization, station, user_id, pin):
+    user = User.objects.filter(pk=user_id, organization=organization, is_active=True).first()
+    if not user:
+        raise ProductionError('Kullanıcı bulunamadı.')
+    if not _has_tablet_operator_perm(user):
+        raise ProductionError('Bu kullanıcı üretim tabletinde işlem yapamaz.')
+    if not _is_station_user(organization, user, station):
+        raise ProductionError('Bu kullanıcı bu istasyona atanmış değil.')
+    profile = ProductionOperatorProfile.objects.filter(organization=organization, user=user, is_active=True).first()
+    if not profile or not profile.check_pin(pin):
+        raise ProductionError('Üretim PIN’i hatalı.')
+    return user
 
 
 def quote_line_product_group_key(line) -> str:
@@ -301,6 +353,7 @@ def create_progress_steps(line, route):
         raise ProductionError('Uretim rotasinda istasyon yok.')
     rows = []
     for step_idx, route_step in enumerate(steps):
+        initial_status = 'ready' if step_idx == 0 or route_step.start_policy == 'parallel' else 'locked'
         rows.append(
             ProductionStepProgress(
                 line=line,
@@ -308,7 +361,7 @@ def create_progress_steps(line, route):
                 station=route_step.station,
                 order=route_step.order,
                 target_quantity=line.quantity,
-                status='ready' if step_idx == 0 else 'locked',
+                status=initial_status,
             )
         )
     ProductionStepProgress.objects.bulk_create(rows)
@@ -650,6 +703,15 @@ def _active_session_for_step(step):
     )
 
 
+def _active_sessions_for_step(step):
+    return (
+        ProductionWorkSession.objects.select_for_update()
+        .filter(step=step, status__in=ACTIVE_SESSION_STATUSES)
+        .select_related('user')
+        .order_by('slot_index', 'started_at', 'id')
+    )
+
+
 def _latest_handover_session(step):
     return (
         ProductionWorkSession.objects.filter(step=step, status='handover')
@@ -713,20 +775,287 @@ def _create_unmatched_machine_event(*, organization, line, step, station, quanti
     )
 
 
+def _open_window_for_tablet(tablet, step, *, start_total=None, sessions=None, note=''):
+    sessions = list(sessions if sessions is not None else ProductionWorkSession.objects.filter(
+        organization=tablet.organization,
+        tablet=tablet,
+        station=tablet.station,
+        step=step,
+        status='started',
+    ).select_related('user'))
+    if not sessions:
+        return None
+    existing = ProductionCountingWindow.objects.filter(
+        organization=tablet.organization,
+        tablet=tablet,
+        step=step,
+        status='open',
+    ).first()
+    if existing:
+        return existing
+    if start_total is None:
+        latest = ProductionCountingWindow.objects.filter(
+            organization=tablet.organization,
+            tablet=tablet,
+            step=step,
+            status='closed',
+        ).order_by('-closed_at', '-id').first()
+        start_total = latest.close_total if latest and latest.close_total is not None else Decimal('0')
+    window = ProductionCountingWindow.objects.create(
+        organization=tablet.organization,
+        work_order=step.line.work_order,
+        line=step.line,
+        step=step,
+        station=tablet.station,
+        tablet=tablet,
+        start_total=_signed_decimal(start_total),
+        note=note or '',
+    )
+    for session in sessions:
+        ProductionCountingParticipant.objects.get_or_create(
+            organization=tablet.organization,
+            window=window,
+            session=session,
+            defaults={'user': session.user, 'start_total': window.start_total},
+        )
+    return window
+
+
+def _open_window_for_current_sessions(tablet, step, *, start_total=None, note=''):
+    sessions = list(
+        ProductionWorkSession.objects.filter(
+            organization=tablet.organization,
+            tablet=tablet,
+            station=tablet.station,
+            step=step,
+            status='started',
+        ).select_related('user')
+    )
+    return _open_window_for_tablet(tablet, step, start_total=start_total, sessions=sessions, note=note)
+
+
+def _active_tablet_sessions(tablet, *, step=None):
+    qs = ProductionWorkSession.objects.filter(
+        organization=tablet.organization,
+        tablet=tablet,
+        station=tablet.station,
+        status__in=ACTIVE_SESSION_STATUSES,
+    ).select_related('user', 'line', 'work_order', 'step')
+    if step:
+        qs = qs.filter(step=step)
+    return list(qs.order_by('slot_index', 'started_at', 'id'))
+
+
+def _require_checkpoint_payload(active_sessions, checkpoint_total=None, participant_totals=None):
+    if not active_sessions:
+        return {}
+    if participant_totals:
+        return {int(key): value for key, value in participant_totals.items()}
+    if checkpoint_total is None or checkpoint_total == '':
+        raise ProductionError('Mevcut ekip degismeden once ortak uretim toplamı girilmelidir.')
+    return {session.id: checkpoint_total for session in active_sessions}
+
+
+def _participant_today_total(organization, user, day):
+    session_ids = list(
+        ProductionWorkSession.objects.filter(
+            organization=organization,
+            user=user,
+            started_at__date=day,
+        ).values_list('id', flat=True)
+    )
+    total = Decimal('0')
+    for session_id in session_ids:
+        total += (
+            ProductionCountingParticipant.objects.filter(organization=organization, session_id=session_id)
+            .aggregate(total=Max('credited_quantity'))['total']
+            or Decimal('0')
+        )
+    return total
+
+
+def _station_target_payload(organization, station, day):
+    target, _ = ProductionStationTarget.objects.get_or_create(
+        organization=organization,
+        station=station,
+        target_date=day,
+        defaults={'target_quantity': Decimal('0')},
+    )
+    actual = (
+        ProductionCountingWindow.objects.filter(
+            organization=organization,
+            station=station,
+            status='closed',
+            closed_at__date=day,
+        ).aggregate(total=Sum('official_delta'))['total']
+        or Decimal('0')
+    )
+    return {
+        'id': target.id,
+        'date': target.target_date,
+        'target_quantity': target.target_quantity,
+        'actual_quantity': actual,
+        'remaining_quantity': max(target.target_quantity - actual, Decimal('0')),
+        'note': target.note,
+    }
+
+
+def _serialize_window_for_tablet(window):
+    if not window:
+        return None
+    return {
+        'id': window.id,
+        'line_id': window.line_id,
+        'step_id': window.step_id,
+        'status': window.status,
+        'start_total': window.start_total,
+        'machine_delta': window.machine_delta,
+        'opened_at': window.opened_at,
+        'participants': [
+            {
+                'id': participant.id,
+                'session_id': participant.session_id,
+                'user_id': participant.user_id,
+                'user_name': participant.user.get_full_name() or participant.user.username,
+                'start_total': participant.start_total,
+                'declared_total': participant.declared_total,
+                'credited_quantity': participant.credited_quantity,
+                'discrepancy_status': participant.discrepancy_status,
+            }
+            for participant in window.participants.select_related('user', 'session').all()
+        ],
+    }
+
+
+def _close_counting_window(*, tablet, step, declared_totals, reason='manual', note=''):
+    window = (
+        ProductionCountingWindow.objects.select_for_update()
+        .filter(organization=tablet.organization, tablet=tablet, step=step, status='open')
+        .select_related('line__work_order')
+        .first()
+    )
+    if not window:
+        return None
+    clean_totals = {}
+    for key, value in (declared_totals or {}).items():
+        if value is None or value == '':
+            continue
+        clean_totals[int(key)] = _decimal(value, 'Ortak üretim toplamı')
+    if not clean_totals:
+        raise ProductionError('Checkpoint icin en az bir uretim toplamı girilmelidir.')
+    close_total = max(clean_totals.values())
+    if close_total < window.start_total:
+        raise ProductionError('Kapanis toplamı pencere baslangicindan kucuk olamaz.')
+    official_delta = close_total - window.start_total
+    window.status = 'closed'
+    window.closed_at = timezone.now()
+    window.close_total = close_total
+    window.official_delta = official_delta
+    window.close_reason = reason
+    window.note = note or window.note
+    window.save(update_fields=['status', 'closed_at', 'close_total', 'official_delta', 'close_reason', 'note'])
+
+    participants = list(window.participants.select_related('session', 'user').select_for_update())
+    for participant in participants:
+        declared = clean_totals.get(participant.session_id, close_total)
+        participant.declared_total = declared
+        participant.credited_quantity = declared
+        participant.discrepancy_quantity = declared - close_total
+        participant.discrepancy_status = 'needs_review' if participant.discrepancy_quantity != 0 else 'none'
+        participant.note = note or participant.note
+        participant.save(update_fields=['declared_total', 'credited_quantity', 'discrepancy_quantity', 'discrepancy_status', 'note'])
+        session = participant.session
+        session.declared_good_quantity = max(session.declared_good_quantity, participant.credited_quantity)
+        session.discrepancy_quantity = max(session.discrepancy_quantity, abs(participant.discrepancy_quantity))
+        if participant.discrepancy_status == 'needs_review':
+            session.discrepancy_status = 'needs_review'
+        session.save(update_fields=['declared_good_quantity', 'discrepancy_quantity', 'discrepancy_status', 'updated_at'])
+
+    if official_delta > 0:
+        progress = ProductionStepProgress.objects.select_for_update().get(pk=step.pk)
+        progress.completed_quantity = min(progress.target_quantity, progress.completed_quantity + official_delta)
+        if progress.status == 'ready':
+            progress.status = 'in_progress'
+            progress.started_at = progress.started_at or timezone.now()
+        progress.save(update_fields=['completed_quantity', 'status', 'started_at'])
+        ProductionEvent.objects.create(
+            organization=tablet.organization,
+            work_order=window.work_order,
+            line=window.line,
+            step=progress,
+            station=tablet.station,
+            event_type='quantity',
+            quantity_delta=official_delta,
+            note=note or f'Tablet checkpoint: {reason}',
+            source='tablet_checkpoint',
+            user=None,
+        )
+        _refresh_line_and_order(window.line)
+    return window
+
+
+def _active_break_for_session(session):
+    return session.breaks.filter(ended_at__isnull=True).order_by('-started_at', '-id').first()
+
+
+def _open_break(session, note=''):
+    row = _active_break_for_session(session)
+    if row:
+        return row
+    return ProductionSessionBreak.objects.create(
+        organization=session.organization,
+        session=session,
+        user=session.user,
+        note=note or '',
+    )
+
+
+def _close_active_break(session, note=''):
+    row = _active_break_for_session(session)
+    if not row:
+        return None
+    row.ended_at = timezone.now()
+    row.note = note or row.note
+    row.save(update_fields=['ended_at', 'note'])
+    return row
+
+
 @transaction.atomic
-def start_work_session(*, organization, user, line_id, station_code, start_counter=None, note='', allow_unassigned=False):
+def start_work_session(*, organization, user, line_id, station_code, start_counter=None, note='', allow_unassigned=False,
+                       tablet_token='', tablet=None, slot_index=None):
     line, station, step = _step_for_session_action(organization, line_id, station_code)
+    if tablet_token:
+        tablet = _tablet_by_token(tablet_token)
+    if tablet and tablet.station_id != station.id:
+        raise ProductionError('Tablet bu istasyona bağlı değil.')
     if not allow_unassigned and not _is_station_user(organization, user, station):
         raise ProductionError('Bu istasyonda işlem yapmaya atanmış kullanıcı değilsiniz.')
     if step.status == 'locked':
         raise ProductionError('Bu istasyon henuz acik degil.')
     if step.status in ('completed', 'skipped'):
         raise ProductionError('Tamamlanan istasyonda yeni oturum acilamaz.')
-    active = _active_session_for_step(step)
-    if active:
-        if active.user_id == user.id:
-            return active
-        raise ProductionError(f'Bu istasyonda {active.user.get_full_name() or active.user.username} için aktif oturum var.')
+    user_active = (
+        ProductionWorkSession.objects.select_for_update()
+        .filter(organization=organization, user=user, status__in=ACTIVE_SESSION_STATUSES)
+        .select_related('step', 'station')
+        .first()
+    )
+    if user_active:
+        if user_active.step_id == step.id:
+            if user_active.status == 'paused':
+                _close_active_break(user_active, 'Tablet yeniden girişinde mola otomatik kapandı.')
+                user_active.status = 'started'
+                user_active.save(update_fields=['status', 'updated_at'])
+            return user_active
+        raise ProductionError('Bu kullanıcının açık üretim oturumu var. Yeni işe geçmeden önce mevcut işi kapatın.')
+    active_sessions = list(_active_sessions_for_step(step))
+    if len(active_sessions) >= station.max_workers:
+        raise ProductionError(f'{station.code} kapasitesi dolu.')
+    if slot_index is not None:
+        if slot_index < 0 or slot_index >= station.max_workers:
+            raise ProductionError('Geçersiz tablet slotu.')
+        if any(item.slot_index == slot_index and (not tablet or item.tablet_id == tablet.id) for item in active_sessions):
+            raise ProductionError('Bu tablet slotu dolu.')
     previous = _latest_handover_session(step)
     session = ProductionWorkSession.objects.create(
         organization=organization,
@@ -735,6 +1064,8 @@ def start_work_session(*, organization, user, line_id, station_code, start_count
         step=step,
         station=station,
         user=user,
+        tablet=tablet,
+        slot_index=slot_index,
         previous_session=previous,
         start_counter=start_counter,
         note=note or '',
@@ -759,6 +1090,7 @@ def pause_work_session(*, organization, user, session_id, note=''):
     session.status = 'paused'
     session.note = note or session.note
     session.save(update_fields=['status', 'note', 'updated_at'])
+    _open_break(session, note)
     return _create_session_event(session=session, event_type='pause', note=note)
 
 
@@ -769,6 +1101,7 @@ def resume_work_session(*, organization, user, session_id, note=''):
         raise ProductionError('Yalnızca kendi oturumunuzu devam ettirebilirsiniz.')
     if session.status != 'paused':
         raise ProductionError('Yalniz moladaki oturum devam ettirilebilir.')
+    _close_active_break(session, note)
     session.status = 'started'
     session.note = note or session.note
     session.save(update_fields=['status', 'note', 'updated_at'])
@@ -785,6 +1118,7 @@ def handover_work_session(*, organization, user, session_id, note=''):
     session.status = 'handover'
     session.ended_at = timezone.now()
     session.note = note or session.note
+    _close_active_break(session, note)
     session.save(update_fields=['status', 'ended_at', 'note', 'updated_at'])
     step = session.step
     if step.status == 'in_progress':
@@ -817,6 +1151,7 @@ def close_work_session(*, organization, user, session_id, declared_good_quantity
     session.discrepancy_quantity = discrepancy
     session.discrepancy_status = 'needs_review' if discrepancy != 0 else 'none'
     session.note = note or session.note
+    _close_active_break(session, note)
     session.save(update_fields=[
         'status',
         'ended_at',
@@ -904,8 +1239,24 @@ def record_machine_session_event(*, organization, line_id, station_code, quantit
             return existing
     line, station, step = _step_for_session_action(organization, line_id, station_code)
     qty = _decimal(quantity_delta)
-    active = _active_session_for_step(step)
+    active_rows = list(_active_sessions_for_step(step).filter(status='started'))
+    operator_hint = (normalized_payload or {}).get('operator_id') or (normalized_payload or {}).get('user_id') or (raw_payload or {}).get('operator_id')
+    active = None
+    if operator_hint:
+        hint = str(operator_hint)
+        active = next(
+            (
+                item for item in active_rows
+                if str(item.user_id) == hint or item.user.username == hint or str(getattr(item.user, 'email', '')) == hint
+            ),
+            None,
+        )
+    elif len(active_rows) == 1:
+        active = active_rows[0]
     if not active:
+        if active_rows:
+            step.machine_quantity = step.machine_quantity + qty
+            step.save(update_fields=['machine_quantity'])
         return _create_unmatched_machine_event(
             organization=organization,
             line=line,
@@ -913,7 +1264,7 @@ def record_machine_session_event(*, organization, line_id, station_code, quantit
             station=station,
             quantity_delta=qty,
             counter_value=counter_value,
-            note=note,
+            note=note or ('Eşleşmemiş makine verisi: birden fazla açık kullanıcı oturumu var.' if active_rows else ''),
             idempotency_key=idempotency_key,
             device=device,
             raw_payload=raw_payload,
@@ -924,6 +1275,16 @@ def record_machine_session_event(*, organization, line_id, station_code, quantit
     active.save(update_fields=['machine_quantity', 'updated_at'])
     step.machine_quantity = step.machine_quantity + qty
     step.save(update_fields=['machine_quantity'])
+    if active.tablet_id:
+        window = ProductionCountingWindow.objects.filter(
+            organization=organization,
+            tablet=active.tablet,
+            step=step,
+            status='open',
+        ).first()
+        if window:
+            window.machine_delta = window.machine_delta + qty
+            window.save(update_fields=['machine_delta'])
     return _create_session_event(
         session=active,
         event_type='quantity',
@@ -937,6 +1298,311 @@ def record_machine_session_event(*, organization, line_id, station_code, quantit
         normalized_payload=normalized_payload,
         mapping_errors=mapping_errors,
     )
+
+
+def _serialize_session_for_tablet(session):
+    active_break = _active_break_for_session(session)
+    return {
+        'id': session.id,
+        'user_id': session.user_id,
+        'user_name': session.user.get_full_name() or session.user.username,
+        'line_id': session.line_id,
+        'work_order_number': session.work_order.number,
+        'product_sku': session.line.product_sku,
+        'product_name': session.line.product_name,
+        'status': session.status,
+        'slot_index': session.slot_index,
+        'started_at': session.started_at,
+        'machine_quantity': session.machine_quantity,
+        'declared_good_quantity': session.declared_good_quantity,
+        'break_seconds': sum(item.duration_seconds for item in session.breaks.all()),
+        'active_break_id': active_break.id if active_break else None,
+    }
+
+
+def _work_item_for_step(step, tablet=None):
+    line = step.line
+    assignments = list(step.tablet_assignments.all())
+    assignment = next((item for item in assignments if tablet and item.tablet_id == tablet.id), None)
+    return {
+        'line_id': line.id,
+        'work_order_id': line.work_order_id,
+        'work_order_number': line.work_order.number,
+        'customer_name': line.work_order.customer_name,
+        'product_sku': line.product_sku,
+        'product_name': line.product_name,
+        'detail_1': line.detail_1,
+        'detail_2': line.detail_2,
+        'status': step.status,
+        'target_quantity': step.target_quantity,
+        'completed_quantity': step.completed_quantity,
+        'machine_quantity': step.machine_quantity,
+        'remaining_quantity': max(step.target_quantity - step.completed_quantity, 0),
+        'visibility': 'selected_tablets' if assignments else 'all_tablets',
+        'is_pinned': bool(assignment and assignment.is_pinned),
+        'priority': assignment.priority if assignment else 0,
+        'start_policy': step.route_step.start_policy,
+        'assigned_tablet_ids': [item.tablet_id for item in assignments],
+    }
+
+
+def tablet_context(token):
+    tablet = _tablet_by_token(token)
+    station = tablet.station
+    open_statuses = ['ready', 'in_progress', 'waiting_handover']
+    steps = (
+        ProductionStepProgress.objects.filter(
+            line__work_order__organization=tablet.organization,
+            station=station,
+            status__in=open_statuses,
+        )
+        .select_related('line__work_order', 'station', 'route_step')
+        .prefetch_related('tablet_assignments')
+        .order_by('line__work_order__due_date', 'line__work_order__number', 'order')[:100]
+    )
+    visible_steps = []
+    for step in steps:
+        assignments = list(step.tablet_assignments.all())
+        if assignments and not any(item.tablet_id == tablet.id for item in assignments):
+            continue
+        visible_steps.append(step)
+    active_sessions = list(
+        ProductionWorkSession.objects.filter(
+            organization=tablet.organization,
+            station=station,
+            status__in=ACTIVE_SESSION_STATUSES,
+        )
+        .select_related('user', 'line', 'work_order')
+        .prefetch_related('breaks')
+        .order_by('slot_index', 'started_at', 'id')
+    )
+    assigned = (
+        ProductionStationUser.objects.filter(organization=tablet.organization, station=station, is_active=True, user__is_active=True)
+        .select_related('user')
+        .order_by('role', 'user__first_name', 'user__username')
+    )
+    today = timezone.localdate()
+    target_payload = _station_target_payload(tablet.organization, station, today)
+    operators = []
+    for row in assigned:
+        profile = ProductionOperatorProfile.objects.filter(organization=tablet.organization, user=row.user, is_active=True).first()
+        if not _has_tablet_operator_perm(row.user):
+            continue
+        operators.append({
+            'id': row.user_id,
+            'name': row.user.get_full_name() or row.user.username,
+            'role': row.role,
+            'has_pin': bool(profile and profile.pin_hash),
+            'today_total': _participant_today_total(tablet.organization, row.user, today),
+        })
+    alerts = list(
+        ProductionStationAlert.objects.filter(organization=tablet.organization)
+        .filter(
+            models.Q(station=station)
+            | models.Q(department=station.department)
+            | models.Q(work_order__lines__steps__station=station)
+        )
+        .exclude(acks__tablet=tablet)
+        .filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=timezone.now()))
+        .distinct()
+        .order_by('-created_at')[:20]
+    )
+    return {
+        'tablet': {'id': tablet.id, 'name': tablet.name, 'token': tablet.token},
+        'station': {
+            'id': station.id,
+            'code': station.code,
+            'name': station.name,
+            'department_name': station.department.name,
+            'max_workers': station.max_workers,
+        },
+        'daily_target': target_payload,
+        'operators': operators,
+        'work_items': sorted(
+            [_work_item_for_step(step, tablet) for step in visible_steps],
+            key=lambda item: (0 if item.get('is_pinned') else 1, item.get('priority') or 0, item.get('work_order_number') or ''),
+        ),
+        'slots': [_serialize_session_for_tablet(session) for session in active_sessions],
+        'active_window': _serialize_window_for_tablet(
+            ProductionCountingWindow.objects.filter(
+                organization=tablet.organization,
+                tablet=tablet,
+                status='open',
+            ).select_related('line', 'step').prefetch_related('participants__user', 'participants__session').first()
+        ),
+        'alerts': [
+            {
+                'id': alert.id,
+                'title': alert.title,
+                'message': alert.message,
+                'severity': alert.severity,
+                'requires_ack': alert.requires_ack,
+                'created_at': alert.created_at,
+            }
+            for alert in alerts
+        ],
+    }
+
+
+@transaction.atomic
+def tablet_login_slot(*, token, user_id, pin, line_id, slot_index, start_counter=None, note='', checkpoint_total=None, participant_totals=None):
+    tablet = _tablet_by_token(token)
+    user = _operator_from_pin(organization=tablet.organization, station=tablet.station, user_id=user_id, pin=pin)
+    line, station, step = _step_for_session_action(tablet.organization, line_id, tablet.station.code)
+    active_before = _active_tablet_sessions(tablet, step=step)
+    if active_before:
+        totals = _require_checkpoint_payload(active_before, checkpoint_total=checkpoint_total, participant_totals=participant_totals)
+        _close_counting_window(tablet=tablet, step=step, declared_totals=totals, reason='login', note=note)
+    session = start_work_session(
+        organization=tablet.organization,
+        user=user,
+        line_id=line_id,
+        station_code=tablet.station.code,
+        start_counter=start_counter,
+        note=note,
+        tablet=tablet,
+        slot_index=slot_index,
+    )
+    active_after = _active_tablet_sessions(tablet, step=step)
+    _open_window_for_tablet(tablet, step, start_total=checkpoint_total if active_before else Decimal('0'), sessions=[item for item in active_after if item.status == 'started'], note=note)
+    return session
+
+
+@transaction.atomic
+def tablet_logout_slot(*, token, user_id, pin, session_id, declared_good_quantity, end_counter=None, note=''):
+    tablet = _tablet_by_token(token)
+    user = _operator_from_pin(organization=tablet.organization, station=tablet.station, user_id=user_id, pin=pin)
+    session = ProductionWorkSession.objects.select_for_update().filter(pk=session_id, organization=tablet.organization, tablet=tablet).select_related('step', 'line__work_order').first()
+    if not session:
+        raise ProductionError('Tablet oturumu bulunamadı.')
+    if session.user_id != user.id:
+        raise ProductionError('Yalnızca kendi tablet oturumunuzu kapatabilirsiniz.')
+    active = _active_tablet_sessions(tablet, step=session.step)
+    totals = _require_checkpoint_payload(active, checkpoint_total=declared_good_quantity)
+    _close_counting_window(tablet=tablet, step=session.step, declared_totals=totals, reason='logout', note=note)
+    if session.status not in ACTIVE_SESSION_STATUSES:
+        raise ProductionError('Yalniz acik oturum kapatilabilir.')
+    session.status = 'closed'
+    session.ended_at = timezone.now()
+    session.end_counter = end_counter
+    session.note = note or session.note
+    _close_active_break(session, note)
+    session.save(update_fields=['status', 'ended_at', 'end_counter', 'note', 'updated_at'])
+    event = _create_session_event(session=session, event_type='complete', quantity_delta=0, counter_value=end_counter, note=note)
+    remaining = [item for item in _active_tablet_sessions(tablet, step=session.step) if item.status == 'started']
+    if remaining:
+        _open_window_for_tablet(tablet, session.step, start_total=declared_good_quantity, sessions=remaining, note=note)
+    return event
+
+
+@transaction.atomic
+def tablet_pause_session(*, token, session_id, note='', checkpoint_total=None, participant_totals=None):
+    tablet = _tablet_by_token(token)
+    session = ProductionWorkSession.objects.filter(pk=session_id, organization=tablet.organization, tablet=tablet).select_related('user').first()
+    if not session:
+        raise ProductionError('Tablet oturumu bulunamadı.')
+    active = _active_tablet_sessions(tablet, step=session.step)
+    totals = _require_checkpoint_payload(active, checkpoint_total=checkpoint_total, participant_totals=participant_totals)
+    _close_counting_window(tablet=tablet, step=session.step, declared_totals=totals, reason='break_start', note=note)
+    event = pause_work_session(organization=tablet.organization, user=session.user, session_id=session_id, note=note)
+    remaining = [item for item in _active_tablet_sessions(tablet, step=session.step) if item.status == 'started']
+    if remaining:
+        _open_window_for_tablet(tablet, session.step, start_total=checkpoint_total, sessions=remaining, note=note)
+    return event
+
+
+@transaction.atomic
+def tablet_resume_session(*, token, session_id, note='', checkpoint_total=None, participant_totals=None):
+    tablet = _tablet_by_token(token)
+    session = ProductionWorkSession.objects.filter(pk=session_id, organization=tablet.organization, tablet=tablet).select_related('user').first()
+    if not session:
+        raise ProductionError('Tablet oturumu bulunamadı.')
+    active = [item for item in _active_tablet_sessions(tablet, step=session.step) if item.status == 'started']
+    if active:
+        totals = _require_checkpoint_payload(active, checkpoint_total=checkpoint_total, participant_totals=participant_totals)
+        _close_counting_window(tablet=tablet, step=session.step, declared_totals=totals, reason='break_end', note=note)
+    event = resume_work_session(organization=tablet.organization, user=session.user, session_id=session_id, note=note)
+    start_total = checkpoint_total
+    if start_total is None or start_total == '':
+        latest = ProductionCountingWindow.objects.filter(organization=tablet.organization, tablet=tablet, step=session.step, status='closed').order_by('-closed_at', '-id').first()
+        start_total = latest.close_total if latest and latest.close_total is not None else Decimal('0')
+    _open_window_for_current_sessions(tablet, session.step, start_total=start_total, note=note)
+    return event
+
+
+@transaction.atomic
+def tablet_checkpoint(*, token, line_id, checkpoint_total=None, participant_totals=None, reason='manual', note=''):
+    tablet = _tablet_by_token(token)
+    line, station, step = _step_for_session_action(tablet.organization, line_id, tablet.station.code)
+    active = _active_tablet_sessions(tablet, step=step)
+    totals = _require_checkpoint_payload(active, checkpoint_total=checkpoint_total, participant_totals=participant_totals)
+    window = _close_counting_window(tablet=tablet, step=step, declared_totals=totals, reason=reason, note=note)
+    started = [item for item in _active_tablet_sessions(tablet, step=step) if item.status == 'started']
+    if started:
+        close_total = window.close_total if window and window.close_total is not None else checkpoint_total
+        _open_window_for_tablet(tablet, step, start_total=close_total, sessions=started, note=note)
+    return window
+
+
+@transaction.atomic
+def tablet_complete_work_item(*, token, line_id, checkpoint_total=None, participant_totals=None, note=''):
+    tablet = _tablet_by_token(token)
+    line, station, step = _step_for_session_action(tablet.organization, line_id, tablet.station.code)
+    active = _active_tablet_sessions(tablet, step=step)
+    if active:
+        totals = _require_checkpoint_payload(active, checkpoint_total=checkpoint_total, participant_totals=participant_totals)
+        _close_counting_window(tablet=tablet, step=step, declared_totals=totals, reason='work_complete', note=note)
+    step = ProductionStepProgress.objects.select_for_update().get(pk=step.pk)
+    step.status = 'completed'
+    step.completed_at = timezone.now()
+    step.completed_by = None
+    step.save(update_fields=['status', 'completed_at', 'completed_by'])
+    nxt = _next_step(step)
+    if nxt and nxt.status == 'locked':
+        nxt.status = 'ready'
+        nxt.save(update_fields=['status'])
+    _refresh_line_and_order(line)
+    return step
+
+
+def send_station_alert(*, organization, user, target_type, title, message, severity='info', station=None, department=None, work_order=None, expires_at=None):
+    alert = ProductionStationAlert.objects.create(
+        organization=organization,
+        target_type=target_type,
+        station=station,
+        department=department,
+        work_order=work_order,
+        title=title,
+        message=message,
+        severity=severity or 'info',
+        created_by=user,
+        expires_at=expires_at,
+    )
+    push_event({
+        'type': 'production.station_alert',
+        'alert_id': alert.id,
+        'target_type': alert.target_type,
+        'station_id': station.id if station else None,
+        'station_code': station.code if station else '',
+        'department_id': department.id if department else None,
+        'work_order_id': work_order.id if work_order else None,
+        'title': alert.title,
+        'message': alert.message,
+        'severity': alert.severity,
+    })
+    return alert
+
+
+def ack_station_alert(*, organization, alert_id, token='', user=None):
+    tablet = _tablet_by_token(token) if token else None
+    alert = ProductionStationAlert.objects.get(pk=alert_id, organization=organization)
+    ack, _ = ProductionStationAlertAck.objects.get_or_create(
+        organization=organization,
+        alert=alert,
+        tablet=tablet,
+        user=user,
+    )
+    return ack
 
 
 def _refresh_line_and_order(line):

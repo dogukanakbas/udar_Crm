@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.contrib.auth.hashers import check_password, make_password
 from django.db import models
 from django.utils import timezone
 
@@ -100,6 +101,66 @@ class ProductionDevice(models.Model):
         return f'{self.station.code} - {self.name}'
 
 
+class ProductionOperatorProfile(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_operator_profiles')
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='production_operator_profile')
+    pin_hash = models.CharField(max_length=255, blank=True, default='')
+    is_active = models.BooleanField(default=True)
+    last_pin_change_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['user__first_name', 'user__username']
+
+    def set_pin(self, raw_pin):
+        self.pin_hash = make_password(str(raw_pin or ''))
+        self.last_pin_change_at = timezone.now()
+
+    def check_pin(self, raw_pin):
+        return bool(self.pin_hash and check_password(str(raw_pin or ''), self.pin_hash))
+
+    def __str__(self):
+        return f'{self.user} production profile'
+
+
+class ProductionStationTablet(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_station_tablets')
+    station = models.ForeignKey(ProductionStation, on_delete=models.CASCADE, related_name='tablets')
+    name = models.CharField(max_length=120)
+    token = models.CharField(max_length=128, unique=True)
+    is_active = models.BooleanField(default=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['station__code', 'name']
+
+    def __str__(self):
+        return f'{self.station.code} - {self.name}'
+
+
+class ProductionStationTarget(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_station_targets')
+    station = models.ForeignKey(ProductionStation, on_delete=models.CASCADE, related_name='daily_targets')
+    target_date = models.DateField(default=timezone.localdate, db_index=True)
+    target_quantity = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    note = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-target_date', 'station__code']
+        unique_together = ('organization', 'station', 'target_date')
+        indexes = [
+            models.Index(fields=['organization', 'target_date']),
+            models.Index(fields=['station', 'target_date']),
+        ]
+
+    def __str__(self):
+        return f'{self.station.code} - {self.target_date}'
+
+
 class ProductionDataField(models.Model):
     FIELD_TYPES = [
         ('text', 'Metin'),
@@ -179,10 +240,15 @@ class ProductionRouteTemplate(models.Model):
 
 
 class ProductionRouteStep(models.Model):
+    START_POLICIES = [
+        ('after_previous', 'Onceki istasyondan sonra'),
+        ('parallel', 'Paralel baslayabilir'),
+    ]
     route = models.ForeignKey(ProductionRouteTemplate, on_delete=models.CASCADE, related_name='steps')
     station = models.ForeignKey(ProductionStation, on_delete=models.PROTECT, related_name='route_steps')
     order = models.PositiveIntegerField(default=0, db_index=True)
     is_required = models.BooleanField(default=True)
+    start_policy = models.CharField(max_length=24, choices=START_POLICIES, default='after_previous')
 
     class Meta:
         ordering = ['order', 'id']
@@ -281,6 +347,27 @@ class ProductionStepProgress(models.Model):
         return f'{self.line_id} - {self.station.code}'
 
 
+class ProductionStepTabletAssignment(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_step_tablet_assignments')
+    step = models.ForeignKey(ProductionStepProgress, on_delete=models.CASCADE, related_name='tablet_assignments')
+    tablet = models.ForeignKey(ProductionStationTablet, on_delete=models.CASCADE, related_name='step_assignments')
+    priority = models.PositiveIntegerField(default=0, db_index=True)
+    is_pinned = models.BooleanField(default=False)
+    note = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-is_pinned', 'priority', 'id']
+        unique_together = ('step', 'tablet')
+        indexes = [
+            models.Index(fields=['organization', 'tablet']),
+            models.Index(fields=['step', 'is_pinned', 'priority']),
+        ]
+
+    def __str__(self):
+        return f'{self.step_id} -> {self.tablet.name}'
+
+
 class ProductionWorkSession(models.Model):
     STATUSES = [
         ('started', 'Basladi'),
@@ -300,7 +387,9 @@ class ProductionWorkSession(models.Model):
     step = models.ForeignKey(ProductionStepProgress, on_delete=models.CASCADE, related_name='sessions')
     station = models.ForeignKey(ProductionStation, on_delete=models.PROTECT, related_name='sessions')
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='production_work_sessions')
+    tablet = models.ForeignKey(ProductionStationTablet, on_delete=models.SET_NULL, null=True, blank=True, related_name='sessions')
     previous_session = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='handover_sessions')
+    slot_index = models.PositiveIntegerField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUSES, default='started')
     started_at = models.DateTimeField(default=timezone.now)
     ended_at = models.DateTimeField(null=True, blank=True)
@@ -333,6 +422,146 @@ class ProductionWorkSession(models.Model):
 
     def __str__(self):
         return f'{self.user} - {self.station.code} - {self.status}'
+
+
+class ProductionSessionBreak(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_session_breaks')
+    session = models.ForeignKey(ProductionWorkSession, on_delete=models.CASCADE, related_name='breaks')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='production_session_breaks')
+    started_at = models.DateTimeField(default=timezone.now)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    note = models.TextField(blank=True, default='')
+
+    class Meta:
+        ordering = ['-started_at', '-id']
+        indexes = [
+            models.Index(fields=['organization', 'ended_at']),
+            models.Index(fields=['session', 'ended_at']),
+        ]
+
+    @property
+    def duration_seconds(self):
+        end = self.ended_at or timezone.now()
+        return max(0, int((end - self.started_at).total_seconds()))
+
+    def __str__(self):
+        return f'{self.session_id} break'
+
+
+class ProductionCountingWindow(models.Model):
+    STATUSES = [
+        ('open', 'Acik'),
+        ('closed', 'Kapandi'),
+        ('cancelled', 'Iptal'),
+    ]
+    CLOSE_REASONS = [
+        ('login', 'Yeni kisi girisi'),
+        ('break_start', 'Mola baslangici'),
+        ('break_end', 'Mola donusu'),
+        ('logout', 'Cikis'),
+        ('work_complete', 'Is emri tamamlandi'),
+        ('manual', 'Manuel checkpoint'),
+    ]
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_counting_windows')
+    work_order = models.ForeignKey(ProductionWorkOrder, on_delete=models.CASCADE, related_name='counting_windows')
+    line = models.ForeignKey(ProductionWorkOrderLine, on_delete=models.CASCADE, related_name='counting_windows')
+    step = models.ForeignKey(ProductionStepProgress, on_delete=models.CASCADE, related_name='counting_windows')
+    station = models.ForeignKey(ProductionStation, on_delete=models.PROTECT, related_name='counting_windows')
+    tablet = models.ForeignKey(ProductionStationTablet, on_delete=models.SET_NULL, null=True, blank=True, related_name='counting_windows')
+    status = models.CharField(max_length=20, choices=STATUSES, default='open')
+    opened_at = models.DateTimeField(default=timezone.now)
+    closed_at = models.DateTimeField(null=True, blank=True)
+    start_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    close_total = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    official_delta = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    machine_delta = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    close_reason = models.CharField(max_length=30, choices=CLOSE_REASONS, blank=True, default='')
+    note = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-opened_at', '-id']
+        indexes = [
+            models.Index(fields=['organization', 'status']),
+            models.Index(fields=['station', 'status']),
+            models.Index(fields=['tablet', 'status']),
+            models.Index(fields=['opened_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.station.code} - {self.status} - {self.opened_at:%Y-%m-%d %H:%M}'
+
+
+class ProductionCountingParticipant(models.Model):
+    STATUSES = [
+        ('none', 'Fark yok'),
+        ('needs_review', 'Inceleme gerekli'),
+        ('approved', 'Onaylandi'),
+        ('corrected', 'Duzeltildi'),
+    ]
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_counting_participants')
+    window = models.ForeignKey(ProductionCountingWindow, on_delete=models.CASCADE, related_name='participants')
+    session = models.ForeignKey(ProductionWorkSession, on_delete=models.CASCADE, related_name='counting_participations')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='production_counting_participations')
+    start_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    declared_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    credited_quantity = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    discrepancy_quantity = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    discrepancy_status = models.CharField(max_length=20, choices=STATUSES, default='none')
+    note = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['window_id', 'id']
+        unique_together = ('window', 'session')
+        indexes = [
+            models.Index(fields=['organization', 'user']),
+            models.Index(fields=['user', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.window_id} - {self.user_id} - {self.credited_quantity}'
+
+
+class ProductionStationAlert(models.Model):
+    TARGET_TYPES = [
+        ('station', 'Istasyon'),
+        ('department', 'Bolum'),
+        ('work_order', 'Is emri'),
+    ]
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_station_alerts')
+    target_type = models.CharField(max_length=20, choices=TARGET_TYPES, default='station')
+    station = models.ForeignKey(ProductionStation, on_delete=models.CASCADE, null=True, blank=True, related_name='alerts')
+    department = models.ForeignKey(ProductionDepartment, on_delete=models.CASCADE, null=True, blank=True, related_name='alerts')
+    work_order = models.ForeignKey(ProductionWorkOrder, on_delete=models.CASCADE, null=True, blank=True, related_name='station_alerts')
+    title = models.CharField(max_length=160)
+    message = models.TextField()
+    severity = models.CharField(max_length=20, default='info')
+    requires_ack = models.BooleanField(default=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='sent_production_alerts')
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+
+    def __str__(self):
+        return self.title
+
+
+class ProductionStationAlertAck(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_station_alert_acks')
+    alert = models.ForeignKey(ProductionStationAlert, on_delete=models.CASCADE, related_name='acks')
+    tablet = models.ForeignKey(ProductionStationTablet, on_delete=models.SET_NULL, null=True, blank=True, related_name='alert_acks')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='production_alert_acks')
+    acknowledged_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['-acknowledged_at', '-id']
+        unique_together = ('alert', 'tablet', 'user')
+
+    def __str__(self):
+        return f'{self.alert_id} ack'
 
 
 class ProductionEvent(models.Model):

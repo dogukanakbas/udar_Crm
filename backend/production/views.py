@@ -17,17 +17,23 @@ from permissions import HasAPIPermission, IsOrgMember
 
 from .models import (
     ProductionDataField,
+    ProductionCountingWindow,
     ProductionDepartment,
     ProductionDevice,
     ProductionDevicePayloadMap,
     ProductionDocument,
     ProductionEvent,
+    ProductionOperatorProfile,
     ProductionRuleBlock,
     ProductionRuleSet,
     ProductionRouteTemplate,
     ProductionSettings,
+    ProductionStationAlert,
+    ProductionStationTablet,
     ProductionStation,
+    ProductionStationTarget,
     ProductionStationUser,
+    ProductionStepTabletAssignment,
     ProductionTemplatePreset,
     ProductionWorkOrder,
     ProductionWorkOrderLine,
@@ -36,17 +42,23 @@ from .models import (
 from .serializers import (
     PiEventSerializer,
     ProductionDataFieldSerializer,
+    ProductionCountingWindowSerializer,
     ProductionDepartmentSerializer,
     ProductionDeviceSerializer,
     ProductionDevicePayloadMapSerializer,
     ProductionDocumentSerializer,
     ProductionEventSerializer,
+    ProductionOperatorProfileSerializer,
     ProductionRuleBlockSerializer,
     ProductionRuleSetSerializer,
     ProductionRouteTemplateSerializer,
     ProductionSettingsSerializer,
+    ProductionStationAlertSerializer,
+    ProductionStationTabletSerializer,
     ProductionStationSerializer,
+    ProductionStationTargetSerializer,
     ProductionStationUserSerializer,
+    ProductionStepTabletAssignmentSerializer,
     ProductionTemplatePresetSerializer,
     ProductionWorkOrderSerializer,
     ProductionWorkSessionSerializer,
@@ -54,7 +66,13 @@ from .serializers import (
     SessionReviewSerializer,
     SessionStartSerializer,
     SessionStateSerializer,
+    StationAlertAckSerializer,
     StationEventSerializer,
+    TabletLoginSlotSerializer,
+    TabletLogoutSlotSerializer,
+    TabletCheckpointSerializer,
+    TabletCompleteWorkItemSerializer,
+    TabletSessionStateSerializer,
 )
 from .services import (
     ProductionError,
@@ -74,7 +92,16 @@ from .services import (
     resume_work_session,
     review_session_discrepancy,
     start_work_session,
+    ack_station_alert,
     close_work_session,
+    send_station_alert,
+    tablet_context,
+    tablet_checkpoint,
+    tablet_complete_work_item,
+    tablet_login_slot,
+    tablet_logout_slot,
+    tablet_pause_session,
+    tablet_resume_session,
 )
 
 
@@ -208,6 +235,80 @@ class ProductionDeviceViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelVi
     search_fields = ['name', 'station__code']
 
 
+class ProductionOperatorProfileViewSet(OrgScopedMixin, viewsets.ModelViewSet):
+    serializer_class = ProductionOperatorProfileSerializer
+    queryset = ProductionOperatorProfile.objects.select_related('user')
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.tablet.manage'
+    write_perm = 'production.tablet.manage'
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['user__username', 'user__first_name', 'user__last_name', 'user__email']
+
+
+class ProductionStationTabletViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
+    serializer_class = ProductionStationTabletSerializer
+    queryset = ProductionStationTablet.objects.select_related('station__department')
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.tablet.manage'
+    write_perm = 'production.tablet.manage'
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'token', 'station__code', 'station__name']
+
+
+class ProductionStationTargetViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
+    serializer_class = ProductionStationTargetSerializer
+    queryset = ProductionStationTarget.objects.select_related('station')
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.view'
+    write_perm = 'production.manage'
+    permission_map = {
+        'create': 'production.manage',
+        'update': 'production.manage',
+        'partial_update': 'production.manage',
+        'destroy': 'production.manage',
+    }
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['station__code', 'station__name', 'note']
+    ordering_fields = ['target_date', 'target_quantity', 'station__code']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        station_id = self.request.query_params.get('station')
+        target_date = self.request.query_params.get('target_date')
+        if station_id:
+            qs = qs.filter(station_id=station_id)
+        if target_date:
+            qs = qs.filter(target_date=target_date)
+        return qs
+
+
+class ProductionStepTabletAssignmentViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
+    serializer_class = ProductionStepTabletAssignmentSerializer
+    queryset = ProductionStepTabletAssignment.objects.select_related('step__line__work_order', 'step__station', 'tablet__station')
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.work_orders.view'
+    write_perm = 'production.work_orders.manage'
+    permission_map = {
+        'create': 'production.work_orders.manage',
+        'update': 'production.work_orders.manage',
+        'partial_update': 'production.work_orders.manage',
+        'destroy': 'production.work_orders.manage',
+    }
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['step__line__work_order__number', 'step__line__product_name', 'tablet__name', 'tablet__station__code']
+    ordering_fields = ['priority', 'created_at']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        step_id = self.request.query_params.get('step')
+        tablet_id = self.request.query_params.get('tablet')
+        if step_id:
+            qs = qs.filter(step_id=step_id)
+        if tablet_id:
+            qs = qs.filter(tablet_id=tablet_id)
+        return qs
+
+
 class ProductionDataFieldViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = ProductionDataFieldSerializer
     queryset = ProductionDataField.objects.select_related('station')
@@ -289,7 +390,7 @@ class ProductionTemplatePresetViewSet(viewsets.ReadOnlyModelViewSet):
 
 class ProductionWorkOrderViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = ProductionWorkOrderSerializer
-    queryset = ProductionWorkOrder.objects.select_related('route', 'created_by').prefetch_related('lines__steps__station__department')
+    queryset = ProductionWorkOrder.objects.select_related('route', 'created_by').prefetch_related('lines__steps__station__department', 'lines__steps__tablet_assignments__tablet')
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
     required_perm = 'production.work_orders.view'
     write_perm = 'production.work_orders.manage'
@@ -404,6 +505,16 @@ class ProductionEventViewSet(OrgScopedMixin, viewsets.ReadOnlyModelViewSet):
     ordering_fields = ['created_at']
 
 
+class ProductionCountingWindowViewSet(OrgScopedMixin, viewsets.ReadOnlyModelViewSet):
+    serializer_class = ProductionCountingWindowSerializer
+    queryset = ProductionCountingWindow.objects.select_related('work_order', 'line', 'step', 'station', 'tablet').prefetch_related('participants__user')
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.sessions.view'
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['work_order__number', 'line__product_name', 'station__code']
+    ordering_fields = ['opened_at', 'closed_at', 'official_delta', 'machine_delta']
+
+
 class ProductionWorkSessionViewSet(OrgScopedMixin, viewsets.ReadOnlyModelViewSet):
     serializer_class = ProductionWorkSessionSerializer
     queryset = ProductionWorkSession.objects.select_related('work_order', 'line', 'step', 'station', 'user', 'reviewed_by')
@@ -438,6 +549,48 @@ class ProductionDocumentViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         serializer.save(organization=self.request.user.organization, uploaded_by=self.request.user)
 
 
+class ProductionStationAlertViewSet(OrgScopedMixin, viewsets.ModelViewSet):
+    serializer_class = ProductionStationAlertSerializer
+    queryset = ProductionStationAlert.objects.select_related('station', 'department', 'work_order', 'created_by').prefetch_related('acks')
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.alerts.view'
+    write_perm = 'production.alerts.send'
+    permission_map = {'create': 'production.alerts.send', 'update': 'production.alerts.send', 'partial_update': 'production.alerts.send', 'destroy': 'production.alerts.send'}
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['title', 'message', 'station__code', 'department__name', 'work_order__number']
+    ordering_fields = ['created_at']
+
+    def create(self, request, *args, **kwargs):
+        target_type = request.data.get('target_type') or 'station'
+        station = None
+        department = None
+        work_order = None
+        if request.data.get('station'):
+            station = ProductionStation.objects.filter(organization=request.user.organization, pk=request.data.get('station')).first()
+        if request.data.get('department'):
+            department = ProductionDepartment.objects.filter(organization=request.user.organization, pk=request.data.get('department')).first()
+        if request.data.get('work_order'):
+            work_order = ProductionWorkOrder.objects.filter(organization=request.user.organization, pk=request.data.get('work_order')).first()
+        if target_type == 'station' and not station:
+            return Response({'detail': 'İstasyon seçimi zorunlu.'}, status=status.HTTP_400_BAD_REQUEST)
+        if target_type == 'department' and not department:
+            return Response({'detail': 'Bölüm seçimi zorunlu.'}, status=status.HTTP_400_BAD_REQUEST)
+        if target_type == 'work_order' and not work_order:
+            return Response({'detail': 'İş emri seçimi zorunlu.'}, status=status.HTTP_400_BAD_REQUEST)
+        alert = send_station_alert(
+            organization=request.user.organization,
+            user=request.user,
+            target_type=target_type,
+            station=station,
+            department=department,
+            work_order=work_order,
+            title=request.data.get('title') or 'Üretim bildirimi',
+            message=request.data.get('message') or '',
+            severity=request.data.get('severity') or 'info',
+        )
+        return Response(self.get_serializer(alert).data, status=status.HTTP_201_CREATED)
+
+
 class ProductionStationConsoleView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
     required_perm = 'production.station.operate'
@@ -462,12 +615,15 @@ class ProductionStationConsoleView(APIView):
             active_step = line.steps.filter(status__in=open_statuses).select_related('station__department').order_by('order').first()
             if not active_step:
                 continue
-            active_session = (
+            active_sessions = list(
                 active_step.sessions.filter(status__in=['started', 'paused'])
                 .select_related('user')
-                .order_by('-started_at', '-id')
-                .first()
+                .prefetch_related('breaks')
+                .order_by('slot_index', 'started_at', 'id')
             )
+            current_user_session = next((item for item in active_sessions if item.user_id == request.user.id), None)
+            active_session = current_user_session or (active_sessions[0] if active_sessions else None)
+            has_capacity = len(active_sessions) < active_step.station.max_workers
             rows.append({
                 'line_id': line.id,
                 'work_order_id': line.work_order_id,
@@ -487,13 +643,10 @@ class ProductionStationConsoleView(APIView):
                 'machine_quantity': active_step.machine_quantity,
                 'remaining_quantity': max(active_step.target_quantity - active_step.completed_quantity, 0),
                 'active_session': ProductionWorkSessionSerializer(active_session).data if active_session else None,
-                'current_user_session': (
-                    ProductionWorkSessionSerializer(active_session).data
-                    if active_session and active_session.user_id == request.user.id
-                    else None
-                ),
-                'can_start': not active_session and active_step.status in ['ready', 'in_progress', 'waiting_handover'],
-                'can_take_over': not active_session and active_step.status == 'waiting_handover',
+                'active_sessions': ProductionWorkSessionSerializer(active_sessions, many=True).data,
+                'current_user_session': ProductionWorkSessionSerializer(current_user_session).data if current_user_session else None,
+                'can_start': has_capacity and active_step.status in ['ready', 'in_progress', 'waiting_handover'],
+                'can_take_over': has_capacity and active_step.status == 'waiting_handover',
                 'previous_summary': _previous_step_summary(active_step),
             })
         return Response({'items': rows})
@@ -522,6 +675,123 @@ class ProductionStationConsoleView(APIView):
         except (ProductionError, ProductionWorkOrderLine.DoesNotExist, ProductionStation.DoesNotExist) as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(ProductionEventSerializer(event).data, status=status.HTTP_201_CREATED)
+
+
+class ProductionTabletContextView(APIView):
+    permission_classes = []
+
+    def get(self, request):
+        token = request.query_params.get('token')
+        if not token:
+            return Response({'detail': 'Tablet tokeni gerekli.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            return Response(tablet_context(token))
+        except ProductionError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ProductionTabletLoginSlotView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        serializer = TabletLoginSlotSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            session = tablet_login_slot(**serializer.validated_data)
+        except (ProductionError, ProductionWorkOrderLine.DoesNotExist, ProductionStation.DoesNotExist) as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ProductionWorkSessionSerializer(session).data, status=status.HTTP_201_CREATED)
+
+
+class ProductionTabletLogoutSlotView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        serializer = TabletLogoutSlotSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            event = tablet_logout_slot(**serializer.validated_data)
+        except (ProductionError, ProductionWorkSession.DoesNotExist) as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ProductionEventSerializer(event).data, status=status.HTTP_201_CREATED)
+
+
+class ProductionTabletBreakStartView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        serializer = TabletSessionStateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            event = tablet_pause_session(**serializer.validated_data)
+        except (ProductionError, ProductionWorkSession.DoesNotExist) as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ProductionEventSerializer(event).data, status=status.HTTP_201_CREATED)
+
+
+class ProductionTabletBreakEndView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        serializer = TabletSessionStateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            event = tablet_resume_session(**serializer.validated_data)
+        except (ProductionError, ProductionWorkSession.DoesNotExist) as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ProductionEventSerializer(event).data, status=status.HTTP_201_CREATED)
+
+
+class ProductionTabletCheckpointView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        serializer = TabletCheckpointSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            window = tablet_checkpoint(**serializer.validated_data)
+        except (ProductionError, ProductionWorkOrderLine.DoesNotExist, ProductionStation.DoesNotExist) as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if not window:
+            return Response({'detail': 'Kapatılacak açık üretim penceresi yok.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ProductionCountingWindowSerializer(window).data, status=status.HTTP_201_CREATED)
+
+
+class ProductionTabletCompleteWorkItemView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        serializer = TabletCompleteWorkItemSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            step = tablet_complete_work_item(**serializer.validated_data)
+        except (ProductionError, ProductionWorkOrderLine.DoesNotExist, ProductionStation.DoesNotExist) as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'id': step.id, 'status': step.status, 'completed_quantity': step.completed_quantity})
+
+
+class ProductionStationAlertAckView(APIView):
+    permission_classes = []
+
+    def post(self, request, alert_id):
+        serializer = StationAlertAckSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            if serializer.validated_data.get('token'):
+                tablet = ProductionStationTablet.objects.select_related('organization').filter(token=serializer.validated_data.get('token')).first()
+                if not tablet:
+                    return Response({'detail': 'Geçersiz tablet tokeni.'}, status=status.HTTP_400_BAD_REQUEST)
+                user = None
+                if serializer.validated_data.get('user_id'):
+                    user = tablet.organization.users.filter(pk=serializer.validated_data.get('user_id')).first()
+                ack = ack_station_alert(organization=tablet.organization, alert_id=alert_id, token=serializer.validated_data.get('token'), user=user)
+            else:
+                if not request.user or not request.user.is_authenticated:
+                    return Response({'detail': 'Tablet tokeni veya oturum gerekli.'}, status=status.HTTP_401_UNAUTHORIZED)
+                ack = ack_station_alert(organization=request.user.organization, alert_id=alert_id, user=request.user)
+        except (ProductionError, ProductionStationAlert.DoesNotExist) as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'id': ack.id, 'acknowledged_at': ack.acknowledged_at})
 
 
 class ProductionSessionStartView(APIView):

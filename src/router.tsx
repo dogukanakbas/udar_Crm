@@ -24,7 +24,7 @@ import AccessLogsPage from '@/pages/access-logs'
 import { MdfHistoryPage } from '@/pages/mdf-history'
 import { MdfManagementPage } from '@/pages/mdf-management'
 import { WarehouseManagementPage, WarehouseOperationsPage } from '@/pages/warehouses'
-import { ProductionConsolePage, ProductionManagementPage, ProductionReportsPage, ProductionWorkOrdersPage } from '@/pages/production'
+import { ProductionConsolePage, ProductionManagementPage, ProductionReportsPage, ProductionTabletPage, ProductionWorkOrdersPage } from '@/pages/production'
 import { getTokens } from '@/lib/auth'
 import { useAppStore } from '@/state/use-app-store'
 import { hasPermission } from '@/lib/permissions'
@@ -34,7 +34,7 @@ const defaultLandingForRole = (role?: string) => (role === 'Admin' ? '/' : role 
 const rootRoute = new RootRoute({
   component: AppShell,
   beforeLoad: async ({ location }) => {
-    if (location.pathname === '/login' || location.pathname === '/activate') return
+    if (location.pathname === '/login' || location.pathname === '/activate' || location.pathname === '/erp/production/tablet') return
     const tokens = getTokens()
     if (!tokens) {
       throw redirect({ to: '/login' })
@@ -178,6 +178,12 @@ const productionConsoleRoute = new Route({
   component: secured(ProductionConsolePage, 'production.station.operate'),
 })
 
+const productionTabletRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/erp/production/tablet',
+  component: ProductionTabletPage,
+})
+
 const productionReportsRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/erp/production/reports',
@@ -312,6 +318,7 @@ const routeTree = rootRoute.addChildren([
     productionManagementRoute,
     productionWorkOrdersRoute,
     productionConsoleRoute,
+    productionTabletRoute,
     productionReportsRoute,
     invoicingRoute,
   accountingRoute,

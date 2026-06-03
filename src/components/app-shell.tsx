@@ -267,6 +267,10 @@ export function AppShell() {
     if (link) link.href = faviconUrl
   }, [data.organization?.favicon_url])
 
+  if (activePath.startsWith('/erp/production/tablet')) {
+    return <Outlet />
+  }
+
   if (isPublic) {
     if (activePath.startsWith('/login')) {
       return <Outlet />

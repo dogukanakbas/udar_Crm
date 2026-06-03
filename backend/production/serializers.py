@@ -2,19 +2,28 @@ from rest_framework import serializers
 
 from .models import (
     ProductionDataField,
+    ProductionCountingParticipant,
+    ProductionCountingWindow,
     ProductionDepartment,
     ProductionDevice,
     ProductionDevicePayloadMap,
     ProductionDocument,
     ProductionEvent,
+    ProductionOperatorProfile,
     ProductionRuleBlock,
     ProductionRuleSet,
     ProductionRouteStep,
     ProductionRouteTemplate,
     ProductionSettings,
+    ProductionSessionBreak,
     ProductionStation,
+    ProductionStationTarget,
+    ProductionStationAlert,
+    ProductionStationAlertAck,
+    ProductionStationTablet,
     ProductionStationUser,
     ProductionStepProgress,
+    ProductionStepTabletAssignment,
     ProductionTemplatePreset,
     ProductionWorkOrder,
     ProductionWorkOrderLine,
@@ -72,6 +81,84 @@ class ProductionDeviceSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
+class ProductionOperatorProfileSerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+    pin = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    has_pin = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductionOperatorProfile
+        fields = ['id', 'organization', 'user', 'user_name', 'pin', 'has_pin', 'is_active', 'last_pin_change_at', 'updated_at']
+        read_only_fields = ['organization', 'user_name', 'has_pin', 'last_pin_change_at', 'updated_at']
+
+    def get_user_name(self, obj):
+        return obj.user.get_full_name() or obj.user.username
+
+    def get_has_pin(self, obj):
+        return bool(obj.pin_hash)
+
+    def validate_user(self, user):
+        request = self.context.get('request')
+        organization = getattr(getattr(request, 'user', None), 'organization', None)
+        if organization and getattr(user, 'organization_id', None) != organization.id:
+            raise serializers.ValidationError('Kullanıcı bu organizasyona ait değil.')
+        return user
+
+    def create(self, validated_data):
+        raw_pin = validated_data.pop('pin', '')
+        obj = super().create(validated_data)
+        if raw_pin:
+            obj.set_pin(raw_pin)
+            obj.save(update_fields=['pin_hash', 'last_pin_change_at', 'updated_at'])
+        return obj
+
+    def update(self, instance, validated_data):
+        raw_pin = validated_data.pop('pin', '')
+        obj = super().update(instance, validated_data)
+        if raw_pin:
+            obj.set_pin(raw_pin)
+            obj.save(update_fields=['pin_hash', 'last_pin_change_at', 'updated_at'])
+        return obj
+
+
+class ProductionStationTabletSerializer(serializers.ModelSerializer):
+    station_code = serializers.CharField(source='station.code', read_only=True)
+    station_name = serializers.CharField(source='station.name', read_only=True)
+
+    class Meta:
+        model = ProductionStationTablet
+        fields = '__all__'
+        read_only_fields = ['organization', 'token', 'station_code', 'station_name', 'last_seen_at', 'created_at', 'updated_at']
+
+    def create(self, validated_data):
+        validated_data.setdefault('token', make_device_token())
+        return super().create(validated_data)
+
+    def validate_station(self, station):
+        request = self.context.get('request')
+        organization = getattr(getattr(request, 'user', None), 'organization', None)
+        if organization and getattr(station, 'organization_id', None) != organization.id:
+            raise serializers.ValidationError('İstasyon bu organizasyona ait değil.')
+        return station
+
+
+class ProductionStationTargetSerializer(serializers.ModelSerializer):
+    station_code = serializers.CharField(source='station.code', read_only=True)
+    station_name = serializers.CharField(source='station.name', read_only=True)
+
+    class Meta:
+        model = ProductionStationTarget
+        fields = '__all__'
+        read_only_fields = ['organization', 'station_code', 'station_name', 'created_at', 'updated_at']
+
+    def validate_station(self, station):
+        request = self.context.get('request')
+        organization = getattr(getattr(request, 'user', None), 'organization', None)
+        if organization and station.organization_id != organization.id:
+            raise serializers.ValidationError('İstasyon bu organizasyona ait değil.')
+        return station
+
+
 class ProductionDataFieldSerializer(serializers.ModelSerializer):
     station_code = serializers.CharField(source='station.code', read_only=True)
 
@@ -99,7 +186,7 @@ class ProductionRouteStepSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ProductionRouteStep
-        fields = ['id', 'route', 'station', 'station_code', 'station_name', 'department_name', 'order', 'is_required']
+        fields = ['id', 'route', 'station', 'station_code', 'station_name', 'department_name', 'order', 'is_required', 'start_policy']
 
 
 class ProductionRouteTemplateSerializer(serializers.ModelSerializer):
@@ -127,6 +214,7 @@ class ProductionRouteTemplateSerializer(serializers.ModelSerializer):
                 station=station,
                 order=row.get('order', idx),
                 is_required=row.get('is_required', True),
+                start_policy=row.get('start_policy') or 'after_previous',
             )
 
     def create(self, validated_data):
@@ -170,6 +258,8 @@ class ProductionStepProgressSerializer(serializers.ModelSerializer):
     station_name = serializers.CharField(source='station.name', read_only=True)
     department_name = serializers.CharField(source='station.department.name', read_only=True)
     department_color = serializers.CharField(source='station.department.color', read_only=True)
+    start_policy = serializers.CharField(source='route_step.start_policy', read_only=True)
+    assigned_tablets = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductionStepProgress
@@ -190,8 +280,50 @@ class ProductionStepProgressSerializer(serializers.ModelSerializer):
             'started_at',
             'completed_at',
             'completed_by',
+            'start_policy',
+            'assigned_tablets',
         ]
         read_only_fields = fields
+
+    def get_assigned_tablets(self, obj):
+        return [
+            {
+                'id': row.id,
+                'tablet': row.tablet_id,
+                'tablet_name': row.tablet.name,
+                'priority': row.priority,
+                'is_pinned': row.is_pinned,
+                'note': row.note,
+            }
+            for row in obj.tablet_assignments.all()
+        ]
+
+
+class ProductionStepTabletAssignmentSerializer(serializers.ModelSerializer):
+    tablet_name = serializers.CharField(source='tablet.name', read_only=True)
+    tablet_station = serializers.CharField(source='tablet.station.code', read_only=True)
+    step_station = serializers.CharField(source='step.station.code', read_only=True)
+    work_order_number = serializers.CharField(source='step.line.work_order.number', read_only=True)
+    product_name = serializers.CharField(source='step.line.product_name', read_only=True)
+
+    class Meta:
+        model = ProductionStepTabletAssignment
+        fields = '__all__'
+        read_only_fields = ['organization', 'created_at', 'tablet_name', 'tablet_station', 'step_station', 'work_order_number', 'product_name']
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        organization = getattr(getattr(request, 'user', None), 'organization', None)
+        step = attrs.get('step') or getattr(self.instance, 'step', None)
+        tablet = attrs.get('tablet') or getattr(self.instance, 'tablet', None)
+        if organization:
+            if step and step.line.work_order.organization_id != organization.id:
+                raise serializers.ValidationError({'step': 'İş adımı bu organizasyona ait değil.'})
+            if tablet and tablet.organization_id != organization.id:
+                raise serializers.ValidationError({'tablet': 'Tablet bu organizasyona ait değil.'})
+        if step and tablet and step.station_id != tablet.station_id:
+            raise serializers.ValidationError({'tablet': 'Tablet, iş adımının istasyonuna bağlı olmalı.'})
+        return attrs
 
 
 class ProductionWorkOrderLineSerializer(serializers.ModelSerializer):
@@ -269,6 +401,8 @@ class ProductionWorkSessionSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='line.product_name', read_only=True)
     user_name = serializers.SerializerMethodField()
     reviewed_by_name = serializers.SerializerMethodField()
+    break_seconds = serializers.SerializerMethodField()
+    active_break_id = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductionWorkSession
@@ -299,6 +433,8 @@ class ProductionWorkSessionSerializer(serializers.ModelSerializer):
             'product_name',
             'user_name',
             'reviewed_by_name',
+            'break_seconds',
+            'active_break_id',
         ]
 
     def get_user_name(self, obj):
@@ -308,6 +444,83 @@ class ProductionWorkSessionSerializer(serializers.ModelSerializer):
         if not obj.reviewed_by:
             return ''
         return obj.reviewed_by.get_full_name() or obj.reviewed_by.username
+
+    def get_break_seconds(self, obj):
+        return sum(item.duration_seconds for item in obj.breaks.all()) if hasattr(obj, '_prefetched_objects_cache') and 'breaks' in obj._prefetched_objects_cache else sum(item.duration_seconds for item in obj.breaks.all())
+
+    def get_active_break_id(self, obj):
+        active = obj.breaks.filter(ended_at__isnull=True).order_by('-started_at', '-id').first()
+        return active.id if active else None
+
+
+class ProductionSessionBreakSerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductionSessionBreak
+        fields = '__all__'
+        read_only_fields = ['organization', 'user', 'started_at', 'ended_at']
+
+    def get_user_name(self, obj):
+        return obj.user.get_full_name() or obj.user.username
+
+
+class ProductionCountingParticipantSerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductionCountingParticipant
+        fields = '__all__'
+        read_only_fields = fields
+
+    def get_user_name(self, obj):
+        return obj.user.get_full_name() or obj.user.username
+
+
+class ProductionCountingWindowSerializer(serializers.ModelSerializer):
+    station_code = serializers.CharField(source='station.code', read_only=True)
+    tablet_name = serializers.CharField(source='tablet.name', read_only=True)
+    work_order_number = serializers.CharField(source='work_order.number', read_only=True)
+    product_name = serializers.CharField(source='line.product_name', read_only=True)
+    participants = ProductionCountingParticipantSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ProductionCountingWindow
+        fields = '__all__'
+        read_only_fields = fields
+
+
+class ProductionStationAlertAckSerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+    tablet_name = serializers.CharField(source='tablet.name', read_only=True)
+
+    class Meta:
+        model = ProductionStationAlertAck
+        fields = '__all__'
+        read_only_fields = ['organization', 'acknowledged_at', 'user_name', 'tablet_name']
+
+    def get_user_name(self, obj):
+        if not obj.user:
+            return ''
+        return obj.user.get_full_name() or obj.user.username
+
+
+class ProductionStationAlertSerializer(serializers.ModelSerializer):
+    station_code = serializers.CharField(source='station.code', read_only=True)
+    department_name = serializers.CharField(source='department.name', read_only=True)
+    work_order_number = serializers.CharField(source='work_order.number', read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+    acks = ProductionStationAlertAckSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ProductionStationAlert
+        fields = '__all__'
+        read_only_fields = ['organization', 'created_by', 'created_at', 'station_code', 'department_name', 'work_order_number', 'created_by_name', 'acks']
+
+    def get_created_by_name(self, obj):
+        if not obj.created_by:
+            return ''
+        return obj.created_by.get_full_name() or obj.created_by.username
 
 
 class ProductionDocumentSerializer(serializers.ModelSerializer):
@@ -322,6 +535,8 @@ class SessionStartSerializer(serializers.Serializer):
     station_code = serializers.CharField()
     start_counter = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
     note = serializers.CharField(required=False, allow_blank=True, default='')
+    tablet_token = serializers.CharField(required=False, allow_blank=True, default='')
+    slot_index = serializers.IntegerField(required=False, allow_null=True)
 
 
 class SessionStateSerializer(serializers.Serializer):
@@ -332,6 +547,55 @@ class SessionStateSerializer(serializers.Serializer):
 class SessionCloseSerializer(SessionStateSerializer):
     declared_good_quantity = serializers.DecimalField(max_digits=14, decimal_places=2)
     end_counter = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+
+
+class TabletLoginSlotSerializer(serializers.Serializer):
+    token = serializers.CharField()
+    user_id = serializers.IntegerField()
+    pin = serializers.CharField()
+    line_id = serializers.IntegerField()
+    slot_index = serializers.IntegerField()
+    start_counter = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+    checkpoint_total = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+    participant_totals = serializers.DictField(child=serializers.DecimalField(max_digits=14, decimal_places=2), required=False)
+    note = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class TabletSessionStateSerializer(serializers.Serializer):
+    token = serializers.CharField()
+    session_id = serializers.IntegerField()
+    checkpoint_total = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+    participant_totals = serializers.DictField(child=serializers.DecimalField(max_digits=14, decimal_places=2), required=False)
+    note = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class TabletLogoutSlotSerializer(TabletSessionStateSerializer):
+    user_id = serializers.IntegerField()
+    pin = serializers.CharField()
+    declared_good_quantity = serializers.DecimalField(max_digits=14, decimal_places=2)
+    end_counter = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+
+
+class StationAlertAckSerializer(serializers.Serializer):
+    token = serializers.CharField(required=False, allow_blank=True, default='')
+    user_id = serializers.IntegerField(required=False, allow_null=True)
+
+
+class TabletCheckpointSerializer(serializers.Serializer):
+    token = serializers.CharField()
+    line_id = serializers.IntegerField()
+    checkpoint_total = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+    participant_totals = serializers.DictField(child=serializers.DecimalField(max_digits=14, decimal_places=2), required=False)
+    reason = serializers.CharField(required=False, allow_blank=True, default='manual')
+    note = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class TabletCompleteWorkItemSerializer(serializers.Serializer):
+    token = serializers.CharField()
+    line_id = serializers.IntegerField()
+    checkpoint_total = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+    participant_totals = serializers.DictField(child=serializers.DecimalField(max_digits=14, decimal_places=2), required=False)
+    note = serializers.CharField(required=False, allow_blank=True, default='')
 
 
 class SessionReviewSerializer(serializers.Serializer):

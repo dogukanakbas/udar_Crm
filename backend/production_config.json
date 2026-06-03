@@ -1,0 +1,739 @@
+{
+  "version": 1,
+  "organization": {
+    "code": "UDAR",
+    "name": "Udar Demo"
+  },
+  "settings": {
+    "default_completion_warehouse_code": "",
+    "default_completion_location_code": "",
+    "auto_stock_in_enabled": true
+  },
+  "departments": [
+    {
+      "code": "PRES",
+      "name": "1. Bölüm - Pres Bölümü",
+      "color": "#1d4ed8",
+      "order": 0,
+      "is_active": true
+    },
+    {
+      "code": "KAYNAK",
+      "name": "2. Bölüm - Kaynak Bölümü",
+      "color": "#ea580c",
+      "order": 1,
+      "is_active": true
+    },
+    {
+      "code": "BOYAHANE",
+      "name": "3. Bölüm - Boyahane Bölümü",
+      "color": "#15803d",
+      "order": 2,
+      "is_active": true
+    },
+    {
+      "code": "MONTAJ",
+      "name": "4. Bölüm - Montaj Bölümü",
+      "color": "#7e22ce",
+      "order": 3,
+      "is_active": true
+    }
+  ],
+  "stations": [
+    {
+      "department_code": "PRES",
+      "code": "LZR-1",
+      "name": "Lazer Kesim",
+      "order": 0,
+      "max_workers": 2,
+      "is_handover": false,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "PRES",
+      "code": "ABK-1",
+      "name": "Abkant 1",
+      "order": 1,
+      "max_workers": 2,
+      "is_handover": false,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "PRES",
+      "code": "ABK-2",
+      "name": "Abkant 2",
+      "order": 2,
+      "max_workers": 2,
+      "is_handover": false,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "PRES",
+      "code": "ABK-3",
+      "name": "Abkant 3",
+      "order": 3,
+      "max_workers": 2,
+      "is_handover": false,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "PRES",
+      "code": "BKM-1",
+      "name": "Büküm / Kenet Makinesi",
+      "order": 4,
+      "max_workers": 2,
+      "is_handover": false,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "PRES",
+      "code": "PNC-1",
+      "name": "Punch Pres",
+      "order": 5,
+      "max_workers": 2,
+      "is_handover": false,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "PRES",
+      "code": "MKS-1",
+      "name": "Matkap / Kesim Sonrası",
+      "order": 6,
+      "max_workers": 2,
+      "is_handover": false,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "PRES",
+      "code": "CKS-1",
+      "name": "Pres Bölümü Devir İstasyonu",
+      "order": 7,
+      "max_workers": 2,
+      "is_handover": true,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "KAYNAK",
+      "code": "KASA-1",
+      "name": "Kasa Kaynak 1",
+      "order": 0,
+      "max_workers": 4,
+      "is_handover": false,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "KAYNAK",
+      "code": "KASA-2",
+      "name": "Kasa Kaynak 2",
+      "order": 1,
+      "max_workers": 4,
+      "is_handover": false,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "KAYNAK",
+      "code": "KANAT-1",
+      "name": "Kanat Kaynak 1",
+      "order": 2,
+      "max_workers": 4,
+      "is_handover": false,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "KAYNAK",
+      "code": "KANAT-2",
+      "name": "Kanat Kaynak 2",
+      "order": 3,
+      "max_workers": 4,
+      "is_handover": false,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "KAYNAK",
+      "code": "CKS-2",
+      "name": "Kaynak Bölümü Devir İstasyonu",
+      "order": 4,
+      "max_workers": 4,
+      "is_handover": true,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "BOYAHANE",
+      "code": "YKMA-1",
+      "name": "Yıkama / Temizleme",
+      "order": 0,
+      "max_workers": 2,
+      "is_handover": false,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "BOYAHANE",
+      "code": "BOYA-1",
+      "name": "Boya Kabini",
+      "order": 1,
+      "max_workers": 2,
+      "is_handover": false,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "BOYAHANE",
+      "code": "CKS-3",
+      "name": "Boyahane Devir İstasyonu",
+      "order": 2,
+      "max_workers": 2,
+      "is_handover": true,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "MONTAJ",
+      "code": "KASAFTL-1",
+      "name": "Kasa Fitil",
+      "order": 0,
+      "max_workers": 2,
+      "is_handover": false,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "MONTAJ",
+      "code": "KASAKPLMA-1",
+      "name": "Kasa Kaplama",
+      "order": 1,
+      "max_workers": 2,
+      "is_handover": false,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "MONTAJ",
+      "code": "PKT-1",
+      "name": "Paketleme",
+      "order": 2,
+      "max_workers": 2,
+      "is_handover": false,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "MONTAJ",
+      "code": "KNTSRME-1",
+      "name": "Kanat Sürme / Kontrol",
+      "order": 3,
+      "max_workers": 2,
+      "is_handover": false,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "MONTAJ",
+      "code": "AKSESUAR-1",
+      "name": "Aksesuar Montaj",
+      "order": 4,
+      "max_workers": 2,
+      "is_handover": false,
+      "is_final": false,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    },
+    {
+      "department_code": "MONTAJ",
+      "code": "FIN-1",
+      "name": "Ürün Tamamlandı",
+      "order": 5,
+      "max_workers": 2,
+      "is_handover": false,
+      "is_final": true,
+      "is_active": true,
+      "description": "Örnek istasyon; kapasite, kullanıcı ve cihaz mapping bilgileri UI üzerinden değiştirilebilir."
+    }
+  ],
+  "station_users": [],
+  "devices": [
+    {
+      "station_code": "LZR-1",
+      "name": "Demo RPi - LZR-1",
+      "token": "a6f192d4c475489bb6e54b6701ed8c4f0dba8fbe85b64e87b3b7ee1c39588a48",
+      "is_active": true
+    }
+  ],
+  "data_fields": [
+    {
+      "station_code": "LZR-1",
+      "key": "line_id",
+      "label": "İş emri satırı",
+      "field_type": "number",
+      "source": "device",
+      "unit": "",
+      "default_value": "",
+      "config": {},
+      "is_visible": true,
+      "order": 0
+    },
+    {
+      "station_code": "LZR-1",
+      "key": "counter_total",
+      "label": "Makine toplam sayacı",
+      "field_type": "number",
+      "source": "device",
+      "unit": "",
+      "default_value": "",
+      "config": {},
+      "is_visible": true,
+      "order": 1
+    },
+    {
+      "station_code": "LZR-1",
+      "key": "quantity_delta",
+      "label": "Adet farkı",
+      "field_type": "number",
+      "source": "device",
+      "unit": "",
+      "default_value": "",
+      "config": {},
+      "is_visible": true,
+      "order": 2
+    },
+    {
+      "station_code": "LZR-1",
+      "key": "machine_status",
+      "label": "Makine durumu",
+      "field_type": "text",
+      "source": "device",
+      "unit": "",
+      "default_value": "",
+      "config": {},
+      "is_visible": true,
+      "order": 3
+    },
+    {
+      "station_code": "LZR-1",
+      "key": "operator_id",
+      "label": "Operatör kart/no",
+      "field_type": "text",
+      "source": "device",
+      "unit": "",
+      "default_value": "",
+      "config": {},
+      "is_visible": true,
+      "order": 4
+    },
+    {
+      "station_code": "LZR-1",
+      "key": "scrap_quantity",
+      "label": "Fire adedi",
+      "field_type": "number",
+      "source": "manual",
+      "unit": "",
+      "default_value": "",
+      "config": {},
+      "is_visible": true,
+      "order": 5
+    }
+  ],
+  "device_maps": [
+    {
+      "device_token": "a6f192d4c475489bb6e54b6701ed8c4f0dba8fbe85b64e87b3b7ee1c39588a48",
+      "station_code": "LZR-1",
+      "data_field_key": "line_id",
+      "source_path": "$.line_id",
+      "target_key": "line_id",
+      "target_type": "number",
+      "default_value": "",
+      "is_required": true,
+      "is_active": true,
+      "order": 0
+    },
+    {
+      "device_token": "a6f192d4c475489bb6e54b6701ed8c4f0dba8fbe85b64e87b3b7ee1c39588a48",
+      "station_code": "LZR-1",
+      "data_field_key": "",
+      "source_path": "$.counter.total",
+      "target_key": "counter_value",
+      "target_type": "number",
+      "default_value": "",
+      "is_required": false,
+      "is_active": true,
+      "order": 1
+    },
+    {
+      "device_token": "a6f192d4c475489bb6e54b6701ed8c4f0dba8fbe85b64e87b3b7ee1c39588a48",
+      "station_code": "LZR-1",
+      "data_field_key": "quantity_delta",
+      "source_path": "$.counter.delta",
+      "target_key": "quantity_delta",
+      "target_type": "number",
+      "default_value": "",
+      "is_required": false,
+      "is_active": true,
+      "order": 2
+    },
+    {
+      "device_token": "a6f192d4c475489bb6e54b6701ed8c4f0dba8fbe85b64e87b3b7ee1c39588a48",
+      "station_code": "LZR-1",
+      "data_field_key": "machine_status",
+      "source_path": "$.machine.status",
+      "target_key": "machine_status",
+      "target_type": "text",
+      "default_value": "",
+      "is_required": false,
+      "is_active": true,
+      "order": 3
+    },
+    {
+      "device_token": "a6f192d4c475489bb6e54b6701ed8c4f0dba8fbe85b64e87b3b7ee1c39588a48",
+      "station_code": "LZR-1",
+      "data_field_key": "operator_id",
+      "source_path": "$.operator.id",
+      "target_key": "operator_id",
+      "target_type": "text",
+      "default_value": "",
+      "is_required": false,
+      "is_active": true,
+      "order": 4
+    }
+  ],
+  "routes": [
+    {
+      "name": "Demo Çelik Kapı Üretim Rotası",
+      "product_group_key": "celik_kapi_demo",
+      "is_default": false,
+      "is_active": true,
+      "steps": [
+        {
+          "station_code": "LZR-1",
+          "order": 0,
+          "is_required": true
+        },
+        {
+          "station_code": "ABK-1",
+          "order": 1,
+          "is_required": true
+        },
+        {
+          "station_code": "ABK-2",
+          "order": 2,
+          "is_required": true
+        },
+        {
+          "station_code": "ABK-3",
+          "order": 3,
+          "is_required": true
+        },
+        {
+          "station_code": "BKM-1",
+          "order": 4,
+          "is_required": true
+        },
+        {
+          "station_code": "PNC-1",
+          "order": 5,
+          "is_required": true
+        },
+        {
+          "station_code": "MKS-1",
+          "order": 6,
+          "is_required": true
+        },
+        {
+          "station_code": "CKS-1",
+          "order": 7,
+          "is_required": true
+        },
+        {
+          "station_code": "KASA-1",
+          "order": 8,
+          "is_required": true
+        },
+        {
+          "station_code": "KASA-2",
+          "order": 9,
+          "is_required": true
+        },
+        {
+          "station_code": "KANAT-1",
+          "order": 10,
+          "is_required": true
+        },
+        {
+          "station_code": "KANAT-2",
+          "order": 11,
+          "is_required": true
+        },
+        {
+          "station_code": "CKS-2",
+          "order": 12,
+          "is_required": true
+        },
+        {
+          "station_code": "YKMA-1",
+          "order": 13,
+          "is_required": true
+        },
+        {
+          "station_code": "BOYA-1",
+          "order": 14,
+          "is_required": true
+        },
+        {
+          "station_code": "CKS-3",
+          "order": 15,
+          "is_required": true
+        },
+        {
+          "station_code": "KASAFTL-1",
+          "order": 16,
+          "is_required": true
+        },
+        {
+          "station_code": "KASAKPLMA-1",
+          "order": 17,
+          "is_required": true
+        },
+        {
+          "station_code": "PKT-1",
+          "order": 18,
+          "is_required": true
+        },
+        {
+          "station_code": "KNTSRME-1",
+          "order": 19,
+          "is_required": true
+        },
+        {
+          "station_code": "AKSESUAR-1",
+          "order": 20,
+          "is_required": true
+        },
+        {
+          "station_code": "FIN-1",
+          "order": 21,
+          "is_required": true
+        }
+      ]
+    }
+  ],
+  "rule_sets": [
+    {
+      "name": "Demo RPi sayaç verisi adet eklesin",
+      "scope": "station",
+      "station_code": "LZR-1",
+      "route_name": "",
+      "trigger_event": "pi_event",
+      "is_active": true,
+      "order": 0,
+      "blocks": [
+        {
+          "block_type": "condition",
+          "config": {
+            "right": 0,
+            "left_key": "quantity_delta",
+            "operator": "gt",
+            "left_source": "normalized"
+          },
+          "is_active": true,
+          "order": 0
+        },
+        {
+          "block_type": "increment_quantity",
+          "config": {
+            "delta_key": "quantity_delta",
+            "delta_source": "normalized"
+          },
+          "is_active": true,
+          "order": 1
+        }
+      ]
+    }
+  ],
+  "template_presets": [
+    {
+      "key": "generic_modular_factory",
+      "name": "Örnek Modüler Fabrika",
+      "description": "Ürüne veya fabrikaya özel olmayan, kopyalanıp değiştirilebilir örnek üretim akışı.",
+      "payload": {
+        "routes": [
+          {
+            "name": "Örnek Modüler Üretim Rotası",
+            "is_default": false,
+            "product_group_key": "moduler_urun"
+          }
+        ],
+        "data_fields": [
+          {
+            "key": "counter_total",
+            "label": "Toplam sayaç",
+            "source": "device",
+            "field_type": "number"
+          },
+          {
+            "key": "machine_status",
+            "label": "Makine durumu",
+            "source": "device",
+            "field_type": "text"
+          },
+          {
+            "key": "operator_id",
+            "label": "Operatör",
+            "source": "device",
+            "field_type": "text"
+          }
+        ],
+        "departments": [
+          {
+            "code": "HAZIRLIK",
+            "name": "Hazırlık",
+            "color": "#2563eb",
+            "order": 0,
+            "stations": [
+              {
+                "code": "HZR-1",
+                "name": "Hazırlık istasyonu",
+                "order": 0,
+                "is_final": false,
+                "is_handover": false,
+                "max_workers": 2
+              },
+              {
+                "code": "DEV-1",
+                "name": "Bölüm devri",
+                "order": 1,
+                "is_final": false,
+                "is_handover": true,
+                "max_workers": 2
+              }
+            ]
+          },
+          {
+            "code": "ISLEME",
+            "name": "İşleme",
+            "color": "#ea580c",
+            "order": 1,
+            "stations": [
+              {
+                "code": "ISL-1",
+                "name": "İşleme istasyonu",
+                "order": 0,
+                "is_final": false,
+                "is_handover": false,
+                "max_workers": 4
+              },
+              {
+                "code": "DEV-2",
+                "name": "Bölüm devri",
+                "order": 1,
+                "is_final": false,
+                "is_handover": true,
+                "max_workers": 4
+              }
+            ]
+          },
+          {
+            "code": "KONTROL",
+            "name": "Kalite Kontrol",
+            "color": "#15803d",
+            "order": 2,
+            "stations": [
+              {
+                "code": "KNT-1",
+                "name": "Kontrol istasyonu",
+                "order": 0,
+                "is_final": false,
+                "is_handover": false,
+                "max_workers": 2
+              }
+            ]
+          },
+          {
+            "code": "PAKETLEME",
+            "name": "Paketleme",
+            "color": "#7e22ce",
+            "order": 3,
+            "stations": [
+              {
+                "code": "PKT-1",
+                "name": "Paketleme istasyonu",
+                "order": 0,
+                "is_final": false,
+                "is_handover": false,
+                "max_workers": 2
+              },
+              {
+                "code": "FIN-1",
+                "name": "Ürün tamamlandı",
+                "order": 1,
+                "is_final": true,
+                "is_handover": false,
+                "max_workers": 2
+              }
+            ]
+          }
+        ],
+        "device_maps": [
+          {
+            "target_key": "line_id",
+            "is_required": true,
+            "source_path": "$.line_id",
+            "target_type": "number"
+          },
+          {
+            "target_key": "counter_value",
+            "source_path": "$.counter.total",
+            "target_type": "number"
+          },
+          {
+            "target_key": "quantity_delta",
+            "source_path": "$.quantity_delta",
+            "target_type": "number"
+          },
+          {
+            "target_key": "machine_status",
+            "source_path": "$.machine.status",
+            "target_type": "text"
+          },
+          {
+            "target_key": "operator_id",
+            "source_path": "$.operator_id",
+            "target_type": "text"
+          }
+        ]
+      },
+      "is_active": true
+    }
+  ]
+}

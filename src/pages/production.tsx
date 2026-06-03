@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Copy, Download, Play, Plus, RefreshCw, Route, Save, Send, TimerReset, Trash2, Upload, UserPlus } from 'lucide-react'
+import { Bell, CheckCircle2, Copy, Download, LogOut, Monitor, Pause, Play, Plus, RefreshCw, Route, Save, Send, TimerReset, Trash2, Upload, UserPlus, Volume2 } from 'lucide-react'
 
 import { PageHeader } from '@/components/app-shell'
 import { Badge } from '@/components/ui/badge'
@@ -21,12 +21,17 @@ type Station = { id: number; department: number; department_name?: string; code:
 type UserLite = { id: number; username?: string; email?: string; first_name?: string; last_name?: string; full_name?: string; role?: string }
 type StationAssignment = { id: number; station: number; station_code?: string; user: number; user_name?: string; role: string; is_active: boolean }
 type Device = { id: number; station: number; station_code?: string; name: string; token?: string; is_active: boolean; last_seen_at?: string }
+type Tablet = { id: number; station: number; station_code?: string; station_name?: string; name: string; token?: string; is_active: boolean; last_seen_at?: string }
+type StationTarget = { id: number; station: number; station_code?: string; station_name?: string; target_date: string; target_quantity: string | number; note?: string }
+type OperatorProfile = { id: number; user: number; user_name?: string; has_pin?: boolean; is_active: boolean; last_pin_change_at?: string }
+type StationAlert = { id: number; target_type: string; station?: number | null; station_code?: string; department?: number | null; department_name?: string; work_order?: number | null; work_order_number?: string; title: string; message: string; severity: string; created_at?: string; acks?: any[] }
 type DeviceMap = { id: number; device: number; device_name?: string; station?: number; station_code?: string; source_path: string; target_key: string; target_type: string; is_required: boolean; is_active: boolean; order: number }
 type DataField = { id: number; station?: number | null; station_code?: string; key: string; label: string; field_type: string; source: string; is_visible: boolean; order: number }
 type RuleSet = { id: number; name: string; scope: string; station?: number | null; route?: number | null; trigger_event: string; is_active: boolean; order: number; blocks?: RuleBlock[] }
 type RuleBlock = { id: number; rule_set: number; block_type: string; config: Record<string, any>; is_active: boolean; order: number }
 type TemplatePreset = { id: number; key: string; name: string; description?: string; is_active: boolean }
-type RouteTemplate = { id: number; name: string; product_group_key?: string; is_default: boolean; steps?: any[] }
+type RouteStep = { id: number; station: number; station_code?: string; station_name?: string; department_name?: string; order: number; is_required: boolean; start_policy?: string }
+type RouteTemplate = { id: number; name: string; product_group_key?: string; is_default: boolean; steps?: RouteStep[] }
 type WarehouseLocation = { id: number; code: string; name?: string; warehouse: number; warehouse_name?: string }
 type ProductionSettings = { default_completion_location?: number | null; default_completion_warehouse?: number | null; auto_stock_in_enabled?: boolean }
 type WorkOrder = {
@@ -52,6 +57,7 @@ type WorkOrderLine = {
 }
 type StepProgress = {
   id: number
+  station?: number
   station_code: string
   station_name: string
   department_name: string
@@ -60,6 +66,8 @@ type StepProgress = {
   completed_quantity: string | number
   machine_quantity?: string | number
   status: string
+  start_policy?: string
+  assigned_tablets?: { id: number; tablet: number; tablet_name: string; priority: number; is_pinned: boolean; note?: string }[]
 }
 type WorkSession = {
   id: number
@@ -103,6 +111,44 @@ type ConsoleItem = {
   can_take_over?: boolean
   previous_summary?: PreviousSummary | null
 }
+type TabletOperator = { id: number; name: string; role: string; has_pin: boolean; today_total: string | number }
+type TabletSlot = {
+  id: number
+  user_id: number
+  user_name: string
+  line_id: number
+  work_order_number: string
+  product_sku: string
+  product_name: string
+  status: string
+  slot_index: number
+  started_at?: string
+  machine_quantity: string | number
+  declared_good_quantity: string | number
+  break_seconds?: number
+  active_break_id?: number | null
+}
+type TabletDailyTarget = { id?: number; date?: string; target_quantity: string | number; actual_quantity: string | number; remaining_quantity: string | number; note?: string }
+type TabletCountingWindow = {
+  id: number
+  line_id: number
+  step_id: number
+  status: string
+  start_total: string | number
+  machine_delta: string | number
+  participants?: { id: number; session_id: number; user_id: number; user_name: string; start_total: string | number; declared_total: string | number; credited_quantity: string | number; discrepancy_status: string }[]
+}
+type TabletWorkItem = ConsoleItem & { work_order_id: number; visibility?: string; is_pinned?: boolean; priority?: number; start_policy?: string; assigned_tablet_ids?: number[] }
+type TabletContext = {
+  tablet?: { id: number; name: string; token: string }
+  station?: { id: number; code: string; name: string; department_name: string; max_workers: number }
+  daily_target?: TabletDailyTarget
+  operators?: TabletOperator[]
+  work_items?: TabletWorkItem[]
+  slots?: TabletSlot[]
+  active_window?: TabletCountingWindow | null
+  alerts?: { id: number; title: string; message: string; severity: string; requires_ack: boolean; created_at?: string }[]
+}
 
 const statusLabel: Record<string, string> = {
   draft: 'Taslak',
@@ -117,6 +163,13 @@ const statusLabel: Record<string, string> = {
 }
 
 const n = (value: unknown) => Number(value || 0)
+const todayIso = () => {
+  const d = new Date()
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
 
 function pct(done: unknown, target: unknown) {
   const total = n(target)
@@ -199,6 +252,10 @@ export function ProductionManagementPage() {
   const [stationAssignments, setStationAssignments] = useState<StationAssignment[]>([])
   const [users, setUsers] = useState<UserLite[]>([])
   const [devices, setDevices] = useState<Device[]>([])
+  const [tablets, setTablets] = useState<Tablet[]>([])
+  const [stationTargets, setStationTargets] = useState<StationTarget[]>([])
+  const [operatorProfiles, setOperatorProfiles] = useState<OperatorProfile[]>([])
+  const [alerts, setAlerts] = useState<StationAlert[]>([])
   const [deviceMaps, setDeviceMaps] = useState<DeviceMap[]>([])
   const [dataFields, setDataFields] = useState<DataField[]>([])
   const [routes, setRoutes] = useState<RouteTemplate[]>([])
@@ -211,19 +268,26 @@ export function ProductionManagementPage() {
   const [departmentDraft, setDepartmentDraft] = useState({ code: '', name: '', color: '#2563eb' })
   const [stationDraft, setStationDraft] = useState({ department: '', code: '', name: '', max_workers: '2', is_handover: false, is_final: false })
   const [assignmentDraft, setAssignmentDraft] = useState({ station: '', user: '', role: 'operator' })
-  const [routeDraft, setRouteDraft] = useState({ name: '', product_group_key: '', station_ids: [] as string[] })
+  const [routeDraft, setRouteDraft] = useState({ name: '', product_group_key: '', station_ids: [] as string[], parallel_station_ids: [] as string[] })
   const [deviceDraft, setDeviceDraft] = useState({ station: '', name: '' })
+  const [tabletDraft, setTabletDraft] = useState({ station: '', name: '' })
+  const [targetDraft, setTargetDraft] = useState({ station: '', target_date: todayIso(), target_quantity: '', note: '' })
+  const [pinDraft, setPinDraft] = useState({ user: '', pin: '' })
+  const [alertDraft, setAlertDraft] = useState({ target_type: 'station', station: '', department: '', work_order: '', title: '', message: '', severity: 'warning' })
   const [mapDraft, setMapDraft] = useState({ device: '', source_path: '$.', target_key: '', target_type: 'text', is_required: false })
   const [fieldDraft, setFieldDraft] = useState({ station: 'global', key: '', label: '', field_type: 'text', source: 'manual' })
   const [ruleDraft, setRuleDraft] = useState({ name: '', scope: 'station', station: 'none', route: 'none', trigger_event: 'pi_event' })
 
   const load = async () => {
-    const [d, s, assignmentRows, userRows, dev, maps, fields, r, ruleRows, presetRows, l, cfg, dash] = await Promise.all([
+    const [d, s, assignmentRows, userRows, dev, tabletRows, profileRows, alertRows, maps, fields, r, ruleRows, presetRows, l, cfg, dash] = await Promise.all([
       fetchAll<Department>('/production/departments/'),
       fetchAll<Station>('/production/stations/'),
       fetchAll<StationAssignment>('/production/station-users/'),
       api.get('/auth/users/').then((res) => (Array.isArray(res.data) ? res.data : res.data?.results || [])).catch(() => []),
       fetchAll<Device>('/production/devices/'),
+      fetchAll<Tablet>('/production/tablets/').catch(() => []),
+      fetchAll<OperatorProfile>('/production/operator-profiles/').catch(() => []),
+      fetchAll<StationAlert>('/production/station-alerts/').catch(() => []),
       fetchAll<DeviceMap>('/production/device-maps/'),
       fetchAll<DataField>('/production/data-fields/'),
       fetchAll<RouteTemplate>('/production/routes/'),
@@ -238,6 +302,9 @@ export function ProductionManagementPage() {
     setStationAssignments(assignmentRows)
     setUsers(userRows)
     setDevices(dev)
+    setTablets(tabletRows)
+    setOperatorProfiles(profileRows)
+    setAlerts(alertRows)
     setDeviceMaps(maps)
     setDataFields(fields)
     setRoutes(r)
@@ -248,9 +315,22 @@ export function ProductionManagementPage() {
     setSummary(dash || {})
   }
 
+  const fetchTargets = async (date: string) => {
+    try {
+      const targets = await fetchAll<StationTarget>(`/production/station-targets/?target_date=${date}`)
+      setStationTargets(targets)
+    } catch {}
+  }
+
   useEffect(() => {
     void load()
   }, [])
+
+  useEffect(() => {
+    if (targetDraft.target_date) {
+      void fetchTargets(targetDraft.target_date)
+    }
+  }, [targetDraft.target_date])
 
   const saveSettings = async () => {
     await api.patch('/production/settings/', settings)
@@ -293,9 +373,14 @@ export function ProductionManagementPage() {
     await api.post('/production/routes/', {
       name: routeDraft.name,
       product_group_key: routeDraft.product_group_key,
-      step_inputs: routeDraft.station_ids.map((stationId, order) => ({ station: Number(stationId), order, is_required: true })),
+      step_inputs: routeDraft.station_ids.map((stationId, order) => ({
+        station: Number(stationId),
+        order,
+        is_required: true,
+        start_policy: routeDraft.parallel_station_ids.includes(stationId) ? 'parallel' : 'after_previous',
+      })),
     })
-    setRouteDraft({ name: '', product_group_key: '', station_ids: [] })
+    setRouteDraft({ name: '', product_group_key: '', station_ids: [], parallel_station_ids: [] })
     toast({ title: 'Rota oluşturuldu' })
     await load()
   }
@@ -304,6 +389,54 @@ export function ProductionManagementPage() {
     await api.post('/production/devices/', { station: Number(deviceDraft.station), name: deviceDraft.name })
     setDeviceDraft({ station: '', name: '' })
     toast({ title: 'Cihaz oluşturuldu' })
+    await load()
+  }
+
+  const createTablet = async () => {
+    await api.post('/production/tablets/', { station: Number(tabletDraft.station), name: tabletDraft.name })
+    setTabletDraft({ station: '', name: '' })
+    toast({ title: 'İstasyon tableti oluşturuldu' })
+    await load()
+  }
+
+  const saveStationTarget = async () => {
+    const existing = stationTargets.find((item) => String(item.station) === targetDraft.station && item.target_date === targetDraft.target_date)
+    const payload = {
+      station: Number(targetDraft.station),
+      target_date: targetDraft.target_date,
+      target_quantity: targetDraft.target_quantity || 0,
+      note: targetDraft.note,
+    }
+    if (existing) await api.patch(`/production/station-targets/${existing.id}/`, payload)
+    else await api.post('/production/station-targets/', payload)
+    toast({ title: 'Günlük istasyon hedefi kaydedildi' })
+    await fetchTargets(targetDraft.target_date)
+    setTargetDraft({ station: '', target_date: targetDraft.target_date, target_quantity: '', note: '' })
+    await load()
+  }
+
+  const saveOperatorPin = async () => {
+    const existing = operatorProfiles.find((item) => String(item.user) === pinDraft.user)
+    const payload = { user: Number(pinDraft.user), pin: pinDraft.pin, is_active: true }
+    if (existing) await api.patch(`/production/operator-profiles/${existing.id}/`, payload)
+    else await api.post('/production/operator-profiles/', payload)
+    setPinDraft({ user: '', pin: '' })
+    toast({ title: 'Üretim PIN’i kaydedildi' })
+    await load()
+  }
+
+  const sendAlert = async () => {
+    await api.post('/production/station-alerts/', {
+      target_type: alertDraft.target_type,
+      station: alertDraft.target_type === 'station' ? Number(alertDraft.station) : null,
+      department: alertDraft.target_type === 'department' ? Number(alertDraft.department) : null,
+      work_order: alertDraft.target_type === 'work_order' ? Number(alertDraft.work_order) : null,
+      title: alertDraft.title,
+      message: alertDraft.message,
+      severity: alertDraft.severity,
+    })
+    setAlertDraft({ target_type: 'station', station: '', department: '', work_order: '', title: '', message: '', severity: 'warning' })
+    toast({ title: 'İstasyon bildirimi gönderildi' })
     await load()
   }
 
@@ -447,10 +580,54 @@ export function ProductionManagementPage() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader><CardTitle>Günlük istasyon hedefleri</CardTitle></CardHeader>
+        <CardContent className="grid gap-4 xl:grid-cols-[420px_1fr]">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-1">
+            <Select value={targetDraft.station} onValueChange={(value) => setTargetDraft((current) => {
+              const existing = stationTargets.find((item) => String(item.station) === value && item.target_date === current.target_date)
+              return { ...current, station: value, target_quantity: existing ? String(existing.target_quantity) : '', note: existing?.note || '' }
+            })}>
+              <SelectTrigger><SelectValue placeholder="İstasyon seç" /></SelectTrigger>
+              <SelectContent>{stations.map((st) => <SelectItem key={st.id} value={String(st.id)}>{st.code} - {st.name}</SelectItem>)}</SelectContent>
+            </Select>
+            <Input type="date" value={targetDraft.target_date} onChange={(e) => setTargetDraft((current) => ({ ...current, target_date: e.target.value }))} />
+            <Input placeholder="Günlük hedef adet" inputMode="decimal" value={targetDraft.target_quantity} onChange={(e) => setTargetDraft((current) => ({ ...current, target_quantity: e.target.value }))} />
+            <Input placeholder="Not" value={targetDraft.note} onChange={(e) => setTargetDraft((current) => ({ ...current, note: e.target.value }))} />
+            <Button onClick={saveStationTarget} disabled={!targetDraft.station || !targetDraft.target_date}>
+              <Save className="mr-2 h-4 w-4" /> Hedefi kaydet
+            </Button>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            {stations.map((station) => {
+              const target = stationTargets.find((item) => item.station === station.id)
+              return (
+                <button
+                  key={station.id}
+                  className="rounded-lg border bg-muted/10 p-3 text-left hover:bg-muted/30"
+                  onClick={() => setTargetDraft({
+                    station: String(station.id),
+                    target_date: target?.target_date || targetDraft.target_date,
+                    target_quantity: target ? String(target.target_quantity) : '',
+                    note: target?.note || '',
+                  })}
+                >
+                  <p className="font-semibold">{station.code}</p>
+                  <p className="text-xs text-muted-foreground">{station.name}</p>
+                  <p className="mt-2 text-2xl font-bold">{formatNumber(n(target?.target_quantity))}</p>
+                </button>
+              )
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
       <Tabs defaultValue="departments" className="space-y-3">
         <TabsList className="flex flex-wrap justify-start">
           <TabsTrigger value="departments">Bölümler</TabsTrigger>
           <TabsTrigger value="stations">İstasyonlar</TabsTrigger>
+          <TabsTrigger value="tablets">Tablet & PIN</TabsTrigger>
+          <TabsTrigger value="alerts">Bildirimler</TabsTrigger>
           <TabsTrigger value="devices">Cihaz & Veri</TabsTrigger>
           <TabsTrigger value="flow">Akış Tasarımcısı</TabsTrigger>
           <TabsTrigger value="presets">Şablonlar</TabsTrigger>
@@ -564,6 +741,147 @@ export function ProductionManagementPage() {
           </div>
         </TabsContent>
 
+        <TabsContent value="tablets">
+          <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
+            <div className="space-y-4">
+              <Card>
+                <CardHeader><CardTitle>İstasyon tableti oluştur</CardTitle></CardHeader>
+                <CardContent className="space-y-3">
+                  <Select value={tabletDraft.station} onValueChange={(value) => setTabletDraft((v) => ({ ...v, station: value }))}>
+                    <SelectTrigger><SelectValue placeholder="İstasyon seç" /></SelectTrigger>
+                    <SelectContent>{stations.map((st) => <SelectItem key={st.id} value={String(st.id)}>{st.code} - {st.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                  <Input placeholder="Tablet adı" value={tabletDraft.name} onChange={(e) => setTabletDraft((v) => ({ ...v, name: e.target.value }))} />
+                  <Button onClick={createTablet} disabled={!tabletDraft.station || !tabletDraft.name}>
+                    <Monitor className="mr-2 h-4 w-4" /> Tablet ekle
+                  </Button>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle>Üretim PIN’i</CardTitle></CardHeader>
+                <CardContent className="space-y-3">
+                  <Select value={pinDraft.user} onValueChange={(value) => setPinDraft((current) => ({ ...current, user: value }))}>
+                    <SelectTrigger><SelectValue placeholder="Kullanıcı seç" /></SelectTrigger>
+                    <SelectContent>{users.map((user) => <SelectItem key={user.id} value={String(user.id)}>{userLabel(user)}{user.role ? ` · ${user.role}` : ''}</SelectItem>)}</SelectContent>
+                  </Select>
+                  <Input type="password" placeholder="Tablet PIN" value={pinDraft.pin} onChange={(e) => setPinDraft((current) => ({ ...current, pin: e.target.value }))} />
+                  <Button onClick={saveOperatorPin} disabled={!pinDraft.user || !pinDraft.pin}>PIN kaydet</Button>
+                </CardContent>
+              </Card>
+            </div>
+            <Card>
+              <CardHeader><CardTitle>Tabletler ve operatör PIN durumu</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-2">
+                  {tablets.map((tablet) => (
+                    <div key={tablet.id} className="rounded-lg border p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">{tablet.name}</p>
+                          <p className="text-xs text-muted-foreground">{tablet.station_code} · {tablet.station_name}</p>
+                        </div>
+                        <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/tablets/${tablet.id}/`, tablet.name)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="mt-3 flex items-center gap-2 rounded-md bg-muted/50 p-2 text-xs">
+                        <code className="min-w-0 flex-1 truncate">{tablet.token}</code>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => {
+                            navigator.clipboard?.writeText(`${window.location.origin}/erp/production/tablet?token=${tablet.token}`)
+                            toast({ title: 'Tablet linki kopyalandı' })
+                          }}
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                  {users.filter((user) => stationAssignments.some((assignment) => assignment.user === user.id && assignment.is_active)).map((user) => {
+                    const profile = operatorProfiles.find((item) => item.user === user.id)
+                    return (
+                      <div key={user.id} className="flex items-center justify-between rounded-md border p-3 text-sm">
+                        <span>{userLabel(user)}</span>
+                        <Badge variant={profile?.has_pin ? 'secondary' : 'outline'}>{profile?.has_pin ? 'PIN var' : 'PIN yok'}</Badge>
+                      </div>
+                    )
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="alerts">
+          <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
+            <Card>
+              <CardHeader><CardTitle>Yönetici bildirimi gönder</CardTitle></CardHeader>
+              <CardContent className="space-y-3">
+                <Select value={alertDraft.target_type} onValueChange={(value) => setAlertDraft((current) => ({ ...current, target_type: value }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="station">İstasyon</SelectItem>
+                    <SelectItem value="department">Bölüm</SelectItem>
+                    <SelectItem value="work_order">İş emri</SelectItem>
+                  </SelectContent>
+                </Select>
+                {alertDraft.target_type === 'station' && (
+                  <Select value={alertDraft.station} onValueChange={(value) => setAlertDraft((current) => ({ ...current, station: value }))}>
+                    <SelectTrigger><SelectValue placeholder="İstasyon seç" /></SelectTrigger>
+                    <SelectContent>{stations.map((st) => <SelectItem key={st.id} value={String(st.id)}>{st.code} - {st.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                )}
+                {alertDraft.target_type === 'department' && (
+                  <Select value={alertDraft.department} onValueChange={(value) => setAlertDraft((current) => ({ ...current, department: value }))}>
+                    <SelectTrigger><SelectValue placeholder="Bölüm seç" /></SelectTrigger>
+                    <SelectContent>{departments.map((dep) => <SelectItem key={dep.id} value={String(dep.id)}>{dep.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                )}
+                {alertDraft.target_type === 'work_order' && (
+                  <Input placeholder="İş emri ID" value={alertDraft.work_order} onChange={(e) => setAlertDraft((current) => ({ ...current, work_order: e.target.value }))} />
+                )}
+                <Input placeholder="Başlık" value={alertDraft.title} onChange={(e) => setAlertDraft((current) => ({ ...current, title: e.target.value }))} />
+                <Textarea placeholder="Mesaj" value={alertDraft.message} onChange={(e) => setAlertDraft((current) => ({ ...current, message: e.target.value }))} />
+                <Select value={alertDraft.severity} onValueChange={(value) => setAlertDraft((current) => ({ ...current, severity: value }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="info">Bilgi</SelectItem>
+                    <SelectItem value="warning">Uyarı</SelectItem>
+                    <SelectItem value="critical">Kritik</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button onClick={sendAlert} disabled={!alertDraft.title || !alertDraft.message}>
+                  <Bell className="mr-2 h-4 w-4" /> Gönder
+                </Button>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>Son bildirimler</CardTitle></CardHeader>
+              <CardContent className="space-y-3">
+                {alerts.map((alert) => (
+                  <div key={alert.id} className="rounded-lg border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold">{alert.title}</p>
+                        <p className="text-sm text-muted-foreground">{alert.message}</p>
+                      </div>
+                      <Badge variant={alert.severity === 'critical' ? 'destructive' : 'outline'}>{alert.severity}</Badge>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      Hedef: {alert.station_code || alert.department_name || alert.work_order_number || alert.target_type} · Okundu: {alert.acks?.length || 0}
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
         <TabsContent value="devices">
           <div className="grid gap-4 xl:grid-cols-3">
             <Card>
@@ -653,13 +971,31 @@ export function ProductionManagementPage() {
                 <Input placeholder="Ürün grubu anahtarı" value={routeDraft.product_group_key} onChange={(e) => setRouteDraft((v) => ({ ...v, product_group_key: e.target.value }))} />
                 <div className="grid gap-2">
                   {stations.map((st) => (
-                    <label key={st.id} className="flex items-center justify-between rounded-md border p-2 text-sm">
-                      <span>{st.code} · {st.name}</span>
-                      <Switch
-                        checked={routeDraft.station_ids.includes(String(st.id))}
-                        onCheckedChange={(checked) => setRouteDraft((v) => ({ ...v, station_ids: checked ? [...v.station_ids, String(st.id)] : v.station_ids.filter((id) => id !== String(st.id)) }))}
-                      />
-                    </label>
+                    <div key={st.id} className="rounded-md border p-3 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-medium">{st.code} · {st.name}</span>
+                        <Switch
+                          checked={routeDraft.station_ids.includes(String(st.id))}
+                          onCheckedChange={(checked) => setRouteDraft((v) => ({
+                            ...v,
+                            station_ids: checked ? [...v.station_ids, String(st.id)] : v.station_ids.filter((id) => id !== String(st.id)),
+                            parallel_station_ids: checked ? v.parallel_station_ids : v.parallel_station_ids.filter((id) => id !== String(st.id)),
+                          }))}
+                        />
+                      </div>
+                      {routeDraft.station_ids.includes(String(st.id)) && (
+                        <label className="mt-3 flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-xs">
+                          <span>Paralel başlayabilir</span>
+                          <Switch
+                            checked={routeDraft.parallel_station_ids.includes(String(st.id))}
+                            onCheckedChange={(checked) => setRouteDraft((v) => ({
+                              ...v,
+                              parallel_station_ids: checked ? [...v.parallel_station_ids, String(st.id)] : v.parallel_station_ids.filter((id) => id !== String(st.id)),
+                            }))}
+                          />
+                        </label>
+                      )}
+                    </div>
                   ))}
                 </div>
                 <Button onClick={createRoute} disabled={!routeDraft.name || !routeDraft.product_group_key || routeDraft.station_ids.length === 0}><Route className="mr-2 h-4 w-4" /> Rota kaydet</Button>
@@ -691,6 +1027,17 @@ export function ProductionManagementPage() {
                         <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/routes/${route.id}/`, route.name)} title="Rotayı sil">
                           <Trash2 className="h-4 w-4" />
                         </Button>
+                      </div>
+                      <div className="mt-4 space-y-2">
+                        {(route.steps || []).map((step, idx) => (
+                          <div key={step.id} className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 p-2 text-xs">
+                            <span className="font-medium">{idx + 1}. {step.station_code} · {step.station_name}</span>
+                            <div className="flex flex-wrap justify-end gap-1">
+                              {step.start_policy === 'parallel' ? <Badge variant="secondary">Paralel başlayabilir</Badge> : <Badge variant="outline">Sırayla</Badge>}
+                              {step.department_name && <Badge variant="outline">{step.department_name}</Badge>}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </CardContent>
                   </Card>
@@ -736,16 +1083,20 @@ export function ProductionWorkOrdersPage() {
   const workOrderImportRef = useRef<HTMLInputElement | null>(null)
   const [orders, setOrders] = useState<WorkOrder[]>([])
   const [contracts, setContracts] = useState<any[]>([])
+  const [tablets, setTablets] = useState<Tablet[]>([])
+  const [stepTargetDraft, setStepTargetDraft] = useState<Record<number, string>>({})
   const [contractId, setContractId] = useState('')
   const [query, setQuery] = useState('')
 
   const load = async () => {
-    const [wo, qs] = await Promise.all([
+    const [wo, qs, tabletRows] = await Promise.all([
       fetchAll<WorkOrder>('/production/work-orders/'),
       fetchAll<any>('/quotes/?document_type=Contract&summary=1'),
+      fetchAll<Tablet>('/production/tablets/'),
     ])
     setOrders(wo)
     setContracts(qs.filter((item) => item.status === 'Approved' || item.status === 'Onaylandı'))
+    setTablets(tabletRows)
   }
 
   useEffect(() => {
@@ -778,6 +1129,29 @@ export function ProductionWorkOrdersPage() {
     form.append('file', file)
     await api.post('/production/work-orders/import/', form, { headers: { 'Content-Type': 'multipart/form-data' } })
     toast({ title: 'İş emirleri içe aktarıldı' })
+    await load()
+  }
+
+  const tabletsForStep = (step: StepProgress) => tablets.filter((tablet) => tablet.station_code === step.station_code)
+
+  const assignStepToTablet = async (step: StepProgress) => {
+    const tabletId = stepTargetDraft[step.id]
+    if (!tabletId) return
+    await api.post('/production/step-tablet-assignments/', {
+      step: step.id,
+      tablet: Number(tabletId),
+      priority: 0,
+      is_pinned: true,
+    })
+    setStepTargetDraft((current) => ({ ...current, [step.id]: '' }))
+    toast({ title: 'İş bu tablete özel olarak atandı' })
+    await load()
+  }
+
+  const clearStepTabletAssignments = async (step: StepProgress) => {
+    const assignments = step.assigned_tablets || []
+    await Promise.all(assignments.map((item) => api.delete(`/production/step-tablet-assignments/${item.id}/`)))
+    toast({ title: 'İş tüm istasyon tabletlerine açıldı' })
     await load()
   }
 
@@ -854,7 +1228,42 @@ export function ProductionWorkOrdersPage() {
                           <span className="font-medium">{step.station_code}</span>
                           <Badge variant="outline">{statusLabel[step.status] || step.status}</Badge>
                         </div>
+                        <div className="mt-2 flex flex-wrap gap-1 text-xs">
+                          {step.start_policy === 'parallel' ? <Badge variant="secondary">Paralel</Badge> : <Badge variant="outline">Sırayla</Badge>}
+                          {(step.assigned_tablets || []).length ? <Badge>Tablete özel</Badge> : <Badge variant="outline">Tüm tabletler</Badge>}
+                        </div>
                         <div className="mt-2"><ProgressBar done={step.completed_quantity} target={step.target_quantity} /></div>
+                        <div className="mt-3 space-y-2 border-t pt-2">
+                          {(step.assigned_tablets || []).length > 0 && (
+                            <div className="space-y-1 text-xs text-muted-foreground">
+                              {(step.assigned_tablets || []).map((assignment) => (
+                                <div key={assignment.id} className="flex items-center justify-between gap-2 rounded bg-muted/40 px-2 py-1">
+                                  <span>{assignment.tablet_name}</span>
+                                  {assignment.is_pinned && <Badge variant="secondary">Öne çıkar</Badge>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <div className="flex flex-col gap-2">
+                            <Select value={stepTargetDraft[step.id] || ''} onValueChange={(value) => setStepTargetDraft((current) => ({ ...current, [step.id]: value }))}>
+                              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Belirli tablete ata" /></SelectTrigger>
+                              <SelectContent>
+                                {tabletsForStep(step).map((tablet) => (
+                                  <SelectItem key={tablet.id} value={String(tablet.id)}>{tablet.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <div className="flex gap-2">
+                              <Button size="sm" variant="outline" className="h-8 flex-1 text-xs" disabled={!stepTargetDraft[step.id]} onClick={() => assignStepToTablet(step)}>
+                                Tablete ata
+                              </Button>
+                              <Button size="sm" variant="ghost" className="h-8 flex-1 text-xs" disabled={!(step.assigned_tablets || []).length} onClick={() => clearStepTabletAssignments(step)}>
+                                Tüm tabletler
+                              </Button>
+                            </div>
+                            {!tabletsForStep(step).length && <p className="text-[11px] text-muted-foreground">Bu istasyona bağlı tablet yok.</p>}
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1017,6 +1426,387 @@ export function ProductionConsolePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+function playTabletAlarm() {
+  try {
+    const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext
+    const ctx = new AudioContextCtor()
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.type = 'sine'
+    osc.frequency.value = 880
+    gain.gain.setValueAtTime(0.001, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.04)
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.7)
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start()
+    osc.stop(ctx.currentTime + 0.75)
+    window.setTimeout(() => ctx.close(), 900)
+  } catch {
+    // Browser may block audio until the first user interaction.
+  }
+}
+
+export function ProductionTabletPage() {
+  const { toast } = useToast()
+  const params = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '')
+  const initialToken = params.get('token') || localStorage.getItem('production-tablet-token') || ''
+  const [token, setToken] = useState(initialToken)
+  const [ctx, setCtx] = useState<TabletContext>({})
+  const [selectedLineId, setSelectedLineId] = useState('')
+  const [loginSlot, setLoginSlot] = useState<number | null>(null)
+  const [loginUser, setLoginUser] = useState('')
+  const [pin, setPin] = useState('')
+  const [closingSlot, setClosingSlot] = useState<TabletSlot | null>(null)
+  const [closingQty, setClosingQty] = useState('')
+  const [closingPin, setClosingPin] = useState('')
+  const [note, setNote] = useState('')
+  const [checkpointOpen, setCheckpointOpen] = useState(false)
+  const [checkpointTitle, setCheckpointTitle] = useState('')
+  const [checkpointTotal, setCheckpointTotal] = useState('')
+  const [checkpointNote, setCheckpointNote] = useState('')
+  const [activeAlert, setActiveAlert] = useState<any | null>(null)
+  const seenAlerts = useRef<Set<number>>(new Set())
+  const checkpointActionRef = useRef<((total: string, note: string) => Promise<void>) | null>(null)
+
+  const load = async () => {
+    if (!token) return
+    localStorage.setItem('production-tablet-token', token)
+    const response = await api.get('/production/tablet/context/', { params: { token } })
+    const data = response.data || {}
+    setCtx(data)
+    if (!selectedLineId && data.work_items?.[0]) setSelectedLineId(String(data.work_items[0].line_id))
+    const alert = (data.alerts || []).find((item: any) => !seenAlerts.current.has(item.id))
+    if (alert) {
+      seenAlerts.current.add(alert.id)
+      setActiveAlert(alert)
+      playTabletAlarm()
+    }
+  }
+
+  useEffect(() => {
+    void load()
+    const timer = window.setInterval(() => void load(), 5000)
+    return () => window.clearInterval(timer)
+  }, [token])
+
+  const slots = Array.from({ length: ctx.station?.max_workers || 1 }, (_, index) => ctx.slots?.find((slot) => Number(slot.slot_index) === index) || null)
+  const selectedWork = ctx.work_items?.find((item) => String(item.line_id) === selectedLineId) || ctx.work_items?.[0]
+  const activeSlots = slots.filter(Boolean) as TabletSlot[]
+  const startedSlots = activeSlots.filter((slot) => slot.status === 'started')
+  const suggestedCheckpoint = String(n(ctx.active_window?.start_total) + n(ctx.active_window?.machine_delta) || n(selectedWork?.machine_quantity) || 0)
+
+  const requestCheckpoint = (title: string, action: (total: string, note: string) => Promise<void>) => {
+    setCheckpointTitle(title)
+    setCheckpointTotal(suggestedCheckpoint)
+    setCheckpointNote('')
+    checkpointActionRef.current = action
+    setCheckpointOpen(true)
+  }
+
+  const submitCheckpoint = async () => {
+    if (!checkpointActionRef.current || checkpointTotal === '') return
+    await checkpointActionRef.current(checkpointTotal, checkpointNote)
+    checkpointActionRef.current = null
+    setCheckpointOpen(false)
+    setCheckpointTotal('')
+    setCheckpointNote('')
+    await load()
+  }
+
+  const login = async () => {
+    if (loginSlot === null || !selectedWork) return
+    const perform = async (total?: string, checkpointNoteValue?: string) => {
+      await api.post('/production/tablet/login-slot/', {
+        token,
+        user_id: Number(loginUser),
+        pin,
+        line_id: selectedWork.line_id,
+        slot_index: loginSlot,
+        checkpoint_total: total || undefined,
+        note: checkpointNoteValue || '',
+      })
+      setLoginSlot(null)
+      setLoginUser('')
+      setPin('')
+      toast({ title: 'Oturum açıldı' })
+    }
+    if (activeSlots.length) {
+      requestCheckpoint('Yeni çalışan girmeden önce mevcut ortak üretim toplamını yazın', perform)
+      return
+    }
+    await perform()
+    await load()
+  }
+
+  const tabletAction = async (endpoint: string, session: TabletSlot) => {
+    const perform = async (total?: string, checkpointNoteValue?: string) => {
+      await api.post(`/production/tablet/${endpoint}/`, {
+        token,
+        session_id: session.id,
+        checkpoint_total: total || undefined,
+        note: checkpointNoteValue || '',
+      })
+      toast({ title: endpoint.includes('start') ? 'Mola başladı' : 'İşe devam edildi' })
+      await load()
+    }
+    const needsCheckpoint = endpoint.includes('break/start') || (endpoint.includes('break/end') && startedSlots.length > 0)
+    if (needsCheckpoint) {
+      requestCheckpoint(endpoint.includes('start') ? 'Molaya çıkmadan önce ortak üretim toplamını yazın' : 'Moladan dönüşte mevcut çalışan toplamını yazın', perform)
+      return
+    }
+    await perform()
+  }
+
+  const logout = async () => {
+    if (!closingSlot) return
+    await api.post('/production/tablet/logout-slot/', {
+      token,
+      session_id: closingSlot.id,
+      user_id: closingSlot.user_id,
+      pin: closingPin,
+      declared_good_quantity: closingQty,
+      note,
+    })
+    setClosingSlot(null)
+    setClosingQty('')
+    setClosingPin('')
+    setNote('')
+    toast({ title: 'Çıkış yapıldı' })
+    await load()
+  }
+
+  const completeWorkItem = async () => {
+    if (!selectedWork) return
+    const perform = async (total?: string, checkpointNoteValue?: string) => {
+      await api.post('/production/tablet/complete-work-item/', {
+        token,
+        line_id: selectedWork.line_id,
+        checkpoint_total: total || undefined,
+        note: checkpointNoteValue || 'Tablet üzerinden iş emri tamamlandı.',
+      })
+      toast({ title: 'İş emri tamamlandı, sıradaki iş kuyruğa alınacak' })
+      await load()
+    }
+    if (activeSlots.length) {
+      requestCheckpoint('İşi tamamlamadan önce ortak üretim toplamını yazın', perform)
+      return
+    }
+    await perform()
+  }
+
+  const ackAlert = async () => {
+    if (!activeAlert) return
+    await api.post(`/production/station-alerts/${activeAlert.id}/ack/`, { token })
+    setActiveAlert(null)
+    await load()
+  }
+
+  if (!token) {
+    return (
+      <div className="mx-auto flex min-h-[70vh] max-w-xl items-center justify-center">
+        <Card className="w-full">
+          <CardHeader><CardTitle>İstasyon tableti</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <Input placeholder="Tablet tokeni" value={token} onChange={(e) => setToken(e.target.value)} />
+            <Button onClick={load} className="w-full">Tableti aç</Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen space-y-4 bg-background p-4">
+      <div className="rounded-xl border bg-card p-5 text-center">
+        <p className="text-sm uppercase tracking-[0.3em] text-muted-foreground">{ctx.station?.department_name || 'İmalat'}</p>
+        <h1 className="mt-2 text-4xl font-black tracking-wide md:text-6xl">{ctx.station?.code} · {ctx.station?.name}</h1>
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          <MetricBlock label="Günlük hedef" value={formatNumber(n(ctx.daily_target?.target_quantity))} />
+          <MetricBlock label="Bugün yapılan" value={formatNumber(n(ctx.daily_target?.actual_quantity))} />
+          <MetricBlock label="Kalan" value={formatNumber(n(ctx.daily_target?.remaining_quantity))} />
+        </div>
+      </div>
+
+      <Card>
+        <CardContent className="grid gap-3 pt-6 lg:grid-cols-[1fr_280px] lg:items-end">
+          <div className="space-y-2">
+            <Label>Aktif iş emri</Label>
+            <Select value={selectedLineId} onValueChange={setSelectedLineId}>
+              <SelectTrigger className="h-14 text-lg"><SelectValue placeholder="İş emri seç" /></SelectTrigger>
+              <SelectContent>
+                {(ctx.work_items || []).map((item) => (
+                  <SelectItem key={item.line_id} value={String(item.line_id)}>
+                    {item.work_order_number} · {item.product_sku} · {item.product_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Button variant="outline" onClick={load} className="h-14"><RefreshCw className="mr-2 h-4 w-4" /> Yenile</Button>
+            <Button onClick={completeWorkItem} disabled={!selectedWork} className="h-14"><CheckCircle2 className="mr-2 h-4 w-4" /> İşi tamamla</Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {selectedWork && (
+        <Card>
+          <CardContent className="grid gap-4 pt-6 md:grid-cols-5">
+            <div className="md:col-span-2">
+              <p className="text-2xl font-bold">{selectedWork.product_name}</p>
+              <p className="text-muted-foreground">{selectedWork.detail_1 || '-'} / {selectedWork.detail_2 || '-'}</p>
+            </div>
+            <MetricBlock label="Hedef" value={formatNumber(n(selectedWork.target_quantity))} />
+            <MetricBlock label="Resmi sağlam" value={formatNumber(n(selectedWork.completed_quantity))} />
+            <MetricBlock label="Makine" value={formatNumber(n(selectedWork.machine_quantity))} />
+            <MetricBlock label="Pencere" value={formatNumber(n(ctx.active_window?.machine_delta))} />
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+        {slots.map((slot, index) => (
+          <Card key={index} className="min-h-72">
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                <span>Slot {index + 1}</span>
+                {slot?.status === 'paused' && <Badge variant="outline">Molada</Badge>}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {slot ? (
+                <>
+                  <div>
+                    <p className="text-2xl font-bold">{slot.user_name}</p>
+                    <p className="text-sm text-muted-foreground">{slot.work_order_number} · {slot.product_sku}</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <MetricBlock label="Oturum makine" value={formatNumber(n(slot.machine_quantity))} />
+                    <MetricBlock label="Bugün kişi" value={formatNumber(n(ctx.operators?.find((item) => item.id === slot.user_id)?.today_total))} />
+                  </div>
+                  <MetricBlock label="Mola sn" value={formatNumber(slot.break_seconds || 0)} />
+                  <div className="grid gap-2">
+                    {slot.status === 'paused' ? (
+                      <Button variant="outline" onClick={() => tabletAction('break/end', slot)}>Molayı bitir</Button>
+                    ) : (
+                      <Button variant="outline" onClick={() => window.confirm('Molaya çıkılsın mı?') && tabletAction('break/start', slot)}>
+                        <Pause className="mr-2 h-4 w-4" /> Mola
+                      </Button>
+                    )}
+                    <Button
+                      variant="destructive"
+                      onClick={() => {
+                        setClosingSlot(slot)
+                        setClosingQty(String(slot.machine_quantity || 0))
+                        setClosingPin('')
+                        setNote('')
+                      }}
+                    >
+                      <LogOut className="mr-2 h-4 w-4" /> Çıkış yap
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <button
+                  className="flex h-48 w-full flex-col items-center justify-center rounded-lg border border-dashed text-muted-foreground hover:bg-muted/40"
+                  onClick={() => setLoginSlot(index)}
+                >
+                  <Plus className="h-12 w-12" />
+                  <span className="mt-2 text-lg font-semibold">Çalışan ekle</span>
+                </button>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Card>
+        <CardHeader><CardTitle>Bugünkü kişi toplamları</CardTitle></CardHeader>
+        <CardContent className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+          {(ctx.operators || []).map((operator) => (
+            <div key={operator.id} className="rounded-md border p-3">
+              <p className="font-medium">{operator.name}</p>
+              <p className="text-2xl font-bold">{formatNumber(n(operator.today_total))}</p>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Dialog open={loginSlot !== null} onOpenChange={(open) => !open && setLoginSlot(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Slot {loginSlot !== null ? loginSlot + 1 : ''} çalışan girişi</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <Select value={loginUser} onValueChange={setLoginUser}>
+              <SelectTrigger><SelectValue placeholder="Çalışan seç" /></SelectTrigger>
+              <SelectContent>{(ctx.operators || []).map((operator) => <SelectItem key={operator.id} value={String(operator.id)}>{operator.name}{operator.has_pin ? '' : ' · PIN yok'}</SelectItem>)}</SelectContent>
+            </Select>
+            <Input type="password" placeholder="Üretim PIN’i" value={pin} onChange={(e) => setPin(e.target.value)} />
+          </div>
+          <DialogFooter><Button onClick={login} disabled={!loginUser || !pin || !selectedWork}>Başlat</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!closingSlot} onOpenChange={(open) => !open && setClosingSlot(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{closingSlot?.user_name} çıkış</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="grid gap-2">
+              <Label>Yaptığı sağlam adet</Label>
+              <Input value={closingQty} onChange={(e) => setClosingQty(e.target.value)} inputMode="decimal" />
+            </div>
+            <Input type="password" placeholder="Üretim PIN’i" value={closingPin} onChange={(e) => setClosingPin(e.target.value)} />
+            <Textarea placeholder="Not" value={note} onChange={(e) => setNote(e.target.value)} />
+          </div>
+          <DialogFooter><Button onClick={logout} disabled={!closingQty || !closingPin}>Çıkışı tamamla</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={checkpointOpen} onOpenChange={(open) => {
+        if (!open) {
+          checkpointActionRef.current = null
+          setCheckpointOpen(false)
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{checkpointTitle || 'Ortak üretim checkpoint’i'}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+              Bu değer iş emrine bir kez yazılır. Aktif çalışanların günlük kişi toplamı ise kendi oturumlarındaki son beyan olarak güncellenir.
+            </div>
+            <div className="grid gap-2">
+              <Label>Ortak üretim toplamı</Label>
+              <Input value={checkpointTotal} onChange={(e) => setCheckpointTotal(e.target.value)} inputMode="decimal" autoFocus />
+            </div>
+            <Textarea placeholder="Not" value={checkpointNote} onChange={(e) => setCheckpointNote(e.target.value)} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCheckpointOpen(false)}>Vazgeç</Button>
+            <Button onClick={submitCheckpoint} disabled={checkpointTotal === ''}>Checkpoint’i kaydet</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!activeAlert}>
+        <DialogContent className="border-amber-400">
+          <DialogHeader><DialogTitle className="flex items-center gap-2 text-2xl"><Volume2 className="h-6 w-6 text-amber-500" /> {activeAlert?.title}</DialogTitle></DialogHeader>
+          <p className="text-lg">{activeAlert?.message}</p>
+          <DialogFooter><Button onClick={ackAlert}><CheckCircle2 className="mr-2 h-4 w-4" /> Okudum</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+function MetricBlock({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-lg border bg-muted/20 p-3">
+      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="mt-1 text-2xl font-bold">{value}</p>
     </div>
   )
 }
