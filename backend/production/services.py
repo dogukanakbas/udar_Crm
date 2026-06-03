@@ -868,7 +868,7 @@ def _participant_today_total(organization, user, day):
     for session_id in session_ids:
         total += (
             ProductionCountingParticipant.objects.filter(organization=organization, session_id=session_id)
-            .aggregate(total=Max('credited_quantity'))['total']
+            .aggregate(total=Sum('credited_quantity'))['total']
             or Decimal('0')
         )
     return total
@@ -942,10 +942,10 @@ def _close_counting_window(*, tablet, step, declared_totals, reason='manual', no
         clean_totals[int(key)] = _decimal(value, 'Ortak üretim toplamı')
     if not clean_totals:
         raise ProductionError('Checkpoint icin en az bir uretim toplamı girilmelidir.')
-    close_total = max(clean_totals.values())
-    if close_total < window.start_total:
-        raise ProductionError('Kapanis toplamı pencere baslangicindan kucuk olamaz.')
-    official_delta = close_total - window.start_total
+    official_delta = max(clean_totals.values())
+    if official_delta < 0:
+        raise ProductionError('Üretim miktarı 0\'dan küçük olamaz.')
+    close_total = window.start_total + official_delta
     window.status = 'closed'
     window.closed_at = timezone.now()
     window.close_total = close_total
@@ -956,15 +956,15 @@ def _close_counting_window(*, tablet, step, declared_totals, reason='manual', no
 
     participants = list(window.participants.select_related('session', 'user').select_for_update())
     for participant in participants:
-        declared = clean_totals.get(participant.session_id, close_total)
+        declared = clean_totals.get(participant.session_id, official_delta)
         participant.declared_total = declared
         participant.credited_quantity = declared
-        participant.discrepancy_quantity = declared - close_total
+        participant.discrepancy_quantity = declared - official_delta
         participant.discrepancy_status = 'needs_review' if participant.discrepancy_quantity != 0 else 'none'
         participant.note = note or participant.note
         participant.save(update_fields=['declared_total', 'credited_quantity', 'discrepancy_quantity', 'discrepancy_status', 'note'])
         session = participant.session
-        session.declared_good_quantity = max(session.declared_good_quantity, participant.credited_quantity)
+        session.declared_good_quantity = ProductionCountingParticipant.objects.filter(session=session).aggregate(total=Sum('credited_quantity'))['total'] or Decimal('0')
         session.discrepancy_quantity = max(session.discrepancy_quantity, abs(participant.discrepancy_quantity))
         if participant.discrepancy_status == 'needs_review':
             session.discrepancy_status = 'needs_review'
@@ -1476,9 +1476,10 @@ def tablet_login_slot(*, token, user_id, pin, line_id=None, slot_index, start_co
     else:
         line, station, step = None, tablet.station, None
     active_before = _active_tablet_sessions(tablet, step=step)
+    closed_win = None
     if active_before:
         totals = _require_checkpoint_payload(active_before, checkpoint_total=checkpoint_total, participant_totals=participant_totals)
-        _close_counting_window(tablet=tablet, step=step, declared_totals=totals, reason='login', note=note)
+        closed_win = _close_counting_window(tablet=tablet, step=step, declared_totals=totals, reason='login', note=note)
     session = start_work_session(
         organization=tablet.organization,
         user=user,
@@ -1490,7 +1491,8 @@ def tablet_login_slot(*, token, user_id, pin, line_id=None, slot_index, start_co
         slot_index=slot_index,
     )
     active_after = _active_tablet_sessions(tablet, step=step)
-    _open_window_for_tablet(tablet, step, start_total=checkpoint_total if active_before else Decimal('0'), sessions=[item for item in active_after if item.status == 'started'], note=note)
+    start_total = closed_win.close_total if closed_win else Decimal('0')
+    _open_window_for_tablet(tablet, step, start_total=start_total, sessions=[item for item in active_after if item.status == 'started'], note=note)
     return session
 
 
@@ -1505,7 +1507,7 @@ def tablet_logout_slot(*, token, user_id, pin, session_id, declared_good_quantit
         raise ProductionError('Yalnızca kendi tablet oturumunuzu kapatabilirsiniz.')
     active = _active_tablet_sessions(tablet, step=session.step)
     totals = _require_checkpoint_payload(active, checkpoint_total=declared_good_quantity)
-    _close_counting_window(tablet=tablet, step=session.step, declared_totals=totals, reason='logout', note=note)
+    closed_win = _close_counting_window(tablet=tablet, step=session.step, declared_totals=totals, reason='logout', note=note)
     if session.status not in ACTIVE_SESSION_STATUSES:
         raise ProductionError('Yalniz acik oturum kapatilabilir.')
     session.status = 'closed'
@@ -1517,7 +1519,8 @@ def tablet_logout_slot(*, token, user_id, pin, session_id, declared_good_quantit
     event = _create_session_event(session=session, event_type='complete', quantity_delta=0, counter_value=end_counter, note=note)
     remaining = [item for item in _active_tablet_sessions(tablet, step=session.step) if item.status == 'started']
     if remaining:
-        _open_window_for_tablet(tablet, session.step, start_total=declared_good_quantity, sessions=remaining, note=note)
+        start_total = closed_win.close_total if closed_win else Decimal('0')
+        _open_window_for_tablet(tablet, session.step, start_total=start_total, sessions=remaining, note=note)
     return event
 
 
@@ -1529,11 +1532,12 @@ def tablet_pause_session(*, token, session_id, note='', checkpoint_total=None, p
         raise ProductionError('Tablet oturumu bulunamadı.')
     active = _active_tablet_sessions(tablet, step=session.step)
     totals = _require_checkpoint_payload(active, checkpoint_total=checkpoint_total, participant_totals=participant_totals)
-    _close_counting_window(tablet=tablet, step=session.step, declared_totals=totals, reason='break_start', note=note)
+    closed_win = _close_counting_window(tablet=tablet, step=session.step, declared_totals=totals, reason='break_start', note=note)
     event = pause_work_session(organization=tablet.organization, user=session.user, session_id=session_id, note=note)
     remaining = [item for item in _active_tablet_sessions(tablet, step=session.step) if item.status == 'started']
     if remaining:
-        _open_window_for_tablet(tablet, session.step, start_total=checkpoint_total, sessions=remaining, note=note)
+        start_total = closed_win.close_total if closed_win else Decimal('0')
+        _open_window_for_tablet(tablet, session.step, start_total=start_total, sessions=remaining, note=note)
     return event
 
 
@@ -1544,11 +1548,12 @@ def tablet_resume_session(*, token, session_id, note='', checkpoint_total=None, 
     if not session:
         raise ProductionError('Tablet oturumu bulunamadı.')
     active = [item for item in _active_tablet_sessions(tablet, step=session.step) if item.status == 'started']
+    closed_win = None
     if active:
         totals = _require_checkpoint_payload(active, checkpoint_total=checkpoint_total, participant_totals=participant_totals)
-        _close_counting_window(tablet=tablet, step=session.step, declared_totals=totals, reason='break_end', note=note)
+        closed_win = _close_counting_window(tablet=tablet, step=session.step, declared_totals=totals, reason='break_end', note=note)
     event = resume_work_session(organization=tablet.organization, user=session.user, session_id=session_id, note=note)
-    start_total = checkpoint_total
+    start_total = closed_win.close_total if closed_win else None
     if start_total is None or start_total == '':
         latest = ProductionCountingWindow.objects.filter(organization=tablet.organization, tablet=tablet, step=session.step, status='closed').order_by('-closed_at', '-id').first()
         start_total = latest.close_total if latest and latest.close_total is not None else Decimal('0')

@@ -1,7 +1,7 @@
 from decimal import Decimal
 from unittest.mock import patch
 
-from django.db.models import Max
+from django.db.models import Max, Sum
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -592,7 +592,7 @@ class ProductionAutomationTests(TestCase):
         self.assertEqual(ali_session.declared_good_quantity, Decimal('60.00'))
         self.assertEqual(veli_session.declared_good_quantity, Decimal('60.00'))
 
-        tablet_checkpoint(token=tablet.token, line_id=line.id, checkpoint_total=Decimal('70'), reason='manual')
+        tablet_checkpoint(token=tablet.token, line_id=line.id, checkpoint_total=Decimal('10'), reason='manual')
 
         first_step.refresh_from_db()
         ali_session.refresh_from_db()
@@ -602,7 +602,7 @@ class ProductionAutomationTests(TestCase):
         self.assertEqual(veli_session.declared_good_quantity, Decimal('70.00'))
         self.assertEqual(ProductionCountingWindow.objects.filter(step=first_step, status='closed').count(), 3)
         self.assertEqual(
-            ProductionCountingParticipant.objects.filter(session=veli_session).aggregate(total=Max('credited_quantity'))['total'],
+            ProductionCountingParticipant.objects.filter(session=veli_session).aggregate(total=Sum('credited_quantity'))['total'],
             Decimal('70.00'),
         )
 

@@ -1551,7 +1551,7 @@ export function ProductionTabletPage() {
     try {
       if (activeSlots.length) {
         const names = activeSlots.map((s) => s.user_name).join(' ve ')
-        requestCheckpoint(`${names} Üretim Sayaç Değerini Yazın`, perform)
+        requestCheckpoint(`${names} Üretim Miktarını Yazın`, perform)
         return
       }
       await perform()
@@ -1584,7 +1584,7 @@ export function ProductionTabletPage() {
       if (needsCheckpoint) {
         const targetSlots = endpoint.includes('break/start') ? activeSlots : startedSlots
         const names = targetSlots.map((s) => s.user_name).join(' ve ')
-        requestCheckpoint(`${names} Üretim Sayaç Değerini Yazın`, perform)
+        requestCheckpoint(`${names} Üretim Miktarını Yazın`, perform)
         return
       }
       await perform()
@@ -1644,7 +1644,7 @@ export function ProductionTabletPage() {
     try {
       if (activeSlots.length) {
         const names = activeSlots.map((s) => s.user_name).join(' ve ')
-        requestCheckpoint(`${names} Üretim Sayaç Değerini Yazın`, perform)
+        requestCheckpoint(`${names} Üretim Miktarını Yazın`, perform)
         return
       }
       await perform()
@@ -1818,10 +1818,10 @@ export function ProductionTabletPage() {
           <DialogHeader><DialogTitle>{closingSlot?.user_name} - Çıkış Yap</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
-              Makinenin üzerindeki güncel sayaç (toplam üretim) değerini yazın. Sistem, ürettiğiniz miktarı otomatik olarak hesaplayıp kaydeder.
+              Bu periyotta tek başınıza veya ekiple birlikte ürettiğiniz net miktarı (adet) yazın.
             </div>
             <div className="grid gap-2">
-              <Label>Makinedeki Güncel Sayaç (Toplam Üretim)</Label>
+              <Label>Yapılan Üretim Miktarı (Adet)</Label>
               <Input value={closingQty} onChange={(e) => setClosingQty(e.target.value)} inputMode="decimal" disabled={submitting} />
             </div>
             <Input type="password" placeholder="Üretim PIN’i" value={closingPin} onChange={(e) => setClosingPin(e.target.value)} disabled={submitting} />
@@ -1838,17 +1838,17 @@ export function ProductionTabletPage() {
         }
       }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{checkpointTitle || 'Sayaç Değerini Yazın'}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{checkpointTitle || 'Üretim Miktarını Yazın'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div className="grid gap-2">
-              <Label>Makinedeki Güncel Sayaç (Toplam Üretim)</Label>
+              <Label>Yapılan Üretim Miktarı (Adet)</Label>
               <Input value={checkpointTotal} onChange={(e) => setCheckpointTotal(e.target.value)} inputMode="decimal" autoFocus disabled={submitting} />
             </div>
             <Textarea placeholder="Varsa notunuz" value={checkpointNote} onChange={(e) => setCheckpointNote(e.target.value)} disabled={submitting} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCheckpointOpen(false)} disabled={submitting}>Vazgeç</Button>
-            <Button onClick={submitCheckpoint} disabled={checkpointTotal === '' || submitting}>Sayaç Değerini Kaydet</Button>
+            <Button onClick={submitCheckpoint} disabled={checkpointTotal === '' || submitting}>Üretim Miktarını Kaydet</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
