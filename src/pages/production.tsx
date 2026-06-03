@@ -1550,9 +1550,8 @@ export function ProductionTabletPage() {
     setSubmitting(true)
     try {
       if (activeSlots.length) {
-        const names = activeSlots.map((s) => s.user_name).join(', ')
         const operatorName = ctx.operators?.find((op) => String(op.id) === String(loginUser))?.name || 'Yeni çalışan'
-        requestCheckpoint(`${operatorName} işe başlamadan önce; içerideki çalışanların (${names}) ortak sayaç (üretim) değerini yazın.`, perform)
+        requestCheckpoint(`${operatorName} İşe Başlamadan Önce Sayaç Değerini Yazın`, perform)
         return
       }
       await perform()
@@ -1584,8 +1583,8 @@ export function ProductionTabletPage() {
     try {
       if (needsCheckpoint) {
         const actionText = endpoint.includes('start')
-          ? `${session.user_name} molaya çıkıyor. Gitmeden önce makinenin üzerindeki güncel sayaç (toplam üretim) değerini buraya yazın.`
-          : `${session.user_name} moladan dönüyor. İşe katılmadan önce makinenin üzerindeki güncel sayaç (toplam üretim) değerini buraya yazın.`
+          ? `${session.user_name} Molaya Çıkmadan Önce Sayaç Değerini Yazın`
+          : `${session.user_name} Moladan Dönerken Sayaç Değerini Yazın`
         requestCheckpoint(actionText, perform)
         return
       }
@@ -1645,8 +1644,7 @@ export function ProductionTabletPage() {
     setSubmitting(true)
     try {
       if (activeSlots.length) {
-        const names = activeSlots.map((s) => s.user_name).join(', ')
-        requestCheckpoint(`Aktif çalışanlar (${names}) için iş emrini tamamlamadan önce, makinenin üzerindeki güncel sayaç (toplam üretim) değerini yazın.`, perform)
+        requestCheckpoint('İş Emrini Tamamlamadan Önce Sayaç Değerini Yazın', perform)
         return
       }
       await perform()
@@ -1840,11 +1838,8 @@ export function ProductionTabletPage() {
         }
       }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Sayaç Kaydı</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{checkpointTitle || 'Sayaç Değerini Yazın'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
-              {checkpointTitle || 'Makinenin üzerindeki sayacı (toplam üretimi) aynen yazın. Sistem, çalışanların payına düşen miktarı otomatik hesaplayacaktır.'}
-            </div>
             <div className="grid gap-2">
               <Label>Makinedeki Güncel Sayaç (Toplam Üretim)</Label>
               <Input value={checkpointTotal} onChange={(e) => setCheckpointTotal(e.target.value)} inputMode="decimal" autoFocus disabled={submitting} />
