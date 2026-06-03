@@ -1466,6 +1466,7 @@ export function ProductionTabletPage() {
   const [closingPin, setClosingPin] = useState('')
   const [note, setNote] = useState('')
   const [checkpointOpen, setCheckpointOpen] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const [checkpointTitle, setCheckpointTitle] = useState('')
   const [checkpointTotal, setCheckpointTotal] = useState('')
   const [checkpointNote, setCheckpointNote] = useState('')
@@ -1510,12 +1511,23 @@ export function ProductionTabletPage() {
 
   const submitCheckpoint = async () => {
     if (!checkpointActionRef.current || checkpointTotal === '') return
-    await checkpointActionRef.current(checkpointTotal, checkpointNote)
-    checkpointActionRef.current = null
-    setCheckpointOpen(false)
-    setCheckpointTotal('')
-    setCheckpointNote('')
-    await load()
+    setSubmitting(true)
+    try {
+      await checkpointActionRef.current(checkpointTotal, checkpointNote)
+      checkpointActionRef.current = null
+      setCheckpointOpen(false)
+      setCheckpointTotal('')
+      setCheckpointNote('')
+      await load()
+    } catch (error: any) {
+      toast({
+        title: 'Hata',
+        description: error?.response?.data?.detail || error.message || 'Bir hata oluştu.',
+        variant: 'destructive',
+      })
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const login = async () => {
@@ -1535,12 +1547,23 @@ export function ProductionTabletPage() {
       setPin('')
       toast({ title: 'Oturum açıldı' })
     }
-    if (activeSlots.length) {
-      requestCheckpoint('Yeni çalışan girmeden önce mevcut ortak üretim toplamını yazın', perform)
-      return
+    setSubmitting(true)
+    try {
+      if (activeSlots.length) {
+        requestCheckpoint('Yeni çalışan girmeden önce mevcut ortak üretim toplamını yazın', perform)
+        return
+      }
+      await perform()
+      await load()
+    } catch (error: any) {
+      toast({
+        title: 'Giriş yapılamadı',
+        description: error?.response?.data?.detail || 'Hatalı PIN veya geçersiz değer.',
+        variant: 'destructive',
+      })
+    } finally {
+      setSubmitting(false)
     }
-    await perform()
-    await load()
   }
 
   const tabletAction = async (endpoint: string, session: TabletSlot) => {
@@ -1555,29 +1578,51 @@ export function ProductionTabletPage() {
       await load()
     }
     const needsCheckpoint = endpoint.includes('break/start') || (endpoint.includes('break/end') && startedSlots.length > 0)
-    if (needsCheckpoint) {
-      requestCheckpoint(endpoint.includes('start') ? 'Molaya çıkmadan önce ortak üretim toplamını yazın' : 'Moladan dönüşte mevcut çalışan toplamını yazın', perform)
-      return
+    setSubmitting(true)
+    try {
+      if (needsCheckpoint) {
+        requestCheckpoint(endpoint.includes('start') ? 'Molaya çıkmadan önce ortak üretim toplamını yazın' : 'Moladan dönüşte mevcut çalışan toplamını yazın', perform)
+        return
+      }
+      await perform()
+    } catch (error: any) {
+      toast({
+        title: 'İşlem başarısız oldu',
+        description: error?.response?.data?.detail || 'Lütfen girdiğiniz değeri kontrol edin.',
+        variant: 'destructive',
+      })
+    } finally {
+      setSubmitting(false)
     }
-    await perform()
   }
 
   const logout = async () => {
     if (!closingSlot) return
-    await api.post('/production/tablet/logout-slot/', {
-      token,
-      session_id: closingSlot.id,
-      user_id: closingSlot.user_id,
-      pin: closingPin,
-      declared_good_quantity: closingQty,
-      note,
-    })
-    setClosingSlot(null)
-    setClosingQty('')
-    setClosingPin('')
-    setNote('')
-    toast({ title: 'Çıkış yapıldı' })
-    await load()
+    setSubmitting(true)
+    try {
+      await api.post('/production/tablet/logout-slot/', {
+        token,
+        session_id: closingSlot.id,
+        user_id: closingSlot.user_id,
+        pin: closingPin,
+        declared_good_quantity: closingQty,
+        note,
+      })
+      setClosingSlot(null)
+      setClosingQty('')
+      setClosingPin('')
+      setNote('')
+      toast({ title: 'Çıkış yapıldı' })
+      await load()
+    } catch (error: any) {
+      toast({
+        title: 'Çıkış yapılamadı',
+        description: error?.response?.data?.detail || 'Hatalı PIN veya geçersiz değer.',
+        variant: 'destructive',
+      })
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const completeWorkItem = async () => {
@@ -1592,11 +1637,22 @@ export function ProductionTabletPage() {
       toast({ title: 'İş emri tamamlandı, sıradaki iş kuyruğa alınacak' })
       await load()
     }
-    if (activeSlots.length) {
-      requestCheckpoint('İşi tamamlamadan önce ortak üretim toplamını yazın', perform)
-      return
+    setSubmitting(true)
+    try {
+      if (activeSlots.length) {
+        requestCheckpoint('İşi tamamlamadan önce ortak üretim toplamını yazın', perform)
+        return
+      }
+      await perform()
+    } catch (error: any) {
+      toast({
+        title: 'Hata',
+        description: error?.response?.data?.detail || 'İşlem tamamlanamadı.',
+        variant: 'destructive',
+      })
+    } finally {
+      setSubmitting(false)
     }
-    await perform()
   }
 
   const ackAlert = async () => {
@@ -1648,8 +1704,8 @@ export function ProductionTabletPage() {
             </Select>
           </div>
           <div className="grid gap-2">
-            <Button variant="outline" onClick={load} className="h-14"><RefreshCw className="mr-2 h-4 w-4" /> Yenile</Button>
-            <Button onClick={completeWorkItem} disabled={!selectedWork} className="h-14"><CheckCircle2 className="mr-2 h-4 w-4" /> İşi tamamla</Button>
+            <Button variant="outline" onClick={load} className="h-14" disabled={submitting}><RefreshCw className="mr-2 h-4 w-4" /> Yenile</Button>
+            <Button onClick={completeWorkItem} disabled={!selectedWork || submitting} className="h-14"><CheckCircle2 className="mr-2 h-4 w-4" /> İşi tamamla</Button>
           </div>
         </CardContent>
       </Card>
@@ -1692,14 +1748,15 @@ export function ProductionTabletPage() {
                   <MetricBlock label="Mola sn" value={formatNumber(slot.break_seconds || 0)} />
                   <div className="grid gap-2">
                     {slot.status === 'paused' ? (
-                      <Button variant="outline" onClick={() => tabletAction('break/end', slot)}>Molayı bitir</Button>
+                      <Button variant="outline" onClick={() => tabletAction('break/end', slot)} disabled={submitting}>Molayı bitir</Button>
                     ) : (
-                      <Button variant="outline" onClick={() => window.confirm('Molaya çıkılsın mı?') && tabletAction('break/start', slot)}>
+                      <Button variant="outline" onClick={() => window.confirm('Molaya çıkılsın mı?') && tabletAction('break/start', slot)} disabled={submitting}>
                         <Pause className="mr-2 h-4 w-4" /> Mola
                       </Button>
                     )}
                     <Button
                       variant="destructive"
+                      disabled={submitting}
                       onClick={() => {
                         setClosingSlot(slot)
                         setClosingQty(String(slot.machine_quantity || 0))
@@ -1715,6 +1772,7 @@ export function ProductionTabletPage() {
                 <button
                   className="flex h-48 w-full flex-col items-center justify-center rounded-lg border border-dashed text-muted-foreground hover:bg-muted/40"
                   onClick={() => setLoginSlot(index)}
+                  disabled={submitting}
                 >
                   <Plus className="h-12 w-12" />
                   <span className="mt-2 text-lg font-semibold">Çalışan ekle</span>
@@ -1745,9 +1803,9 @@ export function ProductionTabletPage() {
               <SelectTrigger><SelectValue placeholder="Çalışan seç" /></SelectTrigger>
               <SelectContent>{(ctx.operators || []).map((operator) => <SelectItem key={operator.id} value={String(operator.id)}>{operator.name}{operator.has_pin ? '' : ' · PIN yok'}</SelectItem>)}</SelectContent>
             </Select>
-            <Input type="password" placeholder="Üretim PIN’i" value={pin} onChange={(e) => setPin(e.target.value)} />
+            <Input type="password" placeholder="Üretim PIN’i" value={pin} onChange={(e) => setPin(e.target.value)} disabled={submitting} />
           </div>
-          <DialogFooter><Button onClick={login} disabled={!loginUser || !pin}>Başlat</Button></DialogFooter>
+          <DialogFooter><Button onClick={login} disabled={!loginUser || !pin || submitting}>Başlat</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1757,12 +1815,12 @@ export function ProductionTabletPage() {
           <div className="space-y-3">
             <div className="grid gap-2">
               <Label>Yaptığı sağlam adet</Label>
-              <Input value={closingQty} onChange={(e) => setClosingQty(e.target.value)} inputMode="decimal" />
+              <Input value={closingQty} onChange={(e) => setClosingQty(e.target.value)} inputMode="decimal" disabled={submitting} />
             </div>
-            <Input type="password" placeholder="Üretim PIN’i" value={closingPin} onChange={(e) => setClosingPin(e.target.value)} />
-            <Textarea placeholder="Not" value={note} onChange={(e) => setNote(e.target.value)} />
+            <Input type="password" placeholder="Üretim PIN’i" value={closingPin} onChange={(e) => setClosingPin(e.target.value)} disabled={submitting} />
+            <Textarea placeholder="Not" value={note} onChange={(e) => setNote(e.target.value)} disabled={submitting} />
           </div>
-          <DialogFooter><Button onClick={logout} disabled={!closingQty || !closingPin}>Çıkışı tamamla</Button></DialogFooter>
+          <DialogFooter><Button onClick={logout} disabled={!closingQty || !closingPin || submitting}>Çıkışı tamamla</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1780,13 +1838,13 @@ export function ProductionTabletPage() {
             </div>
             <div className="grid gap-2">
               <Label>Ortak üretim toplamı</Label>
-              <Input value={checkpointTotal} onChange={(e) => setCheckpointTotal(e.target.value)} inputMode="decimal" autoFocus />
+              <Input value={checkpointTotal} onChange={(e) => setCheckpointTotal(e.target.value)} inputMode="decimal" autoFocus disabled={submitting} />
             </div>
-            <Textarea placeholder="Not" value={checkpointNote} onChange={(e) => setCheckpointNote(e.target.value)} />
+            <Textarea placeholder="Not" value={checkpointNote} onChange={(e) => setCheckpointNote(e.target.value)} disabled={submitting} />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCheckpointOpen(false)}>Vazgeç</Button>
-            <Button onClick={submitCheckpoint} disabled={checkpointTotal === ''}>Checkpoint’i kaydet</Button>
+            <Button variant="outline" onClick={() => setCheckpointOpen(false)} disabled={submitting}>Vazgeç</Button>
+            <Button onClick={submitCheckpoint} disabled={checkpointTotal === '' || submitting}>Checkpoint’i kaydet</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
