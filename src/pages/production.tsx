@@ -1519,13 +1519,13 @@ export function ProductionTabletPage() {
   }
 
   const login = async () => {
-    if (loginSlot === null || !selectedWork) return
+    if (loginSlot === null) return
     const perform = async (total?: string, checkpointNoteValue?: string) => {
       await api.post('/production/tablet/login-slot/', {
         token,
         user_id: Number(loginUser),
         pin,
-        line_id: selectedWork.line_id,
+        line_id: selectedWork?.line_id || null,
         slot_index: loginSlot,
         checkpoint_total: total || undefined,
         note: checkpointNoteValue || '',
@@ -1747,7 +1747,7 @@ export function ProductionTabletPage() {
             </Select>
             <Input type="password" placeholder="Üretim PIN’i" value={pin} onChange={(e) => setPin(e.target.value)} />
           </div>
-          <DialogFooter><Button onClick={login} disabled={!loginUser || !pin || !selectedWork}>Başlat</Button></DialogFooter>
+          <DialogFooter><Button onClick={login} disabled={!loginUser || !pin}>Başlat</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

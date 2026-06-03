@@ -382,9 +382,9 @@ class ProductionWorkSession(models.Model):
         ('corrected', 'Duzeltildi'),
     ]
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_work_sessions')
-    work_order = models.ForeignKey(ProductionWorkOrder, on_delete=models.CASCADE, related_name='sessions')
-    line = models.ForeignKey(ProductionWorkOrderLine, on_delete=models.CASCADE, related_name='sessions')
-    step = models.ForeignKey(ProductionStepProgress, on_delete=models.CASCADE, related_name='sessions')
+    work_order = models.ForeignKey(ProductionWorkOrder, on_delete=models.CASCADE, null=True, blank=True, related_name='sessions')
+    line = models.ForeignKey(ProductionWorkOrderLine, on_delete=models.CASCADE, null=True, blank=True, related_name='sessions')
+    step = models.ForeignKey(ProductionStepProgress, on_delete=models.CASCADE, null=True, blank=True, related_name='sessions')
     station = models.ForeignKey(ProductionStation, on_delete=models.PROTECT, related_name='sessions')
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='production_work_sessions')
     tablet = models.ForeignKey(ProductionStationTablet, on_delete=models.SET_NULL, null=True, blank=True, related_name='sessions')
@@ -463,9 +463,9 @@ class ProductionCountingWindow(models.Model):
         ('manual', 'Manuel checkpoint'),
     ]
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_counting_windows')
-    work_order = models.ForeignKey(ProductionWorkOrder, on_delete=models.CASCADE, related_name='counting_windows')
-    line = models.ForeignKey(ProductionWorkOrderLine, on_delete=models.CASCADE, related_name='counting_windows')
-    step = models.ForeignKey(ProductionStepProgress, on_delete=models.CASCADE, related_name='counting_windows')
+    work_order = models.ForeignKey(ProductionWorkOrder, on_delete=models.CASCADE, null=True, blank=True, related_name='counting_windows')
+    line = models.ForeignKey(ProductionWorkOrderLine, on_delete=models.CASCADE, null=True, blank=True, related_name='counting_windows')
+    step = models.ForeignKey(ProductionStepProgress, on_delete=models.CASCADE, null=True, blank=True, related_name='counting_windows')
     station = models.ForeignKey(ProductionStation, on_delete=models.PROTECT, related_name='counting_windows')
     tablet = models.ForeignKey(ProductionStationTablet, on_delete=models.SET_NULL, null=True, blank=True, related_name='counting_windows')
     status = models.CharField(max_length=20, choices=STATUSES, default='open')
@@ -576,9 +576,9 @@ class ProductionEvent(models.Model):
         ('cancel', 'Iptal'),
     ]
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_events')
-    work_order = models.ForeignKey(ProductionWorkOrder, on_delete=models.CASCADE, related_name='events')
-    line = models.ForeignKey(ProductionWorkOrderLine, on_delete=models.CASCADE, related_name='events')
-    step = models.ForeignKey(ProductionStepProgress, on_delete=models.CASCADE, related_name='events')
+    work_order = models.ForeignKey(ProductionWorkOrder, on_delete=models.CASCADE, null=True, blank=True, related_name='events')
+    line = models.ForeignKey(ProductionWorkOrderLine, on_delete=models.CASCADE, null=True, blank=True, related_name='events')
+    step = models.ForeignKey(ProductionStepProgress, on_delete=models.CASCADE, null=True, blank=True, related_name='events')
     station = models.ForeignKey(ProductionStation, on_delete=models.PROTECT, related_name='events')
     session = models.ForeignKey(ProductionWorkSession, on_delete=models.SET_NULL, null=True, blank=True, related_name='events')
     event_type = models.CharField(max_length=20, choices=EVENT_TYPES)

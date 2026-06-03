@@ -995,9 +995,9 @@ class ProductionReportExportView(APIView):
             lines.append(','.join([
                 session.started_at.strftime('%d.%m.%Y %H:%M'),
                 session.ended_at.strftime('%d.%m.%Y %H:%M') if session.ended_at else '',
-                session.work_order.number,
+                session.work_order.number if session.work_order else '',
                 session.station.code,
-                session.line.product_name.replace(',', ' '),
+                session.line.product_name.replace(',', ' ') if session.line else 'Genel Çalışma',
                 str(session.declared_good_quantity),
                 str(session.machine_quantity),
                 str(session.discrepancy_quantity),

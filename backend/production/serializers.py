@@ -553,7 +553,7 @@ class TabletLoginSlotSerializer(serializers.Serializer):
     token = serializers.CharField()
     user_id = serializers.IntegerField()
     pin = serializers.CharField()
-    line_id = serializers.IntegerField()
+    line_id = serializers.IntegerField(required=False, allow_null=True)
     slot_index = serializers.IntegerField()
     start_counter = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
     checkpoint_total = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
