@@ -1551,7 +1551,8 @@ export function ProductionTabletPage() {
     try {
       if (activeSlots.length) {
         const names = activeSlots.map((s) => s.user_name).join(', ')
-        requestCheckpoint(`Şu an içeride çalışanlar: ${names}. Yeni çalışan girmeden önce, makinenin üzerindeki güncel sayaç (toplam üretim) değerini buraya yazın.`, perform)
+        const operatorName = ctx.operators?.find((op) => String(op.id) === String(loginUser))?.name || 'Yeni çalışan'
+        requestCheckpoint(`${operatorName} işe başlamadan önce; içerideki çalışanların (${names}) ortak sayaç (üretim) değerini yazın.`, perform)
         return
       }
       await perform()
@@ -1644,7 +1645,8 @@ export function ProductionTabletPage() {
     setSubmitting(true)
     try {
       if (activeSlots.length) {
-        requestCheckpoint('İş emrini tamamlamadan önce, makinenin üzerindeki güncel sayaç (toplam üretim) değerini yazın.', perform)
+        const names = activeSlots.map((s) => s.user_name).join(', ')
+        requestCheckpoint(`Aktif çalışanlar (${names}) için iş emrini tamamlamadan önce, makinenin üzerindeki güncel sayaç (toplam üretim) değerini yazın.`, perform)
         return
       }
       await perform()
