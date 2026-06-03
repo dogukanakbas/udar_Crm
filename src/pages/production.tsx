@@ -1550,7 +1550,8 @@ export function ProductionTabletPage() {
     setSubmitting(true)
     try {
       if (activeSlots.length) {
-        requestCheckpoint('Yeni çalışan girmeden önce mevcut ortak üretim toplamını yazın', perform)
+        const names = activeSlots.map((s) => s.user_name).join(', ')
+        requestCheckpoint(`Şu an içeride çalışanlar: ${names}. Yeni çalışan girmeden önce, makinenin üzerindeki güncel sayaç (toplam üretim) değerini buraya yazın.`, perform)
         return
       }
       await perform()
@@ -1581,7 +1582,10 @@ export function ProductionTabletPage() {
     setSubmitting(true)
     try {
       if (needsCheckpoint) {
-        requestCheckpoint(endpoint.includes('start') ? 'Molaya çıkmadan önce ortak üretim toplamını yazın' : 'Moladan dönüşte mevcut çalışan toplamını yazın', perform)
+        const actionText = endpoint.includes('start')
+          ? `${session.user_name} molaya çıkıyor. Gitmeden önce makinenin üzerindeki güncel sayaç (toplam üretim) değerini buraya yazın.`
+          : `${session.user_name} moladan dönüyor. İşe katılmadan önce makinenin üzerindeki güncel sayaç (toplam üretim) değerini buraya yazın.`
+        requestCheckpoint(actionText, perform)
         return
       }
       await perform()
@@ -1640,7 +1644,7 @@ export function ProductionTabletPage() {
     setSubmitting(true)
     try {
       if (activeSlots.length) {
-        requestCheckpoint('İşi tamamlamadan önce ortak üretim toplamını yazın', perform)
+        requestCheckpoint('İş emrini tamamlamadan önce, makinenin üzerindeki güncel sayaç (toplam üretim) değerini yazın.', perform)
         return
       }
       await perform()
@@ -1811,14 +1815,17 @@ export function ProductionTabletPage() {
 
       <Dialog open={!!closingSlot} onOpenChange={(open) => !open && setClosingSlot(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{closingSlot?.user_name} çıkış</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{closingSlot?.user_name} - Çıkış Yap</DialogTitle></DialogHeader>
           <div className="space-y-3">
+            <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+              Makinenin üzerindeki güncel sayaç (toplam üretim) değerini yazın. Sistem, ürettiğiniz miktarı otomatik olarak hesaplayıp kaydeder.
+            </div>
             <div className="grid gap-2">
-              <Label>Yaptığı sağlam adet</Label>
+              <Label>Makinedeki Güncel Sayaç (Toplam Üretim)</Label>
               <Input value={closingQty} onChange={(e) => setClosingQty(e.target.value)} inputMode="decimal" disabled={submitting} />
             </div>
             <Input type="password" placeholder="Üretim PIN’i" value={closingPin} onChange={(e) => setClosingPin(e.target.value)} disabled={submitting} />
-            <Textarea placeholder="Not" value={note} onChange={(e) => setNote(e.target.value)} disabled={submitting} />
+            <Textarea placeholder="Varsa notunuz" value={note} onChange={(e) => setNote(e.target.value)} disabled={submitting} />
           </div>
           <DialogFooter><Button onClick={logout} disabled={!closingQty || !closingPin || submitting}>Çıkışı tamamla</Button></DialogFooter>
         </DialogContent>
@@ -1831,20 +1838,20 @@ export function ProductionTabletPage() {
         }
       }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{checkpointTitle || 'Ortak üretim checkpoint’i'}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Sayaç Kaydı</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
-              Bu değer iş emrine bir kez yazılır. Aktif çalışanların günlük kişi toplamı ise kendi oturumlarındaki son beyan olarak güncellenir.
+              {checkpointTitle || 'Makinenin üzerindeki sayacı (toplam üretimi) aynen yazın. Sistem, çalışanların payına düşen miktarı otomatik hesaplayacaktır.'}
             </div>
             <div className="grid gap-2">
-              <Label>Ortak üretim toplamı</Label>
+              <Label>Makinedeki Güncel Sayaç (Toplam Üretim)</Label>
               <Input value={checkpointTotal} onChange={(e) => setCheckpointTotal(e.target.value)} inputMode="decimal" autoFocus disabled={submitting} />
             </div>
-            <Textarea placeholder="Not" value={checkpointNote} onChange={(e) => setCheckpointNote(e.target.value)} disabled={submitting} />
+            <Textarea placeholder="Varsa notunuz" value={checkpointNote} onChange={(e) => setCheckpointNote(e.target.value)} disabled={submitting} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCheckpointOpen(false)} disabled={submitting}>Vazgeç</Button>
-            <Button onClick={submitCheckpoint} disabled={checkpointTotal === '' || submitting}>Checkpoint’i kaydet</Button>
+            <Button onClick={submitCheckpoint} disabled={checkpointTotal === '' || submitting}>Sayaç Değerini Kaydet</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
