@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Copy, Download, Play, Plus, RefreshCw, Route, Save, Send, TimerReset, UserPlus } from 'lucide-react'
+import { Copy, Download, Play, Plus, RefreshCw, Route, Save, Send, TimerReset, Trash2, UserPlus } from 'lucide-react'
 
 import { PageHeader } from '@/components/app-shell'
 import { Badge } from '@/components/ui/badge'
@@ -149,7 +149,7 @@ function assignmentRoleLabel(role: string) {
   return 'Operatör'
 }
 
-function StationCard({ station, assignments = [] }: { station: Station; assignments?: StationAssignment[] }) {
+function StationCard({ station, assignments = [], onDelete }: { station: Station; assignments?: StationAssignment[]; onDelete?: () => void }) {
   return (
     <div className="rounded-lg border bg-card/70 p-3">
       <div className="flex items-start justify-between gap-3">
@@ -157,7 +157,14 @@ function StationCard({ station, assignments = [] }: { station: Station; assignme
           <p className="font-semibold">{station.code}</p>
           <p className="text-xs text-muted-foreground">{station.department_name || station.name}</p>
         </div>
-        <Badge variant={station.is_active ? 'secondary' : 'outline'}>{station.is_active ? 'Aktif' : 'Pasif'}</Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant={station.is_active ? 'secondary' : 'outline'}>{station.is_active ? 'Aktif' : 'Pasif'}</Badge>
+          {onDelete && (
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={onDelete} title="İstasyonu sil">
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
       </div>
       <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
         {assignments.length ? assignments.map((assignment) => (
@@ -325,6 +332,21 @@ export function ProductionManagementPage() {
     await load()
   }
 
+  const deleteItem = async (url: string, label: string) => {
+    if (!window.confirm(`${label} silinsin mi? Bu işlem geri alınamaz.`)) return
+    try {
+      await api.delete(url)
+      toast({ title: `${label} silindi` })
+      await load()
+    } catch (error: any) {
+      toast({
+        title: `${label} silinemedi`,
+        description: error?.response?.data?.detail || 'Bağlı kayıtları kontrol edin.',
+        variant: 'destructive',
+      })
+    }
+  }
+
   const clonePreset = async (preset: TemplatePreset) => {
     setBusy(true)
     try {
@@ -407,9 +429,19 @@ export function ProductionManagementPage() {
               <CardContent className="space-y-4">
                 {departments.map((dep) => (
                   <div key={dep.id} className="rounded-lg border p-3">
-                    <div className="mb-3 flex items-center gap-2">
-                      <span className="h-3 w-3 rounded-full" style={{ background: dep.color || '#21406d' }} />
-                      <h3 className="font-semibold">{dep.name}</h3>
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <span className="h-3 w-3 rounded-full" style={{ background: dep.color || '#21406d' }} />
+                        <h3 className="font-semibold">{dep.name}</h3>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-destructive"
+                        onClick={() => deleteItem(`/production/departments/${dep.id}/`, dep.name)}
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" /> Sil
+                      </Button>
                     </div>
                     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                       {stations.filter((station) => station.department === dep.id).map((station) => (
@@ -417,6 +449,7 @@ export function ProductionManagementPage() {
                           key={station.id}
                           station={station}
                           assignments={stationAssignments.filter((item) => item.station === station.id && item.is_active)}
+                          onDelete={() => deleteItem(`/production/stations/${station.id}/`, station.code)}
                         />
                       ))}
                     </div>
@@ -480,6 +513,7 @@ export function ProductionManagementPage() {
                     key={station.id}
                     station={station}
                     assignments={stationAssignments.filter((item) => item.station === station.id && item.is_active)}
+                    onDelete={() => deleteItem(`/production/stations/${station.id}/`, station.code)}
                   />
                 ))}
               </CardContent>
@@ -531,7 +565,39 @@ export function ProductionManagementPage() {
             </Card>
           </div>
           <div className="mt-4 grid gap-3 xl:grid-cols-2">
-            {deviceMaps.map((map) => <Card key={map.id}><CardContent className="flex items-center justify-between gap-3 pt-6 text-sm"><span>{map.device_name} · {map.source_path}</span><Badge variant="outline">{map.target_key}</Badge></CardContent></Card>)}
+            {devices.map((device) => (
+              <Card key={`device-${device.id}`}>
+                <CardContent className="flex items-center justify-between gap-3 pt-6 text-sm">
+                  <span>{device.name} · {device.station_code}</span>
+                  <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/devices/${device.id}/`, device.name)} title="Cihazı sil">
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+            {dataFields.map((field) => (
+              <Card key={`field-${field.id}`}>
+                <CardContent className="flex items-center justify-between gap-3 pt-6 text-sm">
+                  <span>{field.label} · {field.station_code || 'Genel'}</span>
+                  <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/data-fields/${field.id}/`, field.label)} title="Veri alanını sil">
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+            {deviceMaps.map((map) => (
+              <Card key={`map-${map.id}`}>
+                <CardContent className="flex items-center justify-between gap-3 pt-6 text-sm">
+                  <span>{map.device_name} · {map.source_path}</span>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline">{map.target_key}</Badge>
+                    <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/device-maps/${map.id}/`, map.target_key)} title="Eşlemeyi sil">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
           </div>
         </TabsContent>
 
@@ -568,8 +634,37 @@ export function ProductionManagementPage() {
                 </CardContent>
               </Card>
               <div className="grid gap-3 xl:grid-cols-2">
-                {routes.map((route) => <Card key={route.id}><CardContent className="pt-6"><div className="flex items-center justify-between"><p className="font-medium">{route.name}</p>{route.is_default && <Badge>Varsayılan</Badge>}</div><p className="mt-1 text-xs text-muted-foreground">{route.product_group_key || 'ürün grubu yok'} · {route.steps?.length || 0} istasyon</p></CardContent></Card>)}
-                {rules.map((rule) => <Card key={rule.id}><CardContent className="pt-6"><p className="font-medium">{rule.name}</p><p className="mt-1 text-xs text-muted-foreground">{rule.scope} · {rule.trigger_event} · {rule.blocks?.length || 0} blok</p></CardContent></Card>)}
+                {routes.map((route) => (
+                  <Card key={route.id}>
+                    <CardContent className="pt-6">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium">{route.name}</p>
+                            {route.is_default && <Badge>Varsayılan</Badge>}
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">{route.product_group_key || 'ürün grubu yok'} · {route.steps?.length || 0} istasyon</p>
+                        </div>
+                        <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/routes/${route.id}/`, route.name)} title="Rotayı sil">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+                {rules.map((rule) => (
+                  <Card key={rule.id}>
+                    <CardContent className="flex items-center justify-between gap-3 pt-6">
+                      <div>
+                        <p className="font-medium">{rule.name}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{rule.scope} · {rule.trigger_event} · {rule.blocks?.length || 0} blok</p>
+                      </div>
+                      <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/rules/${rule.id}/`, rule.name)} title="Kural setini sil">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
             </div>
           </div>

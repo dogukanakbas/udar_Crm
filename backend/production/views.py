@@ -1,4 +1,5 @@
-from django.db.models import Sum
+from django.db import IntegrityError
+from django.db.models import ProtectedError, Sum
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import filters, permissions, status, viewsets
@@ -86,6 +87,24 @@ class OrgScopedMixin:
         serializer.save(organization=self.request.user.organization)
 
 
+class SafeDestroyMixin:
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        try:
+            instance.delete()
+        except ProtectedError:
+            return Response(
+                {'detail': 'Bu kayit rota, is emri, uretim ilerlemesi veya hareket kaydi ile bagli oldugu icin silinemez. Once bagli yapilari kaldirin ya da kaydi pasife alin.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except IntegrityError:
+            return Response(
+                {'detail': 'Bu kayit baska kayitlarla bagli oldugu icin silinemedi. Once bagli kayitlari temizleyin.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class ProductionSettingsView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
     required_perm = 'production.view'
@@ -104,7 +123,7 @@ class ProductionSettingsView(APIView):
         return Response(serializer.data)
 
 
-class ProductionDepartmentViewSet(OrgScopedMixin, viewsets.ModelViewSet):
+class ProductionDepartmentViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = ProductionDepartmentSerializer
     queryset = ProductionDepartment.objects.all()
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
@@ -116,7 +135,7 @@ class ProductionDepartmentViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     ordering_fields = ['order', 'name']
 
 
-class ProductionStationViewSet(OrgScopedMixin, viewsets.ModelViewSet):
+class ProductionStationViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = ProductionStationSerializer
     queryset = ProductionStation.objects.select_related('department')
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
@@ -139,7 +158,7 @@ class ProductionStationViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         return qs
 
 
-class ProductionStationUserViewSet(OrgScopedMixin, viewsets.ModelViewSet):
+class ProductionStationUserViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = ProductionStationUserSerializer
     queryset = ProductionStationUser.objects.select_related('station', 'user')
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
@@ -150,7 +169,7 @@ class ProductionStationUserViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     search_fields = ['station__code', 'user__username', 'user__first_name', 'user__last_name']
 
 
-class ProductionDeviceViewSet(OrgScopedMixin, viewsets.ModelViewSet):
+class ProductionDeviceViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = ProductionDeviceSerializer
     queryset = ProductionDevice.objects.select_related('station')
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
@@ -161,7 +180,7 @@ class ProductionDeviceViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     search_fields = ['name', 'station__code']
 
 
-class ProductionDataFieldViewSet(OrgScopedMixin, viewsets.ModelViewSet):
+class ProductionDataFieldViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = ProductionDataFieldSerializer
     queryset = ProductionDataField.objects.select_related('station')
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
@@ -173,7 +192,7 @@ class ProductionDataFieldViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     ordering_fields = ['order', 'key']
 
 
-class ProductionDevicePayloadMapViewSet(OrgScopedMixin, viewsets.ModelViewSet):
+class ProductionDevicePayloadMapViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = ProductionDevicePayloadMapSerializer
     queryset = ProductionDevicePayloadMap.objects.select_related('device', 'station', 'data_field')
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
@@ -185,7 +204,7 @@ class ProductionDevicePayloadMapViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     ordering_fields = ['order', 'target_key']
 
 
-class ProductionRouteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
+class ProductionRouteViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = ProductionRouteTemplateSerializer
     queryset = ProductionRouteTemplate.objects.prefetch_related('steps__station__department')
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
@@ -196,7 +215,7 @@ class ProductionRouteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     search_fields = ['name', 'product_group_key']
 
 
-class ProductionRuleSetViewSet(OrgScopedMixin, viewsets.ModelViewSet):
+class ProductionRuleSetViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = ProductionRuleSetSerializer
     queryset = ProductionRuleSet.objects.select_related('station', 'route').prefetch_related('blocks')
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
@@ -208,7 +227,7 @@ class ProductionRuleSetViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     ordering_fields = ['order', 'name']
 
 
-class ProductionRuleBlockViewSet(OrgScopedMixin, viewsets.ModelViewSet):
+class ProductionRuleBlockViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
     serializer_class = ProductionRuleBlockSerializer
     queryset = ProductionRuleBlock.objects.select_related('rule_set')
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
