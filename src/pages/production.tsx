@@ -1550,8 +1550,8 @@ export function ProductionTabletPage() {
     setSubmitting(true)
     try {
       if (activeSlots.length) {
-        const operatorName = ctx.operators?.find((op) => String(op.id) === String(loginUser))?.name || 'Yeni çalışan'
-        requestCheckpoint(`${operatorName} İşe Başlamadan Önce Sayaç Değerini Yazın`, perform)
+        const names = activeSlots.map((s) => s.user_name).join(' ve ')
+        requestCheckpoint(`${names} Üretim Sayaç Değerini Yazın`, perform)
         return
       }
       await perform()
@@ -1582,10 +1582,9 @@ export function ProductionTabletPage() {
     setSubmitting(true)
     try {
       if (needsCheckpoint) {
-        const actionText = endpoint.includes('start')
-          ? `${session.user_name} Molaya Çıkmadan Önce Sayaç Değerini Yazın`
-          : `${session.user_name} Moladan Dönerken Sayaç Değerini Yazın`
-        requestCheckpoint(actionText, perform)
+        const targetSlots = endpoint.includes('break/start') ? activeSlots : startedSlots
+        const names = targetSlots.map((s) => s.user_name).join(' ve ')
+        requestCheckpoint(`${names} Üretim Sayaç Değerini Yazın`, perform)
         return
       }
       await perform()
@@ -1644,7 +1643,8 @@ export function ProductionTabletPage() {
     setSubmitting(true)
     try {
       if (activeSlots.length) {
-        requestCheckpoint('İş Emrini Tamamlamadan Önce Sayaç Değerini Yazın', perform)
+        const names = activeSlots.map((s) => s.user_name).join(' ve ')
+        requestCheckpoint(`${names} Üretim Sayaç Değerini Yazın`, perform)
         return
       }
       await perform()
