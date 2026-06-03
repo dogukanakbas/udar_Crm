@@ -1,3 +1,6 @@
+import tempfile
+
+from django.core.management import call_command
 from django.db import IntegrityError
 from django.db.models import ProtectedError, Sum
 from django.http import HttpResponse
@@ -133,6 +136,31 @@ class ProductionDepartmentViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.Mod
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['code', 'name']
     ordering_fields = ['order', 'name']
+
+    @action(detail=False, methods=['get'], url_path='export-config')
+    def export_config(self, request):
+        if not user_has_perm(request.user, 'production.manage'):
+            return Response({'detail': 'Bu veriyi disari aktarma yetkiniz yok.'}, status=status.HTTP_403_FORBIDDEN)
+        with tempfile.NamedTemporaryFile(mode='r+', suffix='.json', encoding='utf-8') as handle:
+            call_command('export_production_config', output=handle.name, organization=getattr(request.user.organization, 'code', ''), include_presets=True)
+            handle.seek(0)
+            response = HttpResponse(handle.read(), content_type='application/json; charset=utf-8')
+        response['Content-Disposition'] = 'attachment; filename="production_config.json"'
+        return response
+
+    @action(detail=False, methods=['post'], url_path='import-config')
+    def import_config(self, request):
+        if not user_has_perm(request.user, 'production.manage'):
+            return Response({'detail': 'Bu veriyi ice aktarma yetkiniz yok.'}, status=status.HTTP_403_FORBIDDEN)
+        uploaded = request.FILES.get('file')
+        if not uploaded:
+            return Response({'detail': 'JSON dosyasi gerekli.'}, status=status.HTTP_400_BAD_REQUEST)
+        with tempfile.NamedTemporaryFile(mode='wb+', suffix='.json') as handle:
+            for chunk in uploaded.chunks():
+                handle.write(chunk)
+            handle.flush()
+            call_command('import_production_config', handle.name, organization=getattr(request.user.organization, 'code', ''), include_presets=True)
+        return Response({'detail': 'Uretim konfigurasyonu ice aktarildi.'})
 
 
 class ProductionStationViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
@@ -276,6 +304,37 @@ class ProductionWorkOrderViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['number', 'source_number', 'customer_name', 'lines__product_name', 'lines__product_sku']
     ordering_fields = ['created_at', 'due_date', 'status']
+
+    @action(detail=False, methods=['get'], url_path='export')
+    def export_orders(self, request):
+        if not user_has_perm(request.user, 'production.work_orders.manage'):
+            return Response({'detail': 'Bu veriyi disari aktarma yetkiniz yok.'}, status=status.HTTP_403_FORBIDDEN)
+        with tempfile.NamedTemporaryFile(mode='r+', suffix='.json', encoding='utf-8') as handle:
+            call_command('export_production_work_orders', output=handle.name, organization=getattr(request.user.organization, 'code', ''))
+            handle.seek(0)
+            response = HttpResponse(handle.read(), content_type='application/json; charset=utf-8')
+        response['Content-Disposition'] = 'attachment; filename="production_work_orders.json"'
+        return response
+
+    @action(detail=False, methods=['post'], url_path='import')
+    def import_orders(self, request):
+        if not user_has_perm(request.user, 'production.work_orders.manage'):
+            return Response({'detail': 'Bu veriyi ice aktarma yetkiniz yok.'}, status=status.HTTP_403_FORBIDDEN)
+        uploaded = request.FILES.get('file')
+        if not uploaded:
+            return Response({'detail': 'JSON dosyasi gerekli.'}, status=status.HTTP_400_BAD_REQUEST)
+        replace_lines = str(request.data.get('replace_lines', '')).lower() in {'1', 'true', 'yes', 'evet'}
+        with tempfile.NamedTemporaryFile(mode='wb+', suffix='.json') as handle:
+            for chunk in uploaded.chunks():
+                handle.write(chunk)
+            handle.flush()
+            call_command(
+                'import_production_work_orders',
+                handle.name,
+                organization=getattr(request.user.organization, 'code', ''),
+                replace_lines=replace_lines,
+            )
+        return Response({'detail': 'Uretim is emirleri ice aktarildi.'})
 
     def perform_create(self, serializer):
         order = create_manual_work_order(

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Copy, Download, Play, Plus, RefreshCw, Route, Save, Send, TimerReset, Trash2, UserPlus } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Copy, Download, Play, Plus, RefreshCw, Route, Save, Send, TimerReset, Trash2, Upload, UserPlus } from 'lucide-react'
 
 import { PageHeader } from '@/components/app-shell'
 import { Badge } from '@/components/ui/badge'
@@ -138,6 +138,18 @@ async function fetchAll<T = any>(url: string): Promise<T[]> {
   return Array.isArray(res.data) ? res.data : res.data?.results || []
 }
 
+function downloadJson(data: BlobPart, filename: string) {
+  const blob = data instanceof Blob ? data : new Blob([data], { type: 'application/json;charset=utf-8' })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
 function userLabel(user?: UserLite) {
   if (!user) return ''
   return user.full_name || `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username || user.email || `#${user.id}`
@@ -181,6 +193,7 @@ function StationCard({ station, assignments = [], onDelete }: { station: Station
 
 export function ProductionManagementPage() {
   const { toast } = useToast()
+  const configImportRef = useRef<HTMLInputElement | null>(null)
   const [departments, setDepartments] = useState<Department[]>([])
   const [stations, setStations] = useState<Station[]>([])
   const [stationAssignments, setStationAssignments] = useState<StationAssignment[]>([])
@@ -358,13 +371,43 @@ export function ProductionManagementPage() {
     }
   }
 
+  const exportConfig = async () => {
+    const response = await api.get('/production/departments/export-config/', { responseType: 'blob' })
+    downloadJson(response.data, 'production_config.json')
+    toast({ title: 'İmalat yönetimi dışa aktarıldı' })
+  }
+
+  const importConfig = async (file?: File) => {
+    if (!file) return
+    const form = new FormData()
+    form.append('file', file)
+    await api.post('/production/departments/import-config/', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+    toast({ title: 'İmalat yönetimi içe aktarıldı' })
+    await load()
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
         title="İmalat Yönetimi"
         description="Bölüm, istasyon, rota, cihaz verisi, akış kuralları ve şablonları fabrika yapısına göre düzenleyin."
         actions={
-          <Button variant="outline" onClick={load}><RefreshCw className="mr-2 h-4 w-4" /> Yenile</Button>
+          <div className="flex flex-wrap gap-2">
+            <input
+              ref={configImportRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                event.target.value = ''
+                void importConfig(file)
+              }}
+            />
+            <Button variant="outline" onClick={exportConfig}><Download className="mr-2 h-4 w-4" /> Dışa aktar</Button>
+            <Button variant="outline" onClick={() => configImportRef.current?.click()}><Upload className="mr-2 h-4 w-4" /> İçe aktar</Button>
+            <Button variant="outline" onClick={load}><RefreshCw className="mr-2 h-4 w-4" /> Yenile</Button>
+          </div>
         }
       />
 
@@ -690,6 +733,7 @@ export function ProductionManagementPage() {
 
 export function ProductionWorkOrdersPage() {
   const { toast } = useToast()
+  const workOrderImportRef = useRef<HTMLInputElement | null>(null)
   const [orders, setOrders] = useState<WorkOrder[]>([])
   const [contracts, setContracts] = useState<any[]>([])
   const [contractId, setContractId] = useState('')
@@ -722,27 +766,57 @@ export function ProductionWorkOrdersPage() {
     await load()
   }
 
+  const exportWorkOrders = async () => {
+    const response = await api.get('/production/work-orders/export/', { responseType: 'blob' })
+    downloadJson(response.data, 'production_work_orders.json')
+    toast({ title: 'İş emirleri dışa aktarıldı' })
+  }
+
+  const importWorkOrders = async (file?: File) => {
+    if (!file) return
+    const form = new FormData()
+    form.append('file', file)
+    await api.post('/production/work-orders/import/', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+    toast({ title: 'İş emirleri içe aktarıldı' })
+    await load()
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
         title="Üretim İş Emirleri"
         description="Sözleşmeden otomatik gelen veya manuel açılacak üretim işleri."
         actions={
-          <Dialog>
-            <DialogTrigger asChild><Button><Plus className="mr-2 h-4 w-4" /> Sözleşmeden aktar</Button></DialogTrigger>
-            <DialogContent>
-              <DialogHeader><DialogTitle>Onaylı sözleşmeden iş emri oluştur</DialogTitle></DialogHeader>
-              <Select value={contractId} onValueChange={setContractId}>
-                <SelectTrigger><SelectValue placeholder="Onaylı sözleşme seç" /></SelectTrigger>
-                <SelectContent>
-                  {contracts.map((item) => (
-                    <SelectItem key={item.id} value={String(item.id)}>{item.number} - {item.customer_name || item.customerName || 'Cari'}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <DialogFooter><Button onClick={createFromContract} disabled={!contractId}>Aktar</Button></DialogFooter>
-            </DialogContent>
-          </Dialog>
+          <div className="flex flex-wrap gap-2">
+            <input
+              ref={workOrderImportRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                event.target.value = ''
+                void importWorkOrders(file)
+              }}
+            />
+            <Button variant="outline" onClick={exportWorkOrders}><Download className="mr-2 h-4 w-4" /> Dışa aktar</Button>
+            <Button variant="outline" onClick={() => workOrderImportRef.current?.click()}><Upload className="mr-2 h-4 w-4" /> İçe aktar</Button>
+            <Dialog>
+              <DialogTrigger asChild><Button><Plus className="mr-2 h-4 w-4" /> Sözleşmeden aktar</Button></DialogTrigger>
+              <DialogContent>
+                <DialogHeader><DialogTitle>Onaylı sözleşmeden iş emri oluştur</DialogTitle></DialogHeader>
+                <Select value={contractId} onValueChange={setContractId}>
+                  <SelectTrigger><SelectValue placeholder="Onaylı sözleşme seç" /></SelectTrigger>
+                  <SelectContent>
+                    {contracts.map((item) => (
+                      <SelectItem key={item.id} value={String(item.id)}>{item.number} - {item.customer_name || item.customerName || 'Cari'}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <DialogFooter><Button onClick={createFromContract} disabled={!contractId}>Aktar</Button></DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
         }
       />
       <Card>
