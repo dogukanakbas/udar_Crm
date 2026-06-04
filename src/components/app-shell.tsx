@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { Link, Outlet, useRouterState } from '@tanstack/react-router'
 import {
   Activity,
@@ -21,9 +21,12 @@ import {
   Shield,
   SunMedium,
   LogOut,
+  Volume2,
+  CheckCircle2,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import type { Role } from '@/types'
 import {
   DropdownMenu,
@@ -235,6 +238,37 @@ function CalendarIconMini(props: React.ComponentProps<'svg'>) {
   return <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18"/></svg>
 }
 
+function playManagerAlarm() {
+  try {
+    const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext
+    const ctx = new AudioContextCtor()
+    
+    const playTone = (freq: number, startDelay: number, duration: number) => {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      
+      const startTime = ctx.currentTime + startDelay
+      gain.gain.setValueAtTime(0.001, startTime)
+      gain.gain.exponentialRampToValueAtTime(0.3, startTime + 0.04)
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration - 0.05)
+      
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start(startTime)
+      osc.stop(startTime + duration)
+    }
+
+    playTone(660, 0, 0.15)
+    playTone(880, 0.12, 0.25)
+    
+    window.setTimeout(() => ctx.close(), 1000)
+  } catch (e) {
+    // Browser might block audio context before first user interaction
+  }
+}
+
 export function AppShell() {
   const { data, resetDemo, setRole } = useAppStore()
   const { theme, setTheme } = useTheme()
@@ -244,6 +278,62 @@ export function AppShell() {
   const routerState = useRouterState()
   const loggedIn = !!getTokens()
   const isPublic = !loggedIn
+
+  const [unackedAlerts, setUnackedAlerts] = useState<any[]>([])
+  const [ackingAlertId, setAckingAlertId] = useState<number | null>(null)
+  const alertedIdsRef = useRef<number[]>([])
+
+  const canViewAlerts = loggedIn && hasPermission(data.settings.role, data.rolePermissions || [], 'production.alerts.view')
+  const currentUserId = typeof window !== 'undefined' ? localStorage.getItem('current-user-id') : null
+
+  useEffect(() => {
+    if (!canViewAlerts) {
+      setUnackedAlerts([])
+      return
+    }
+
+    const fetchAlerts = async () => {
+      try {
+        const res = await api.get('/production/station-alerts/')
+        const allAlerts = Array.isArray(res.data) ? res.data : (res.data?.results || [])
+        // Filter alerts that require acknowledgment and have not been acknowledged by this user
+        const active = allAlerts.filter((alert: any) => {
+          if (!alert.requires_ack) return false
+          const hasAcked = alert.acks?.some((ack: any) => String(ack.user) === String(currentUserId))
+          return !hasAcked
+        })
+        setUnackedAlerts(active)
+      } catch (error) {
+        console.error('Failed to fetch station alerts:', error)
+      }
+    }
+
+    fetchAlerts()
+    const interval = setInterval(fetchAlerts, 5000)
+    return () => clearInterval(interval)
+  }, [canViewAlerts, currentUserId])
+
+  useEffect(() => {
+    if (unackedAlerts.length > 0) {
+      const newAlerts = unackedAlerts.filter(a => !alertedIdsRef.current.includes(a.id))
+      if (newAlerts.length > 0) {
+        playManagerAlarm()
+        alertedIdsRef.current = [...alertedIdsRef.current, ...newAlerts.map(a => a.id)]
+      }
+    }
+  }, [unackedAlerts])
+
+  const ackAlert = async (alertId: number) => {
+    setAckingAlertId(alertId)
+    try {
+      await api.post(`/production/station-alerts/${alertId}/ack/`, {})
+      setUnackedAlerts((prev) => prev.filter((a) => a.id !== alertId))
+    } catch (error) {
+      console.error('Failed to acknowledge alert:', error)
+    } finally {
+      setAckingAlertId(null)
+    }
+  }
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -433,6 +523,52 @@ export function AppShell() {
         </main>
       </div>
       <GlobalSearch open={searchOpen} onOpenChange={setSearchOpen} />
+
+      {unackedAlerts[0] && (
+        <Dialog open={true} onOpenChange={() => {}}>
+          <DialogContent className="border-red-500 bg-destructive/10 backdrop-blur-md max-w-md animate-in fade-in zoom-in duration-200">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-3 text-2xl text-red-600 font-bold animate-pulse">
+                <Volume2 className="h-7 w-7 text-red-600" />
+                {unackedAlerts[0].title || 'Yönetici Çağrısı'}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="rounded-lg border border-red-500/20 bg-card p-4 shadow-inner space-y-2">
+                <p className="text-lg font-semibold text-foreground">{unackedAlerts[0].message}</p>
+                
+                <div className="grid grid-cols-2 gap-2 pt-2 text-xs text-muted-foreground border-t border-dashed">
+                  {unackedAlerts[0].department_name && (
+                    <p><span className="font-medium text-foreground">Bölüm:</span> {unackedAlerts[0].department_name}</p>
+                  )}
+                  {unackedAlerts[0].station_code && (
+                    <p><span className="font-medium text-foreground">İstasyon:</span> {unackedAlerts[0].station_code}</p>
+                  )}
+                  {unackedAlerts[0].work_order_number && (
+                    <p className="col-span-2"><span className="font-medium text-foreground">İş Emri:</span> {unackedAlerts[0].work_order_number}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="destructive"
+                className="w-full h-12 text-base font-semibold bg-red-600 hover:bg-red-700 text-white"
+                onClick={() => ackAlert(unackedAlerts[0].id)}
+                disabled={ackingAlertId === unackedAlerts[0].id}
+              >
+                {ackingAlertId === unackedAlerts[0].id ? (
+                  'Onaylanıyor...'
+                ) : (
+                  <>
+                    <CheckCircle2 className="mr-2 h-5 w-5" /> Okudum, Onayla
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   )
 }
