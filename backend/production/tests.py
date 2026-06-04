@@ -946,3 +946,104 @@ class ProductionAutomationTests(TestCase):
         order_steel = create_work_order_from_contract(quote_steel, user=self.user)
         self.assertIsNotNone(order_steel)
         self.assertEqual(order_steel.status, 'draft')
+
+    def test_shift_aware_station_statistics_and_midnight_reset(self):
+        # Setup: Clear targets and shifts first
+        ProductionStationTarget.objects.all().delete()
+        ProductionShiftSchedule.objects.all().delete()
+
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        line = order.lines.get()
+        first_step = line.steps.select_related('station__department').order_by('order').first()
+
+        tablet = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=first_step.station,
+            name='Gece Reset Test Tablet',
+            token='reset-test-tablet',
+        )
+
+        # Create Night shift schedule: 18:00 - 03:00 (crosses midnight)
+        schedule = ProductionShiftSchedule.objects.create(
+            organization=self.org,
+            department=first_step.station.department,
+            name='Gece Vardiyası',
+            weekdays=[0, 1, 2, 3, 4, 5, 6],
+            start_time=time(18, 0),
+            end_time=time(3, 0),
+            crosses_midnight=True,
+        )
+
+        report_day = timezone.localdate()
+        target_qty = Decimal('500')
+
+        # Create Target for the report day
+        ProductionStationTarget.objects.create(
+            organization=self.org,
+            station=first_step.station,
+            target_date=report_day,
+            target_quantity=target_qty,
+        )
+
+        # Mock current time to 01:30 AM of the NEXT day (during the active night shift)
+        next_day = report_day + timedelta(days=1)
+        mock_now = timezone.make_aware(datetime.combine(next_day, time(1, 30)))
+
+        # Simulate shift occurrence starting yesterday 18:00 and ending today 03:00
+        starts_at = timezone.make_aware(datetime.combine(report_day, time(18, 0)))
+        ends_at = timezone.make_aware(datetime.combine(next_day, time(3, 0)))
+
+        # Explicitly pre-create the occurrence to simulate system state
+        from .models import ProductionShiftOccurrence
+        occurrence = ProductionShiftOccurrence.objects.create(
+            organization=self.org,
+            department=first_step.station.department,
+            schedule=schedule,
+            name='Gece Vardiyası',
+            report_date=report_day,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            status='active',
+        )
+
+        # Close a counting window at 01:15 AM (past midnight)
+        win = ProductionCountingWindow.objects.create(
+            organization=self.org,
+            work_order=order,
+            line=line,
+            step=first_step,
+            station=first_step.station,
+            tablet=tablet,
+            status='closed',
+            opened_at=starts_at,
+            closed_at=timezone.make_aware(datetime.combine(next_day, time(1, 15))),
+            start_total=Decimal('0'),
+            close_total=Decimal('150'),
+            official_delta=Decimal('150'),
+        )
+
+        # We also create a shift checkpoint to link it to the occurrence
+        from .models import ProductionShiftCheckpoint
+        ProductionShiftCheckpoint.objects.create(
+            organization=self.org,
+            occurrence=occurrence,
+            window=win,
+            station=first_step.station,
+            tablet=tablet,
+            reason='manual',
+            official_delta=Decimal('150'),
+            created_at=timezone.make_aware(datetime.combine(next_day, time(1, 15))),
+        )
+
+        # Retrieve context at mock_now (01:30 AM)
+        with patch('production.services.timezone.now', return_value=mock_now):
+            context = tablet_context(tablet.token)
+
+        # Assertions:
+        # 1. The target should be report_day's target (500), not next_day's default (0)
+        self.assertEqual(context['daily_target']['target_quantity'], Decimal('500.00'))
+        # 2. The actual quantity should include the window closed at 01:15 AM, which is 150
+        self.assertEqual(context['daily_target']['actual_quantity'], Decimal('150.00'))
+        # 3. Remaining quantity is 350
+        self.assertEqual(context['daily_target']['remaining_quantity'], Decimal('350.00'))

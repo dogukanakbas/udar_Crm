@@ -1110,21 +1110,50 @@ def _require_checkpoint_payload(active_sessions, checkpoint_total=None, particip
     return {session.id: checkpoint_total for session in active_sessions}
 
 
-def _participant_today_total(organization, user, day):
-    session_ids = list(
-        ProductionWorkSession.objects.filter(
-            organization=organization,
-            user=user,
-            started_at__date=day,
-        ).values_list('id', flat=True)
-    )
-    total = Decimal('0')
-    for session_id in session_ids:
-        total += (
-            ProductionCountingParticipant.objects.filter(organization=organization, session_id=session_id)
-            .aggregate(total=Sum('credited_quantity'))['total']
-            or Decimal('0')
+def _participant_today_total(organization, user, day, department=None):
+    if not department:
+        session_ids = list(
+            ProductionWorkSession.objects.filter(
+                organization=organization,
+                user=user,
+                started_at__date=day,
+            ).values_list('id', flat=True)
         )
+        total = Decimal('0')
+        for session_id in session_ids:
+            total += (
+                ProductionCountingParticipant.objects.filter(organization=organization, session_id=session_id)
+                .aggregate(total=Sum('credited_quantity'))['total']
+                or Decimal('0')
+            )
+        return total
+
+    # Fetch all shift occurrences on adjacent days to check boundaries
+    relevant_occs = list(ProductionShiftOccurrence.objects.filter(
+        department=department,
+        report_date__in=[day - timedelta(days=1), day, day + timedelta(days=1)]
+    ))
+    
+    # Fetch candidate participant entries closed on adjacent days
+    candidates = ProductionCountingParticipant.objects.filter(
+        organization=organization,
+        user=user,
+        window__status='closed',
+        window__closed_at__date__in=[day - timedelta(days=1), day, day + timedelta(days=1)]
+    ).select_related('window')
+    
+    total = Decimal('0')
+    for part in candidates:
+        win_report_date = None
+        for occ in relevant_occs:
+            if occ.starts_at <= part.window.closed_at < occ.ends_at:
+                win_report_date = occ.report_date
+                break
+        if not win_report_date:
+            win_report_date = timezone.localtime(part.window.closed_at).date()
+            
+        if win_report_date == day:
+            total += part.credited_quantity
     return total
 
 
@@ -1135,15 +1164,40 @@ def _station_target_payload(organization, station, day):
         target_date=day,
         defaults={'target_quantity': Decimal('0')},
     )
-    actual = (
-        ProductionCountingWindow.objects.filter(
-            organization=organization,
-            station=station,
-            status='closed',
-            closed_at__date=day,
-        ).aggregate(total=Sum('official_delta'))['total']
-        or Decimal('0')
+    
+    # Fetch all shift occurrences of the department on this report date
+    occurrences = ProductionShiftOccurrence.objects.filter(
+        department=station.department,
+        report_date=day
     )
+    
+    # We also consider occurrences on adjacent days to categorise windows closed on day-1, day, day+1
+    relevant_occs = list(ProductionShiftOccurrence.objects.filter(
+        department=station.department,
+        report_date__in=[day - timedelta(days=1), day, day + timedelta(days=1)]
+    ))
+    
+    # Fetch candidate windows closed on day-1, day, or day+1
+    candidate_windows = ProductionCountingWindow.objects.filter(
+        organization=organization,
+        station=station,
+        status='closed',
+        closed_at__date__in=[day - timedelta(days=1), day, day + timedelta(days=1)]
+    )
+    
+    actual = Decimal('0')
+    for win in candidate_windows:
+        win_report_date = None
+        for occ in relevant_occs:
+            if occ.starts_at <= win.closed_at < occ.ends_at:
+                win_report_date = occ.report_date
+                break
+        if not win_report_date:
+            win_report_date = timezone.localtime(win.closed_at).date()
+            
+        if win_report_date == day:
+            actual += win.official_delta
+
     return {
         'id': target.id,
         'date': target.target_date,
@@ -1662,6 +1716,18 @@ def tablet_context(token):
         .order_by('role', 'user__first_name', 'user__username')
     )
     today = timezone.localdate()
+    active_occurrence, _ = _active_shift_occurrence(station.department)
+    if active_occurrence:
+        today = active_occurrence.report_date
+    else:
+        # Check if there is a recently ended occurrence (within 12 hours) to show its totals until next shift
+        recent_occurrence = ProductionShiftOccurrence.objects.filter(
+            department=station.department,
+            ends_at__lte=timezone.now()
+        ).order_by('-ends_at').first()
+        if recent_occurrence and (timezone.now() - recent_occurrence.ends_at).total_seconds() < 12 * 3600:
+            today = recent_occurrence.report_date
+
     target_payload = _station_target_payload(tablet.organization, station, today)
     operators = []
     for row in assigned:
@@ -1673,7 +1739,7 @@ def tablet_context(token):
             'name': row.user.get_full_name() or row.user.username,
             'role': row.role,
             'has_pin': bool(profile and profile.pin_hash),
-            'today_total': _participant_today_total(tablet.organization, row.user, today),
+            'today_total': _participant_today_total(tablet.organization, row.user, today, station.department),
         })
     alerts = list(
         ProductionStationAlert.objects.filter(organization=tablet.organization)
