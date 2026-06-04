@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, CheckCircle2, Copy, Download, Edit3, LogOut, Monitor, Pause, Play, Plus, RefreshCw, Route, Save, Send, TimerReset, Trash2, Upload, UserPlus, Volume2, X } from 'lucide-react'
+import { Bell, Calendar, CheckCircle2, Copy, Cpu, Download, Edit3, Layers, LogOut, Monitor, Pause, Play, Plus, RefreshCw, Route, Save, Send, TimerReset, Trash2, Upload, UserPlus, Volume2, X } from 'lucide-react'
+import { Area, AreaChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip as ReTooltip, XAxis, YAxis, PieChart, Pie } from 'recharts'
 
 import { PageHeader } from '@/components/app-shell'
 import { Badge } from '@/components/ui/badge'
@@ -2481,70 +2482,368 @@ function MetricBlock({ label, value }: { label: string; value: string | number }
 }
 
 export function ProductionReportsPage() {
-  const [summary, setSummary] = useState<any>({})
+  const [start, setStart] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() - 30)
+    return d.toISOString().split('T')[0]
+  })
+  const [end, setEnd] = useState(() => new Date().toISOString().split('T')[0])
+  const [selectedDept, setSelectedDept] = useState('all')
+  const [selectedStation, setSelectedStation] = useState('all')
+  const [selectedWorker, setSelectedWorker] = useState('all')
+  const [summary, setSummary] = useState<any>({
+    by_station: [],
+    by_worker: [],
+    by_date: [],
+    worker_station: [],
+    detailed_sessions: [],
+    departments: [],
+    stations_list: [],
+    workers_list: [],
+    open_sessions: 0,
+    discrepancies_pending: 0,
+    departments_count: 0,
+    stations_count: 0,
+    active_orders: 0,
+    completed_today: 0,
+  })
+  const [loading, setLoading] = useState(false)
 
   const load = async () => {
-    setSummary(await api.get('/production/reports/summary/').then((res) => res.data))
+    setLoading(true)
+    try {
+      const params: any = { start, end }
+      if (selectedDept !== 'all') params.department = selectedDept
+      if (selectedStation !== 'all') params.station = selectedStation
+      if (selectedWorker !== 'all') params.worker = selectedWorker
+      
+      const res = await api.get('/production/reports/summary/', { params })
+      setSummary(res.data)
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
     void load()
-  }, [])
+  }, [start, end, selectedDept, selectedStation, selectedWorker])
 
   const downloadCsv = async () => {
-    const res = await api.get('/production/reports/export/', { responseType: 'blob' })
+    const params: any = { start, end }
+    if (selectedDept !== 'all') params.department = selectedDept
+    if (selectedStation !== 'all') params.station = selectedStation
+    if (selectedWorker !== 'all') params.worker = selectedWorker
+
+    const res = await api.get('/production/reports/export/', { params, responseType: 'blob' })
     const url = URL.createObjectURL(new Blob([res.data], { type: 'text/csv;charset=utf-8' }))
     const link = document.createElement('a')
     link.href = url
-    link.download = 'imalat_raporu.csv'
+    link.download = `imalat_raporu_${start}_${end}.csv`
     document.body.appendChild(link)
     link.click()
     link.remove()
     URL.revokeObjectURL(url)
   }
 
+  // Calculate stats in the current filtered range
+  const totalProducedInRange = useMemo(() => {
+    return (summary.by_station || []).reduce((acc: number, row: any) => acc + (parseFloat(row.total) || 0), 0)
+  }, [summary.by_station])
+
+  const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f43f5e', '#14b8a6', '#eab308']
+
+  // Format date safely
+  const formatDateTime = (isoString: string) => {
+    if (!isoString) return '-'
+    const d = new Date(isoString)
+    return `${d.toLocaleDateString('tr-TR')} ${d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
         title="İmalat Raporları"
-        description="Bölüm, istasyon ve çalışan bazlı üretim performansı."
+        description="Filtrelenebilir imalat verimliliği, çalışan performans analizleri ve grafikler."
         actions={
           <>
-            <Button variant="outline" onClick={load}><TimerReset className="mr-2 h-4 w-4" /> Yenile</Button>
-            <Button variant="outline" onClick={downloadCsv}><Download className="mr-2 h-4 w-4" /> CSV indir</Button>
+            <Button variant="outline" onClick={load} disabled={loading}>
+              <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Yenile
+            </Button>
+            <Button variant="outline" onClick={downloadCsv} disabled={loading}>
+              <Download className="mr-2 h-4 w-4" /> Excel/CSV Aktar
+            </Button>
           </>
         }
       />
-      <div className="grid gap-3 md:grid-cols-4">
-        <Card><CardHeader><CardTitle>Bölüm</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{summary.departments || 0}</CardContent></Card>
-        <Card><CardHeader><CardTitle>İstasyon</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{summary.stations || 0}</CardContent></Card>
-        <Card><CardHeader><CardTitle>Açık iş</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{summary.active_orders || 0}</CardContent></Card>
-        <Card><CardHeader><CardTitle>Bugün adet</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{formatNumber(summary.completed_today || 0)}</CardContent></Card>
-      </div>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle>İstasyon verimliliği</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
-            {(summary.by_station || []).map((row: any, idx: number) => (
-              <div key={idx} className="flex items-center justify-between rounded border p-3 text-sm">
-                <span>{row.station__code} · {row.station__department__name}</span>
-                <strong>{formatNumber(row.total || 0)}</strong>
-              </div>
-            ))}
+
+      {/* Filter panel */}
+      <Card className="border border-border/80">
+        <CardContent className="pt-6 grid gap-4 sm:grid-cols-2 md:grid-cols-5">
+          <div className="space-y-1">
+            <Label className="text-xs">Başlangıç Tarihi</Label>
+            <div className="relative">
+              <Calendar className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input type="date" className="pl-8 text-sm" value={start} onChange={(e) => setStart(e.target.value)} />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Bitiş Tarihi</Label>
+            <div className="relative">
+              <Calendar className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input type="date" className="pl-8 text-sm" value={end} onChange={(e) => setEnd(e.target.value)} />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Bölüm</Label>
+            <Select value={selectedDept} onValueChange={(val) => { setSelectedDept(val); setSelectedStation('all'); }}>
+              <SelectTrigger className="text-sm">
+                <SelectValue placeholder="Tümü" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tüm Bölümler</SelectItem>
+                {(summary.departments || []).map((d: any) => (
+                  <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">İstasyon</Label>
+            <Select value={selectedStation} onValueChange={setSelectedStation}>
+              <SelectTrigger className="text-sm">
+                <SelectValue placeholder="Tümü" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tüm İstasyonlar</SelectItem>
+                {(summary.stations_list || [])
+                  .filter((st: any) => selectedDept === 'all' || String(st.department_id) === selectedDept)
+                  .map((st: any) => (
+                    <SelectItem key={st.id} value={String(st.id)}>{st.code} - {st.name}</SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Çalışan</Label>
+            <Select value={selectedWorker} onValueChange={setSelectedWorker}>
+              <SelectTrigger className="text-sm">
+                <SelectValue placeholder="Tümü" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tüm Çalışanlar</SelectItem>
+                {(summary.workers_list || []).map((w: any) => (
+                  <SelectItem key={w.id} value={String(w.id)}>
+                    {w.first_name || w.last_name ? `${w.first_name} ${w.last_name}` : w.username}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Metrics Cards */}
+      <div className="grid gap-4 md:grid-cols-4">
+        <Card className="border border-border/80 bg-card/60 backdrop-blur-sm">
+          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+            <CardTitle className="text-xs font-medium text-muted-foreground">Bölüm Sayısı</CardTitle>
+            <Layers className="h-4 w-4 text-primary" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-foreground">{summary.departments?.length || 0}</div>
+            <p className="text-[10px] text-muted-foreground mt-0.5">Aktif üretim departmanları</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader><CardTitle>Çalışan üretimi</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
-            {(summary.by_worker || []).map((row: any, idx: number) => (
-              <div key={idx} className="flex items-center justify-between rounded border p-3 text-sm">
-                <span>{row.user__username || 'Cihaz / sistem'}</span>
-                <strong>{formatNumber(row.total || 0)}</strong>
-              </div>
-            ))}
+        <Card className="border border-border/80 bg-card/60 backdrop-blur-sm">
+          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+            <CardTitle className="text-xs font-medium text-muted-foreground">İstasyon Sayısı</CardTitle>
+            <Cpu className="h-4 w-4 text-indigo-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-foreground">{summary.stations_list?.length || 0}</div>
+            <p className="text-[10px] text-muted-foreground mt-0.5">Aktif hat istasyonları</p>
+          </CardContent>
+        </Card>
+        <Card className="border border-border/80 bg-card/60 backdrop-blur-sm">
+          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+            <CardTitle className="text-xs font-medium text-muted-foreground">Açık İş Emri Yükü</CardTitle>
+            <Route className="h-4 w-4 text-amber-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-foreground">{summary.active_orders || 0}</div>
+            <p className="text-[10px] text-muted-foreground mt-0.5">Üretimi süren/bekleyen iş emirleri</p>
+          </CardContent>
+        </Card>
+        <Card className="border border-border/80 bg-card/60 backdrop-blur-sm">
+          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+            <CardTitle className="text-xs font-medium text-muted-foreground">Dönemlik Toplam Üretim</CardTitle>
+            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{formatNumber(totalProducedInRange)}</div>
+            <p className="text-[10px] text-muted-foreground mt-0.5">Seçilen aralıktaki toplam teslimat</p>
           </CardContent>
         </Card>
       </div>
+
+      {/* Charts section */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className="border border-border/80 bg-card/40 backdrop-blur-sm">
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-primary" /> Günlük Üretim Hacmi (Zaman Serisi)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="h-[280px]">
+            {(!summary.by_date || summary.by_date.length === 0) ? (
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                Seçilen aralıkta üretim kaydı bulunamadı.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={summary.by_date} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#2563eb" stopOpacity={0.4}/>
+                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0.0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border/40" />
+                  <XAxis dataKey="date" tick={{ fontSize: 10 }} stroke="#888888" />
+                  <YAxis tick={{ fontSize: 10 }} stroke="#888888" allowDecimals={false} />
+                  <ReTooltip formatter={(value) => `${formatNumber(Number(value))} adet`} />
+                  <Area type="monotone" dataKey="total" stroke="#2563eb" fillOpacity={1} fill="url(#colorTotal)" name="Üretim Adedi" />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border border-border/80 bg-card/40 backdrop-blur-sm">
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <Cpu className="h-4 w-4 text-indigo-500" /> İstasyon Bazlı Üretim Dağılım Payı
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="h-[280px]">
+            {(!summary.by_station || summary.by_station.length === 0) ? (
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                İstasyon bazında üretim verisi bulunamadı.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={summary.by_station}
+                    dataKey="total"
+                    nameKey="station__code"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={80}
+                    label={({ name, percent }: { name?: string; percent?: number }) => `${name || ''} (${((percent || 0) * 100).toFixed(0)}%)`}
+                    labelLine={true}
+                  >
+                    {(summary.by_station || []).map((_: any, index: number) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <ReTooltip formatter={(value) => `${formatNumber(Number(value))} adet`} />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Tabs / Tables */}
+      <Tabs defaultValue="worker-breakdown" className="w-full">
+        <TabsList className="grid w-full grid-cols-2 max-w-[400px]">
+          <TabsTrigger value="worker-breakdown">Çalışan & İstasyon Dağılımı</TabsTrigger>
+          <TabsTrigger value="detailed-logs">Detaylı Çalışma Logları</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="worker-breakdown">
+          <Card className="border border-border/80">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-semibold">Çalışanların İstasyonlardaki Üretim Performansı</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {(!summary.worker_station || summary.worker_station.length === 0) ? (
+                <div className="text-center py-6 text-sm text-muted-foreground">Veri yok.</div>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50 border-b border-border">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Çalışan</th>
+                        <th className="px-4 py-3 text-left font-semibold text-muted-foreground">İstasyon Kodu</th>
+                        <th className="px-4 py-3 text-left font-semibold text-muted-foreground">İstasyon Adı</th>
+                        <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Toplam Üretilen Adet</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {summary.worker_station.map((row: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-muted/20">
+                          <td className="px-4 py-2.5 font-medium text-foreground">
+                            {row.user__first_name || row.user__last_name ? `${row.user__first_name} ${row.user__last_name}` : row.user__username}
+                          </td>
+                          <td className="px-4 py-2.5 text-muted-foreground font-mono">{row.station__code}</td>
+                          <td className="px-4 py-2.5 text-foreground">{row.station__name}</td>
+                          <td className="px-4 py-2.5 text-right font-bold text-emerald-600 dark:text-emerald-400">
+                            {formatNumber(row.total)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="detailed-logs">
+          <Card className="border border-border/80">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-semibold">Son Çalışma Oturum Logları (Maks. 200 Kayıt)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {(!summary.detailed_sessions || summary.detailed_sessions.length === 0) ? (
+                <div className="text-center py-6 text-sm text-muted-foreground">Log kaydı bulunamadı.</div>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50 border-b border-border">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Başlangıç Zamanı</th>
+                        <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Çalışan</th>
+                        <th className="px-4 py-3 text-left font-semibold text-muted-foreground">İstasyon</th>
+                        <th className="px-4 py-3 text-left font-semibold text-muted-foreground">İş Emri</th>
+                        <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Mamul Adı</th>
+                        <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Kabul Edilen Miktar</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {summary.detailed_sessions.map((row: any) => (
+                        <tr key={row.id} className="hover:bg-muted/20">
+                          <td className="px-4 py-2.5 text-muted-foreground text-xs">{formatDateTime(row.started_at)}</td>
+                          <td className="px-4 py-2.5 font-medium text-foreground">{row.fullname || row.username}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground">{row.station_code} - {row.station_name}</td>
+                          <td className="px-4 py-2.5 font-mono text-xs">{row.work_order_number || '-'}</td>
+                          <td className="px-4 py-2.5 truncate max-w-[200px]" title={row.product_name}>{row.product_name}</td>
+                          <td className="px-4 py-2.5 text-right font-semibold text-foreground">{formatNumber(row.quantity)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

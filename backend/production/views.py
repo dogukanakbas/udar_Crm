@@ -1046,32 +1046,93 @@ class ProductionReportSummaryView(APIView):
         org = request.user.organization
         start = request.query_params.get('start')
         end = request.query_params.get('end')
+        dept_id = request.query_params.get('department')
+        station_id = request.query_params.get('station')
+        user_id = request.query_params.get('worker')
+
         events = ProductionEvent.objects.filter(organization=org)
         sessions = ProductionWorkSession.objects.filter(organization=org)
+
         if start:
             events = events.filter(created_at__date__gte=start)
             sessions = sessions.filter(started_at__date__gte=start)
         if end:
             events = events.filter(created_at__date__lte=end)
             sessions = sessions.filter(started_at__date__lte=end)
+        if dept_id and dept_id != 'all':
+            events = events.filter(station__department_id=dept_id)
+            sessions = sessions.filter(station__department_id=dept_id)
+        if station_id and station_id != 'all':
+            events = events.filter(station_id=station_id)
+            sessions = sessions.filter(station_id=station_id)
+        if user_id and user_id != 'all':
+            events = events.filter(user_id=user_id)
+            sessions = sessions.filter(user_id=user_id)
+
         by_station = list(
-            events.values('station__code', 'station__name', 'station__department__name')
+            events.values('station_id', 'station__code', 'station__name', 'station__department__name')
             .annotate(total=Sum('quantity_delta'))
             .order_by('station__department__order', 'station__order')
         )
+        
         by_worker = list(
-            sessions.values('user_id', 'user__username')
+            sessions.values('user_id', 'user__username', 'user__first_name', 'user__last_name')
             .annotate(
                 total=Sum('declared_good_quantity'),
                 machine_total=Sum('machine_quantity'),
                 discrepancy_total=Sum('discrepancy_quantity'),
             )
-            .order_by('-total')[:50]
+            .order_by('-total')[:100]
         )
+
+        by_date = list(
+            events.values('created_at__date')
+            .annotate(total=Sum('quantity_delta'))
+            .order_by('created_at__date')
+        )
+        for item in by_date:
+            if item['created_at__date']:
+                item['date'] = item['created_at__date'].strftime('%Y-%m-%d')
+                del item['created_at__date']
+
+        worker_station = list(
+            sessions.values('user__username', 'user__first_name', 'user__last_name', 'station__code', 'station__name')
+            .annotate(total=Sum('declared_good_quantity'))
+            .order_by('-total')[:200]
+        )
+
+        detailed_sessions = []
+        for s in sessions.select_related('user', 'station', 'line__work_order', 'line').order_by('-started_at')[:200]:
+            detailed_sessions.append({
+                'id': s.id,
+                'started_at': s.started_at.isoformat() if s.started_at else None,
+                'ended_at': s.ended_at.isoformat() if s.ended_at else None,
+                'username': s.user.username,
+                'fullname': s.user.get_full_name(),
+                'station_code': s.station.code,
+                'station_name': s.station.name,
+                'work_order_number': s.work_order.number if s.work_order else '',
+                'product_name': s.line.product_name if s.line else 'Genel Çalışma',
+                'quantity': float(s.declared_good_quantity or 0),
+            })
+
+        departments = list(ProductionDepartment.objects.filter(organization=org, is_active=True).values('id', 'name'))
+        stations_list = list(ProductionStation.objects.filter(organization=org, is_active=True).values('id', 'name', 'code', 'department_id'))
+        
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        workers_list = list(User.objects.filter(organization=org, is_active=True).values('id', 'username', 'first_name', 'last_name'))
+
         data = dashboard_summary(org)
         data.update({
             'by_station': by_station,
             'by_worker': by_worker,
+            'by_date': by_date,
+            'worker_station': worker_station,
+            'detailed_sessions': detailed_sessions,
+            'departments': departments,
+            'stations_list': stations_list,
+            'workers_list': workers_list,
             'open_sessions': sessions.filter(status__in=['started', 'paused']).count(),
             'discrepancies_pending': sessions.filter(discrepancy_status='needs_review').count(),
         })
