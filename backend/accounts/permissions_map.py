@@ -91,6 +91,8 @@ PERMISSION_CATALOG = [
             ("products.bulk.delete", "Ürünleri toplu sil"),
             ("products.import", "Ürün içe aktar"),
             ("products.export", "Ürün dışa aktar"),
+            ("technical_drawings.view", "Ürün teknik resimlerini görüntüle"),
+            ("technical_drawings.manage", "Ürün teknik resimlerini yönet"),
         ],
     },
     {
@@ -252,7 +254,7 @@ DEFAULT_ROLE_PERMS = {
         "quotes.view.all", "quotes.create", "quotes.edit.all", "quotes.status.change", "quotes.convert", "quotes.download", "quotes.prepare",
         "partners.view", "partners.create", "partners.edit", "partners.import", "partners.export",
         "templates.view", "templates.products.edit", "templates.seller_companies.edit", "templates.document_terms.edit", "templates.pricing.edit", "templates.payment_options.edit", "templates.service_tax.edit", "templates.excel.upload",
-        "products.view", "products.create", "products.edit", "products.import", "products.export",
+        "products.view", "products.create", "products.edit", "products.import", "products.export", "technical_drawings.view", "technical_drawings.manage",
         "erp.view", "orders.view", "orders.create", "orders.edit", "orders.receive", "inventory.view", "inventory.edit", "warehouses.view", "warehouses.manage", "warehouse_locations.manage", "warehouse_stock.view", "warehouse_stock.operate", "warehouse_stock.transfer", "warehouse_stock.allocate", "warehouse_stock.import", "warehouse_stock.export", "warehouse_movements.view", "logistics.view", "logistics.edit", "vehicles.view", "vehicles.edit",
         "production.view", "production.manage", "production.templates.manage", "production.station_users.manage", "production.device_maps.manage", "production.rules.manage", "production.work_orders.view", "production.work_orders.manage", "production.sessions.view", "production.sessions.review", "production.sessions.manage", "production.tablet.operate", "production.tablet.manage", "production.shifts.view", "production.shifts.manage", "production.shift_reports.view", "production.alerts.send", "production.alerts.view", "production.pi_events.view", "production.reports.view", "production.documents.manage",
         "tickets.view", "tickets.edit", "tasks.view", "tasks.create", "tasks.edit", "tasks.assign", "teams.view", "teams.edit", "worker_tracking.view", "reports.view", "audit.view",
@@ -260,12 +262,12 @@ DEFAULT_ROLE_PERMS = {
     ],
     "Sales": [
         "quotes.view.own", "quotes.create", "quotes.edit.own", "quotes.status.change", "quotes.convert", "quotes.download", "quotes.prepare",
-        "partners.view", "partners.create", "partners.edit", "partners.import", "products.view", "templates.view",
+        "partners.view", "partners.create", "partners.edit", "partners.import", "products.view", "technical_drawings.view", "templates.view",
     ],
     "Finance": [
         "quotes.view.all", "quotes.download", "partners.view", "erp.view", "invoices.view", "invoices.edit", "invoices.pay", "orders.view", "reports.view", "audit.view", "approvals.view",
     ],
     "Support": ["tickets.view", "tickets.edit", "tasks.view", "tasks.edit", "teams.view"],
-    "Warehouse": ["erp.view", "products.view", "orders.view", "orders.receive", "inventory.view", "inventory.edit", "warehouses.view", "warehouse_stock.view", "warehouse_stock.operate", "warehouse_stock.transfer", "warehouse_stock.import", "warehouse_stock.export", "warehouse_movements.view", "logistics.view", "logistics.edit", "tasks.view", "tasks.edit", "teams.view"],
-    "Worker": ["tasks.view.own", "tasks.edit", "tasks.handover", "production.station.operate", "production.tablet.operate", "products.view", "partners.view", "tickets.view", "vehicles.view", "teams.view", "quotes.view.own"],
+    "Warehouse": ["erp.view", "products.view", "technical_drawings.view", "orders.view", "orders.receive", "inventory.view", "inventory.edit", "warehouses.view", "warehouse_stock.view", "warehouse_stock.operate", "warehouse_stock.transfer", "warehouse_stock.import", "warehouse_stock.export", "warehouse_movements.view", "logistics.view", "logistics.edit", "tasks.view", "tasks.edit", "teams.view"],
+    "Worker": ["tasks.view.own", "tasks.edit", "tasks.handover", "production.station.operate", "production.tablet.operate", "products.view", "technical_drawings.view", "partners.view", "tickets.view", "vehicles.view", "teams.view", "quotes.view.own"],
 }

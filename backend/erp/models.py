@@ -49,6 +49,55 @@ class Product(models.Model):
         return self.name
 
 
+def product_technical_drawing_path(instance, filename):
+    return f'product-technical-drawings/org_{instance.organization_id}/product_{instance.product_id}/{filename}'
+
+
+class TechnicalDrawingFolder(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='technical_drawing_folders')
+    name = models.CharField(max_length=120)
+    description = models.TextField(blank=True, default='')
+    order = models.PositiveIntegerField(default=0, db_index=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['order', 'name', 'id']
+        unique_together = ('organization', 'name')
+
+    def __str__(self):
+        return self.name
+
+
+class ProductTechnicalDrawing(models.Model):
+    PREVIEW_TYPES = [
+        ('image', 'Gorsel'),
+    ]
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='product_technical_drawings')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='technical_drawings')
+    folder = models.ForeignKey(TechnicalDrawingFolder, on_delete=models.SET_NULL, null=True, blank=True, related_name='drawings')
+    title = models.CharField(max_length=255)
+    version = models.CharField(max_length=50, blank=True, default='')
+    tags = models.JSONField(default=list, blank=True)
+    description = models.TextField(blank=True, default='')
+    file = models.FileField(upload_to=product_technical_drawing_path)
+    file_type = models.CharField(max_length=20, choices=PREVIEW_TYPES, default='download')
+    original_filename = models.CharField(max_length=255, blank=True, default='')
+    is_active = models.BooleanField(default=True)
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='uploaded_product_drawings')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-is_active', '-uploaded_at', '-id']
+        indexes = [
+            models.Index(fields=['organization', 'product', 'is_active']),
+            models.Index(fields=['organization', 'file_type']),
+        ]
+
+    def __str__(self):
+        return self.title or self.original_filename or f'{self.product} teknik resim'
+
+
 class SalesOrder(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='sales_orders')
     number = models.CharField(max_length=50)

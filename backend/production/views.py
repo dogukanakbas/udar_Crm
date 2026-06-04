@@ -29,6 +29,7 @@ from .models import (
     ProductionRuleSet,
     ProductionRouteTemplate,
     ProductionSettings,
+    ProductionSessionBreak,
     ProductionStationAlert,
     ProductionShiftBreak,
     ProductionShiftCheckpoint,
@@ -83,6 +84,7 @@ from .serializers import (
     TabletCompleteWorkItemSerializer,
     TabletShiftCheckpointSerializer,
     TabletSessionStateSerializer,
+    TabletCallManagerSerializer,
 )
 from .services import (
     ProductionError,
@@ -113,6 +115,7 @@ from .services import (
     tablet_logout_slot,
     tablet_pause_session,
     tablet_resume_session,
+    tablet_call_manager,
 )
 
 
@@ -865,6 +868,19 @@ class ProductionTabletCompleteWorkItemView(APIView):
         return Response({'id': step.id, 'status': step.status, 'completed_quantity': step.completed_quantity})
 
 
+class ProductionTabletCallManagerView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        serializer = TabletCallManagerSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            alert = tablet_call_manager(**serializer.validated_data)
+        except ProductionError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ProductionStationAlertSerializer(alert).data, status=status.HTTP_201_CREATED)
+
+
 class ProductionStationAlertAckView(APIView):
     permission_classes = []
 
@@ -1141,6 +1157,7 @@ class ProductionReportSummaryView(APIView):
         for s in sessions.select_related('user', 'station', 'line__work_order', 'line').order_by('-started_at')[:200]:
             detailed_sessions.append({
                 'id': s.id,
+                'type': 'work',
                 'started_at': s.started_at.isoformat() if s.started_at else None,
                 'ended_at': s.ended_at.isoformat() if s.ended_at else None,
                 'username': s.user.username,
@@ -1151,6 +1168,36 @@ class ProductionReportSummaryView(APIView):
                 'product_name': s.line.product_name if s.line else 'Genel Çalışma',
                 'quantity': float(s.declared_good_quantity or 0),
             })
+
+        breaks = ProductionSessionBreak.objects.filter(organization=org).select_related('user', 'session__station')
+        if start:
+            breaks = breaks.filter(started_at__date__gte=start)
+        if end:
+            breaks = breaks.filter(started_at__date__lte=end)
+        if dept_id and dept_id != 'all':
+            breaks = breaks.filter(session__station__department_id=dept_id)
+        if station_id and station_id != 'all':
+            breaks = breaks.filter(session__station_id=station_id)
+        if user_id and user_id != 'all':
+            breaks = breaks.filter(user_id=user_id)
+
+        for b in breaks.order_by('-started_at')[:200]:
+            detailed_sessions.append({
+                'id': f"break-{b.id}",
+                'type': 'break',
+                'started_at': b.started_at.isoformat() if b.started_at else None,
+                'ended_at': b.ended_at.isoformat() if b.ended_at else None,
+                'username': b.user.username,
+                'fullname': b.user.get_full_name(),
+                'station_code': b.session.station.code if b.session else '',
+                'station_name': b.session.station.name if b.session else '',
+                'work_order_number': 'MOLA',
+                'product_name': b.note or 'Kişisel Mola',
+                'quantity': 0.0,
+            })
+
+        detailed_sessions.sort(key=lambda x: x['started_at'] or '', reverse=True)
+        detailed_sessions = detailed_sessions[:200]
 
         departments = list(ProductionDepartment.objects.filter(organization=org, is_active=True).values('id', 'name'))
         stations_list = list(ProductionStation.objects.filter(organization=org, is_active=True).values('id', 'name', 'code', 'department_id'))

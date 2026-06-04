@@ -30,6 +30,16 @@ import { startSse as startSseClient } from '@/lib/sse'
 import { mapApiProductLineToTask, taskProductLinesToApiPayload } from '@/lib/task-product-lines-helpers'
 import { hasPermission } from '@/lib/permissions'
 
+const relationId = (value: any) => {
+  if (value && typeof value === 'object') return value.id != null ? String(value.id) : undefined
+  return value != null && value !== '' ? String(value) : undefined
+}
+
+const relationName = (value: any) => {
+  if (value && typeof value === 'object') return value.name || value.title || value.code || ''
+  return value || ''
+}
+
 type AppState = {
   data: MockDbSnapshot
   resetDemo: () => void
@@ -370,9 +380,9 @@ export const useAppStore = create<AppState>()(
         id: String(p.id ?? idx),
         sku: p.sku || p.name || `SKU-${idx}`,
         name: p.name,
-        category: p.category_name || '',
-        categoryId: p.category ? String(p.category) : undefined,
-        categoryName: p.category_name || '',
+        category: relationName(p.category_name || p.category),
+        categoryId: relationId(p.category),
+        categoryName: relationName(p.category_name || p.category),
         stock: Number(p.stock ?? 0),
         reserved: Number(p.reserved ?? 0),
         reorderPoint: Number(p.reorder_point ?? 0),
@@ -389,6 +399,8 @@ export const useAppStore = create<AppState>()(
         attributeSchemaOverride: p.attribute_schema_override || [],
         inventoryMode: p.inventory_mode || 'legacy',
         productType: p.product_type || 'finished',
+        technicalDrawingCount: Number(p.technical_drawing_count || 0),
+        technicalDrawings: p.technical_drawings || [],
       }))
       const companies = (partnersRes.data || []).map((c: any, idx: number) => ({
         id: String(c.id ?? idx),

@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from accounts.utils import user_has_any_perm
+from erp.serializers import serialize_technical_drawing_summary, technical_drawing_summary_queryset
 
 from .models import (
     ProductionDataField,
@@ -423,11 +424,21 @@ class ProductionStepTabletAssignmentSerializer(serializers.ModelSerializer):
 
 class ProductionWorkOrderLineSerializer(serializers.ModelSerializer):
     steps = ProductionStepProgressSerializer(many=True, read_only=True)
+    technical_drawings = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductionWorkOrderLine
         fields = '__all__'
         read_only_fields = ['completed_quantity', 'stock_in_done', 'stock_in_movement_id', 'steps']
+
+    def get_technical_drawings(self, obj):
+        if not obj.product_id:
+            return []
+        request = self.context.get('request')
+        return [
+            serialize_technical_drawing_summary(row, request)
+            for row in technical_drawing_summary_queryset(obj.product).select_related('product', 'folder')[:10]
+        ]
 
 
 class ProductionWorkOrderSerializer(serializers.ModelSerializer):
@@ -728,3 +739,9 @@ class PiEventSerializer(StationEventSerializer):
     line_id = serializers.IntegerField(required=False)
     station_code = serializers.CharField(required=False, allow_blank=True)
     event_type = serializers.ChoiceField(choices=[item[0] for item in ProductionEvent.EVENT_TYPES], required=False)
+
+
+class TabletCallManagerSerializer(serializers.Serializer):
+    token = serializers.CharField()
+    title = serializers.CharField(max_length=160)
+    message = serializers.CharField(required=False, allow_blank=True, default='')

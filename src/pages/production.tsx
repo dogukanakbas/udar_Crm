@@ -27,7 +27,7 @@ type StationTarget = { id: number; station: number; station_code?: string; stati
 type ShiftSchedule = { id: number; department: number; department_name?: string; name: string; weekdays: number[]; start_time: string; end_time: string; crosses_midnight: boolean; order: number; is_active: boolean; note?: string }
 type ShiftBreak = { id: number; department: number; department_name?: string; schedule?: number | null; schedule_name?: string; name: string; start_time: string; end_time: string; requires_checkpoint: boolean; lock_type: string; order: number; is_active: boolean; note?: string }
 type OperatorProfile = { id: number; user: number; user_name?: string; has_pin?: boolean; is_active: boolean; last_pin_change_at?: string }
-type StationAlert = { id: number; target_type: string; station?: number | null; station_code?: string; department?: number | null; department_name?: string; work_order?: number | null; work_order_number?: string; title: string; message: string; severity: string; created_at?: string; acks?: any[] }
+type StationAlert = { id: number; target_type: string; station?: number | null; station_code?: string; department?: number | null; department_name?: string; work_order?: number | null; work_order_number?: string; title: string; message: string; severity: string; requires_ack?: boolean; created_at?: string; acks?: any[] }
 type DeviceMap = { id: number; device: number; device_name?: string; station?: number; station_code?: string; source_path: string; target_key: string; target_type: string; is_required: boolean; is_active: boolean; order: number }
 type DataField = { id: number; station?: number | null; station_code?: string; key: string; label: string; field_type: string; source: string; is_visible: boolean; order: number }
 type RuleSet = { id: number; name: string; scope: string; station?: number | null; route?: number | null; trigger_event: string; is_active: boolean; order: number; blocks?: RuleBlock[] }
@@ -871,6 +871,20 @@ export function ProductionManagementPage() {
     await load()
   }
 
+  const handleManagerAck = async (alertId: number) => {
+    try {
+      await api.post(`/production/station-alerts/${alertId}/ack/`, {})
+      toast({ title: 'Bildirim onaylandı' })
+      await load()
+    } catch (err: any) {
+      toast({
+        title: 'Onaylama başarısız',
+        description: err.response?.data?.detail || 'Bilinmeyen bir hata oluştu.',
+        variant: 'destructive',
+      })
+    }
+  }
+
   const createMap = async () => {
     const device = devices.find((item) => String(item.id) === mapDraft.device)
     const payload = {
@@ -1496,7 +1510,25 @@ export function ProductionManagementPage() {
                         <p className="font-semibold">{alert.title}</p>
                         <p className="text-sm text-muted-foreground">{alert.message}</p>
                       </div>
-                      <Badge variant={alert.severity === 'critical' ? 'destructive' : 'outline'}>{alert.severity}</Badge>
+                      <div className="flex flex-col items-end gap-2 shrink-0">
+                        <Badge variant={alert.severity === 'critical' ? 'destructive' : 'outline'}>{alert.severity}</Badge>
+                        {alert.requires_ack && (
+                          alert.acks && alert.acks.length > 0 ? (
+                            <span className="inline-flex items-center text-[10px] text-emerald-600 font-bold dark:text-emerald-400 gap-1 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                              <CheckCircle2 className="h-3 w-3" /> Onaylandı ({alert.acks[0].user_name || alert.acks[0].tablet_name})
+                            </span>
+                          ) : (
+                            <Button 
+                              size="sm"
+                              variant="outline" 
+                              onClick={() => handleManagerAck(alert.id)}
+                              className="h-7 border-amber-500 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 text-xs px-2 py-0 font-semibold gap-1"
+                            >
+                              <Volume2 className="h-3.5 w-3.5" /> Okudum / Onayla
+                            </Button>
+                          )
+                        )}
+                      </div>
                     </div>
                     <div className="mt-2 text-xs text-muted-foreground">
                       Hedef: {alert.station_code || alert.department_name || alert.work_order_number || alert.target_type} · Okundu: {alert.acks?.length || 0}
@@ -2313,10 +2345,36 @@ export function ProductionTabletPage() {
   const [checkpointTotal, setCheckpointTotal] = useState('')
   const [checkpointNote, setCheckpointNote] = useState('')
   const [activeAlert, setActiveAlert] = useState<any | null>(null)
+  const [callManagerOpen, setCallManagerOpen] = useState(false)
+  const [callManagerTitle, setCallManagerTitle] = useState('Makine Arızası')
+  const [callManagerMessage, setCallManagerMessage] = useState('')
   const [tick, setTick] = useState(Date.now())
   const [lastLoadedAt, setLastLoadedAt] = useState(Date.now())
   const seenAlerts = useRef<Set<number>>(new Set())
   const checkpointActionRef = useRef<((total: string, note: string) => Promise<void>) | null>(null)
+
+  const callManager = async () => {
+    setSubmitting(true)
+    try {
+      await api.post('/production/tablet/call-manager/', {
+        token,
+        title: callManagerTitle,
+        message: callManagerMessage,
+      })
+      toast({ title: 'Yönetici çağrısı gönderildi' })
+      setCallManagerOpen(false)
+      setCallManagerMessage('')
+      await load()
+    } catch (err: any) {
+      toast({
+        title: 'Çağrı başarısız',
+        description: err.response?.data?.detail || 'Bilinmeyen bir hata oluştu.',
+        variant: 'destructive',
+      })
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   const load = async () => {
     if (!token) return
@@ -2558,10 +2616,23 @@ export function ProductionTabletPage() {
   return (
     <div className="min-h-screen space-y-3 bg-background p-3">
       <div className="rounded-xl border bg-card p-3">
-        <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr] lg:items-center">
-          <div>
-            <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{ctx.station?.department_name || 'İmalat'}</p>
-            <h1 className="mt-1 text-3xl font-black tracking-wide md:text-5xl">{ctx.station?.code} · {ctx.station?.name}</h1>
+        <div className="grid gap-3 lg:grid-cols-[1.5fr_1fr] lg:items-center">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{ctx.station?.department_name || 'İmalat'}</p>
+              <h1 className="mt-1 text-3xl font-black tracking-wide md:text-5xl">{ctx.station?.code} · {ctx.station?.name}</h1>
+            </div>
+            <Button 
+              onClick={() => {
+                setCallManagerTitle('Makine Arızası')
+                setCallManagerMessage('')
+                setCallManagerOpen(true)
+              }} 
+              variant="outline"
+              className="h-12 border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-300 font-bold hover:bg-amber-500/20 gap-2 shrink-0 sm:self-center"
+            >
+              <Volume2 className="h-5 w-5 animate-pulse" /> Yöneticiyi Çağır
+            </Button>
           </div>
           <div className="grid gap-2 sm:grid-cols-3">
             <MetricBlock label="Hedef" value={formatNumber(n(ctx.daily_target?.target_quantity))} />
@@ -2780,6 +2851,44 @@ export function ProductionTabletPage() {
           <DialogHeader><DialogTitle className="flex items-center gap-2 text-2xl"><Volume2 className="h-6 w-6 text-amber-500" /> {activeAlert?.title}</DialogTitle></DialogHeader>
           <p className="text-lg">{activeAlert?.message}</p>
           <DialogFooter><Button onClick={ackAlert}><CheckCircle2 className="mr-2 h-4 w-4" /> Okudum</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={callManagerOpen} onOpenChange={setCallManagerOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Volume2 className="h-5 w-5 text-amber-500" /> Yöneticiyi Çağır
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid gap-2">
+              <Label>Durum/Kategori</Label>
+              <Select value={callManagerTitle} onValueChange={setCallManagerTitle}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Durum seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Makine Arızası">Makine Arızası</SelectItem>
+                  <SelectItem value="Teknik Sorun">Teknik Sorun</SelectItem>
+                  <SelectItem value="Diğer">Diğer</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Açıklama / Mesaj (İsteğe Bağlı)</Label>
+              <Textarea 
+                placeholder="Yöneticiye iletmek istediğiniz detayları yazın..." 
+                value={callManagerMessage} 
+                onChange={(e) => setCallManagerMessage(e.target.value)} 
+                disabled={submitting}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCallManagerOpen(false)} disabled={submitting}>Vazgeç</Button>
+            <Button onClick={callManager} disabled={submitting} className="bg-amber-500 hover:bg-amber-600 text-white font-bold">Çağrıyı Gönder</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
@@ -3204,16 +3313,31 @@ export function ProductionReportsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {summary.detailed_sessions.map((row: any) => (
-                        <tr key={row.id} className="hover:bg-muted/20">
-                          <td className="px-4 py-2.5 text-muted-foreground text-xs">{formatDateTime(row.started_at)}</td>
-                          <td className="px-4 py-2.5 font-medium text-foreground">{row.fullname || row.username}</td>
-                          <td className="px-4 py-2.5 text-muted-foreground">{row.station_code} - {row.station_name}</td>
-                          <td className="px-4 py-2.5 font-mono text-xs">{row.work_order_number || '-'}</td>
-                          <td className="px-4 py-2.5 truncate max-w-[200px]" title={row.product_name}>{row.product_name}</td>
-                          <td className="px-4 py-2.5 text-right font-semibold text-foreground">{formatNumber(row.quantity)}</td>
-                        </tr>
-                      ))}
+                      {summary.detailed_sessions.map((row: any) => {
+                        const isBreak = row.type === 'break';
+                        return (
+                          <tr key={row.id} className={`hover:bg-muted/20 ${isBreak ? 'bg-amber-500/5 dark:bg-amber-500/10 hover:bg-amber-500/10 dark:hover:bg-amber-500/20' : ''}`}>
+                            <td className="px-4 py-2.5 text-muted-foreground text-xs">{formatDateTime(row.started_at)}</td>
+                            <td className="px-4 py-2.5 font-medium text-foreground">{row.fullname || row.username}</td>
+                            <td className="px-4 py-2.5 text-muted-foreground">{row.station_code ? `${row.station_code} - ${row.station_name}` : '-'}</td>
+                            <td className="px-4 py-2.5 font-mono text-xs">
+                              {isBreak ? (
+                                <span className="inline-flex items-center rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-400">
+                                  MOLA
+                                </span>
+                              ) : (
+                                row.work_order_number || '-'
+                              )}
+                            </td>
+                            <td className={`px-4 py-2.5 truncate max-w-[200px] ${isBreak ? 'italic text-amber-600 dark:text-amber-400 font-medium' : 'text-foreground'}`} title={row.product_name}>
+                              {row.product_name}
+                            </td>
+                            <td className="px-4 py-2.5 text-right font-semibold text-foreground">
+                              {isBreak ? '-' : formatNumber(row.quantity)}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

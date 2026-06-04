@@ -22,7 +22,21 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework import routers
 
 from crm.views import QuoteViewSet, PricingRuleViewSet, SellerCompanyViewSet, BusinessPartnerViewSet, LeadViewSet, OpportunityViewSet, ContactViewSet
-from erp.views import ProductViewSet as ERPProductViewSet, CategoryViewSet, InvoiceViewSet, SalesOrderViewSet, PurchaseOrderViewSet, StockMovementViewSet, VehicleViewSet, WarehouseViewSet, InventoryLocationViewSet, WarehouseStockViewSet, WarehouseDashboardView
+from erp.views import (
+    ProductViewSet as ERPProductViewSet,
+    CategoryViewSet,
+    InvoiceViewSet,
+    ProductTechnicalDrawingViewSet,
+    SalesOrderViewSet,
+    PurchaseOrderViewSet,
+    StockMovementViewSet,
+    TechnicalDrawingFolderViewSet,
+    VehicleViewSet,
+    WarehouseViewSet,
+    InventoryLocationViewSet,
+    WarehouseStockViewSet,
+    WarehouseDashboardView,
+)
 from mdf.views import MdfSkuViewSet
 from production.views import (
     ProductionDataFieldViewSet,
@@ -53,6 +67,7 @@ from production.views import (
     ProductionTabletBreakStartView,
     ProductionTabletCheckpointView,
     ProductionTabletCompleteWorkItemView,
+    ProductionTabletCallManagerView,
     ProductionTabletContextView,
     ProductionTabletLoginSlotView,
     ProductionTabletLogoutSlotView,
@@ -120,6 +135,8 @@ router.register(r'contacts', ContactViewSet, basename='contacts')
 router.register(r'leads', LeadViewSet, basename='leads')
 router.register(r'opportunities', OpportunityViewSet, basename='opportunities')
 router.register(r'products', ERPProductViewSet, basename='products')
+router.register(r'technical-drawing-folders', TechnicalDrawingFolderViewSet, basename='technical-drawing-folders')
+router.register(r'product-technical-drawings', ProductTechnicalDrawingViewSet, basename='product-technical-drawings')
 router.register(r'categories', CategoryViewSet, basename='categories')
 router.register(r'invoices', InvoiceViewSet, basename='invoices')
 router.register(r'sales-orders', SalesOrderViewSet, basename='sales-orders')
@@ -219,6 +236,7 @@ urlpatterns = [
     path('api/production/tablet/checkpoint/', ProductionTabletCheckpointView.as_view(), name='production-tablet-checkpoint'),
     path('api/production/tablet/shift-checkpoint/', ProductionTabletShiftCheckpointView.as_view(), name='production-tablet-shift-checkpoint'),
     path('api/production/tablet/complete-work-item/', ProductionTabletCompleteWorkItemView.as_view(), name='production-tablet-complete-work-item'),
+    path('api/production/tablet/call-manager/', ProductionTabletCallManagerView.as_view(), name='production-tablet-call-manager'),
     path('api/production/station-sessions/start/', ProductionSessionStartView.as_view(), name='production-session-start'),
     path('api/production/station-sessions/pause/', ProductionSessionPauseView.as_view(), name='production-session-pause'),
     path('api/production/station-sessions/resume/', ProductionSessionResumeView.as_view(), name='production-session-resume'),

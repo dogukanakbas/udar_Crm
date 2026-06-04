@@ -25,6 +25,7 @@ from .models import (
     ProductionShiftBreak,
     ProductionShiftCheckpoint,
     ProductionShiftSchedule,
+    ProductionStation,
     ProductionStationTarget,
     ProductionStationTablet,
     ProductionStationUser,
@@ -1047,3 +1048,26 @@ class ProductionAutomationTests(TestCase):
         self.assertEqual(context['daily_target']['actual_quantity'], Decimal('150.00'))
         # 3. Remaining quantity is 350
         self.assertEqual(context['daily_target']['remaining_quantity'], Decimal('350.00'))
+
+    def test_tablet_call_manager_creates_alert(self):
+        station = ProductionStation.objects.filter(organization=self.org).first()
+        tablet = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=station,
+            name='Test Tablet',
+            token='test-call-manager-token',
+        )
+        from .services import tablet_call_manager
+        alert = tablet_call_manager(
+            token=tablet.token,
+            title='Makine Arızası',
+            message='CNC-1 makinesinde hidrolik kaçak var.'
+        )
+        self.assertEqual(alert.organization, self.org)
+        self.assertEqual(alert.station, station)
+        self.assertEqual(alert.title, 'Makine Arızası')
+        self.assertEqual(alert.message, 'CNC-1 makinesinde hidrolik kaçak var.')
+        self.assertEqual(alert.severity, 'warning')
+        self.assertTrue(alert.requires_ack)
+        self.assertEqual(alert.acks.count(), 1)
+        self.assertEqual(alert.acks.first().tablet, tablet)

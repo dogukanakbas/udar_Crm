@@ -14,15 +14,29 @@ from permissions import IsOrgMember, HasAPIPermission
 from organizations.models import Organization, NumberRange, Warehouse
 from core.events import push_event
 from .inventory_service import InventoryError, adjust, allocate_opening_balance, as_decimal, stock_in, stock_out, transfer
-from .models import InventoryLocation, Invoice, Product, Category, SalesOrder, PurchaseOrder, StockMovement, Vehicle, WarehouseStock
+from .models import (
+    InventoryLocation,
+    Invoice,
+    Product,
+    ProductTechnicalDrawing,
+    Category,
+    SalesOrder,
+    PurchaseOrder,
+    StockMovement,
+    TechnicalDrawingFolder,
+    Vehicle,
+    WarehouseStock,
+)
 from .template_catalog_import import upsert_product_catalog, upsert_template_catalog
 from .serializers import (
     InvoiceSerializer,
     ProductSerializer,
+    ProductTechnicalDrawingSerializer,
     CategorySerializer,
     SalesOrderSerializer,
     PurchaseOrderSerializer,
     StockMovementSerializer,
+    TechnicalDrawingFolderSerializer,
     VehicleSerializer,
     WarehouseSerializer,
     InventoryLocationSerializer,
@@ -206,6 +220,66 @@ class ProductViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             Product.objects.bulk_update(products, ['order'])
 
         return Response({'detail': 'Ürünler başarıyla sıralandı.', 'count': len(normalized_positions)})
+
+
+class TechnicalDrawingFolderViewSet(OrgScopedMixin, viewsets.ModelViewSet):
+    serializer_class = TechnicalDrawingFolderSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'technical_drawings.view'
+    permission_map = {
+        'create': 'technical_drawings.manage',
+        'update': 'technical_drawings.manage',
+        'partial_update': 'technical_drawings.manage',
+        'destroy': 'technical_drawings.manage',
+    }
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name', 'description']
+    ordering_fields = ['order', 'name', 'id']
+    ordering = ['order', 'name', 'id']
+    queryset = TechnicalDrawingFolder.objects.all()
+
+
+class ProductTechnicalDrawingViewSet(OrgScopedMixin, viewsets.ModelViewSet):
+    serializer_class = ProductTechnicalDrawingSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'technical_drawings.view'
+    permission_map = {
+        'create': 'technical_drawings.manage',
+        'update': 'technical_drawings.manage',
+        'partial_update': 'technical_drawings.manage',
+        'destroy': 'technical_drawings.manage',
+    }
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = [
+        'title',
+        'description',
+        'original_filename',
+        'product__sku',
+        'product__name',
+        'product__category__name',
+    ]
+    ordering_fields = ['uploaded_at', 'title', 'product__sku']
+    ordering = ['-uploaded_at', '-id']
+    queryset = ProductTechnicalDrawing.objects.select_related('product', 'product__category', 'folder', 'uploaded_by')
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        product_id = self.request.query_params.get('product')
+        folder_id = self.request.query_params.get('folder')
+        active = self.request.query_params.get('active')
+        tag = self.request.query_params.get('tag')
+        if product_id:
+            qs = qs.filter(product_id=product_id)
+        if folder_id:
+            qs = qs.filter(folder_id=folder_id)
+        if active in {'true', '1', 'false', '0'}:
+            qs = qs.filter(is_active=active in {'true', '1'})
+        if tag:
+            qs = qs.filter(tags__contains=[tag])
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(organization=self.request.user.organization, uploaded_by=self.request.user)
 
 
 class CategoryViewSet(OrgScopedMixin, viewsets.ModelViewSet):

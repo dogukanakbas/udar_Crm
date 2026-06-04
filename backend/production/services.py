@@ -17,6 +17,7 @@ from accounts.utils import user_has_perm
 from core.events import push_event
 from erp.inventory_service import InventoryError, stock_in
 from erp.models import InventoryLocation, Product
+from erp.serializers import serialize_technical_drawing_summary, technical_drawing_summary_queryset
 
 from .models import (
     ProductionDataField,
@@ -1204,6 +1205,7 @@ def _station_target_payload(organization, station, day):
         'target_quantity': target.target_quantity,
         'actual_quantity': actual,
         'remaining_quantity': max(target.target_quantity - actual, Decimal('0')),
+        'completion_percent': (actual / target.target_quantity * Decimal('100')) if target.target_quantity else Decimal('0'),
         'note': target.note,
     }
 
@@ -1656,6 +1658,12 @@ def _work_item_for_step(step, tablet=None):
     line = step.line
     assignments = list(step.tablet_assignments.all())
     assignment = next((item for item in assignments if tablet and item.tablet_id == tablet.id), None)
+    drawings = []
+    if line.product_id:
+        drawings = [
+            serialize_technical_drawing_summary(row)
+            for row in technical_drawing_summary_queryset(line.product).select_related('product', 'folder')[:10]
+        ]
     return {
         'line_id': line.id,
         'work_order_id': line.work_order_id,
@@ -1665,6 +1673,9 @@ def _work_item_for_step(step, tablet=None):
         'product_name': line.product_name,
         'detail_1': line.detail_1,
         'detail_2': line.detail_2,
+        'technical_notes': line.technical_notes,
+        'details': line.details or {},
+        'technical_drawings': drawings,
         'status': step.status,
         'target_quantity': step.target_quantity,
         'completed_quantity': step.completed_quantity,
@@ -2221,3 +2232,26 @@ def dashboard_summary(organization):
 
 def make_device_token():
     return uuid4().hex + uuid4().hex
+
+
+def tablet_call_manager(token, title, message):
+    tablet = _tablet_by_token(token)
+    station = tablet.station
+    alert = ProductionStationAlert.objects.create(
+        organization=tablet.organization,
+        target_type='station',
+        station=station,
+        department=station.department,
+        title=title,
+        message=message or f"{station.code} istasyonundan yönetici çağrısı yapıldı.",
+        severity='warning',
+        requires_ack=True
+    )
+    # Auto-acknowledge for the calling tablet itself so it doesn't pop up on the tablet
+    ProductionStationAlertAck.objects.create(
+        organization=tablet.organization,
+        alert=alert,
+        tablet=tablet,
+        acknowledged_at=timezone.now()
+    )
+    return alert

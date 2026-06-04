@@ -146,6 +146,27 @@ export interface Product {
   attributeSchemaOverride?: CategoryTemplateField[]
   inventoryMode?: 'legacy' | 'warehouse'
   productType?: 'finished' | 'semi_finished' | 'raw_material' | 'consumable'
+  technicalDrawingCount?: number
+  technicalDrawings?: ProductTechnicalDrawing[]
+}
+
+export interface ProductTechnicalDrawing {
+  id: number
+  product: number | string
+  product_sku?: string
+  product_name?: string
+  folder?: number | string | null
+  folder_name?: string
+  title: string
+  version?: string
+  tags?: string[]
+  description?: string
+  file?: string
+  file_url?: string
+  file_type?: 'image'
+  original_filename?: string
+  is_active?: boolean
+  uploaded_at?: string
 }
 
 export interface InvoicePayment {

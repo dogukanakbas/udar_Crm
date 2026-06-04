@@ -5,7 +5,48 @@ from accounts.price_lists import normalize_product_price_lists
 
 from organizations.models import Warehouse
 from .inventory_service import resolve_product_details
-from .models import Category, InventoryLocation, Invoice, InvoicePayment, Product, PurchaseOrder, SalesOrder, StockMovement, Vehicle, WarehouseStock
+from .models import (
+    Category,
+    InventoryLocation,
+    Invoice,
+    InvoicePayment,
+    Product,
+    ProductTechnicalDrawing,
+    PurchaseOrder,
+    SalesOrder,
+    StockMovement,
+    TechnicalDrawingFolder,
+    Vehicle,
+    WarehouseStock,
+)
+
+
+def technical_drawing_summary_queryset(product):
+    return product.technical_drawings.filter(is_active=True).order_by('-uploaded_at', '-id')
+
+
+def serialize_technical_drawing_summary(row, request=None):
+    file_url = row.file.url if row.file else ''
+    if request and file_url:
+        file_url = request.build_absolute_uri(file_url)
+    return {
+        'id': row.id,
+        'product': row.product_id,
+        'product_sku': getattr(row.product, 'sku', ''),
+        'product_name': getattr(row.product, 'name', ''),
+        'folder': row.folder_id,
+        'folder_name': row.folder.name if row.folder else '',
+        'title': row.title,
+        'version': row.version,
+        'tags': row.tags or [],
+        'description': row.description,
+        'file': file_url,
+        'file_url': file_url,
+        'file_type': row.file_type,
+        'original_filename': row.original_filename,
+        'is_active': row.is_active,
+        'uploaded_at': row.uploaded_at,
+    }
 
 
 def _ensure_org(request):
@@ -88,6 +129,8 @@ class ProductSerializer(serializers.ModelSerializer):
         default=None,
     )
     sku = serializers.CharField(required=False, allow_blank=True, default='')
+    technical_drawing_count = serializers.SerializerMethodField()
+    technical_drawings = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -117,6 +160,16 @@ class ProductSerializer(serializers.ModelSerializer):
         self.fields['sku'].required = False
         self.fields['sku'].allow_blank = True
         self.fields['sku'].default = ''
+
+    def get_technical_drawing_count(self, obj):
+        return technical_drawing_summary_queryset(obj).count()
+
+    def get_technical_drawings(self, obj):
+        request = self.context.get('request')
+        return [
+            serialize_technical_drawing_summary(row, request)
+            for row in technical_drawing_summary_queryset(obj).select_related('product', 'folder')[:5]
+        ]
 
     def to_internal_value(self, data):
         mutable = data.copy()
@@ -193,11 +246,90 @@ class ProductSerializer(serializers.ModelSerializer):
         data['category_template_defaults'] = instance.category.template_defaults if instance.category else {}
         data['category_attribute_schema'] = instance.category.attribute_schema if instance.category else []
         data['price_lists'] = normalize_product_price_lists(instance.price_lists, instance.price)
+        data['technical_drawing_count'] = self.get_technical_drawing_count(instance)
+        data['technical_drawings'] = self.get_technical_drawings(instance)
         data['resolved_attribute_schema'] = _merge_attribute_schema(
             instance.category.attribute_schema if instance.category else [],
             instance.attribute_schema_override,
         )
         return data
+
+
+class TechnicalDrawingFolderSerializer(serializers.ModelSerializer):
+    drawing_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TechnicalDrawingFolder
+        fields = '__all__'
+        read_only_fields = ['organization', 'drawing_count']
+
+    def get_drawing_count(self, obj):
+        return obj.drawings.filter(is_active=True).count()
+
+
+class ProductTechnicalDrawingSerializer(serializers.ModelSerializer):
+    product_sku = serializers.CharField(source='product.sku', read_only=True)
+    product_name = serializers.CharField(source='product.name', read_only=True)
+    folder_name = serializers.CharField(source='folder.name', read_only=True, default='')
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductTechnicalDrawing
+        fields = '__all__'
+        read_only_fields = [
+            'organization',
+            'uploaded_by',
+            'uploaded_at',
+            'updated_at',
+            'file_type',
+            'original_filename',
+            'product_sku',
+            'product_name',
+            'folder_name',
+            'file_url',
+        ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        org = _ensure_org(self.context.get('request'))
+        self.fields['product'].queryset = Product.objects.filter(organization=org)
+        self.fields['folder'].queryset = TechnicalDrawingFolder.objects.filter(organization=org)
+
+    def get_file_url(self, obj):
+        if not obj.file:
+            return ''
+        request = self.context.get('request')
+        return request.build_absolute_uri(obj.file.url) if request else obj.file.url
+
+    def validate_tags(self, value):
+        if value in [None, '']:
+            return []
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(',') if item.strip()]
+        if isinstance(value, list):
+            return [str(item or '').strip() for item in value if str(item or '').strip()]
+        raise serializers.ValidationError('Etiketler liste veya virgüllü metin olmalıdır.')
+
+    def validate_file(self, value):
+        extension = (getattr(value, 'name', '') or '').rsplit('.', 1)[-1].lower()
+        if extension not in {'png', 'jpg', 'jpeg'}:
+            raise serializers.ValidationError('Teknik resim yalnız PNG veya JPG formatında yüklenebilir.')
+        return value
+
+    def _apply_uploaded_file_metadata(self, validated_data):
+        uploaded = validated_data.get('file')
+        if uploaded:
+            validated_data['original_filename'] = getattr(uploaded, 'name', '') or ''
+            validated_data['file_type'] = 'image'
+        if not validated_data.get('title'):
+            validated_data['title'] = validated_data.get('original_filename') or 'Teknik resim'
+        return validated_data
+
+    def create(self, validated_data):
+        return super().create(self._apply_uploaded_file_metadata(validated_data))
+
+    def update(self, instance, validated_data):
+        return super().update(instance, self._apply_uploaded_file_metadata(validated_data))
 
 
 class InvoicePaymentSerializer(serializers.ModelSerializer):

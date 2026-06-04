@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
-import { Trash2 } from 'lucide-react'
+import { FileImage, Trash2, Upload } from 'lucide-react'
 
 import { DataTable } from '@/components/data-table'
 import { SortableTable } from '@/components/sortable-table'
@@ -18,6 +18,7 @@ import { useToast } from '@/components/ui/use-toast'
 import { RbacGuard } from '@/components/rbac'
 import { useAppStore } from '@/state/use-app-store'
 import api from '@/lib/api'
+import { apiOrigin } from '@/lib/api'
 import {
   downloadInventoryStateWorkbook,
   downloadInventoryTemplateWorkbook,
@@ -45,6 +46,21 @@ const EMPTY_PRODUCT = {
   templateDefaults: { section_key: '', unit: '', tax: 20, discount: 0, discount_secondary: 0, template_family: '', technical_items: [] },
   attributeValues: {},
   attributeSchemaOverride: [],
+}
+
+function productDrawingUrl(drawing: any) {
+  const raw = drawing?.file_url || drawing?.file || ''
+  if (!raw) return ''
+  if (/^https?:\/\//i.test(raw)) return raw
+  return `${apiOrigin}${raw.startsWith('/') ? raw : `/${raw}`}`
+}
+
+function safeText(value: any, fallback = '') {
+  if (value === null || value === undefined || value === '') return fallback
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) return value.map((item) => safeText(item)).filter(Boolean).join(', ') || fallback
+  if (typeof value === 'object') return safeText(value.name || value.title || value.sku || value.code || value.id, fallback)
+  return fallback
 }
 
 export function InventoryPanel() {
@@ -329,7 +345,7 @@ export function InventoryPanel() {
                     <div className="min-w-0">
                       <p className="font-semibold">{item.name}</p>
                       <p className="text-xs text-muted-foreground">SKU {item.sku}</p>
-                      <p className="text-xs text-muted-foreground">{item.categoryName || item.category || 'Kategori yok'}</p>
+                      <p className="text-xs text-muted-foreground">{safeText(item.categoryName || item.category, 'Kategori yok')}</p>
                     </div>
                     <Badge variant="outline">Stok {item.stock - item.reserved}</Badge>
                   </div>
@@ -499,6 +515,10 @@ function AdjustStockDialog({ sku, onClose, onAdjust }: { sku: string | null; onC
 function ProductEditorDialog({ open, product, categories, priceLists, onClose, onSave }: { open: boolean; product?: Product | null; categories: Category[]; priceLists: PriceListOption[]; onClose: () => void; onSave: (payload: any) => void }) {
   const [values, setValues] = useState<any>(EMPTY_PRODUCT)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const drawingInputRef = useRef<HTMLInputElement | null>(null)
+  const [drawings, setDrawings] = useState<any[]>([])
+  const [drawingTitle, setDrawingTitle] = useState('')
+  const [drawingUploading, setDrawingUploading] = useState(false)
   const selectedCategory = categories.find((category) => category.id === values.categoryId)
   const mergedSchema = [...(selectedCategory?.attributeSchema || []), ...(values.attributeSchemaOverride || [])]
 
@@ -532,6 +552,47 @@ function ProductEditorDialog({ open, product, categories, priceLists, onClose, o
     )
     setSubmitError(null)
   }, [open, product, priceLists])
+
+  const loadDrawings = async () => {
+    if (!product?.id) {
+      setDrawings([])
+      return
+    }
+    const response = await api.get('/product-technical-drawings/', { params: { product: product.id, active: 'true' } })
+    setDrawings(Array.isArray(response.data) ? response.data : response.data?.results || [])
+  }
+
+  useEffect(() => {
+    if (!open) return
+    void loadDrawings()
+  }, [open, product?.id])
+
+  const uploadDrawing = async (file?: File) => {
+    if (!product?.id || !file) return
+    const extension = file.name.split('.').pop()?.toLowerCase()
+    if (!['png', 'jpg', 'jpeg'].includes(extension || '')) {
+      setSubmitError('Teknik resim yalnız PNG veya JPG formatında yüklenebilir.')
+      return
+    }
+    setDrawingUploading(true)
+    try {
+      const form = new FormData()
+      form.append('product', product.id)
+      form.append('title', drawingTitle.trim() || file.name)
+      form.append('file', file)
+      form.append('is_active', 'true')
+      await api.post('/product-technical-drawings/', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+      setDrawingTitle('')
+      await loadDrawings()
+    } finally {
+      setDrawingUploading(false)
+    }
+  }
+
+  const deleteDrawing = async (drawingId: number) => {
+    await api.delete(`/product-technical-drawings/${drawingId}/`)
+    await loadDrawings()
+  }
 
   const setBasic = (key: string, value: any) => setValues((current: any) => ({ ...current, [key]: value }))
   const setTemplate = (key: string, value: any) => setValues((current: any) => ({ ...current, templateDefaults: { ...current.templateDefaults, [key]: value } }))
@@ -643,6 +704,59 @@ function ProductEditorDialog({ open, product, categories, priceLists, onClose, o
                     <Input value={item} onChange={(event) => updateTechnicalItem(index, event.target.value)} placeholder={`${index + 1}. teknik madde`} />
                     <Button type="button" variant="ghost" size="sm" onClick={() => removeTechnicalItem(index)}>
                       Sil
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3 rounded-lg border border-border/70 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="font-medium">Ürün teknik resimleri</p>
+                <p className="text-xs text-muted-foreground">PNG/JPG yükleyin. Üretim tableti ve iş emirlerinde tıklanarak görüntülenir.</p>
+              </div>
+              {product?.id ? (
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    ref={drawingInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      event.target.value = ''
+                      void uploadDrawing(file)
+                    }}
+                  />
+                  <Input className="h-9 w-48" placeholder="Başlık (opsiyonel)" value={drawingTitle} onChange={(event) => setDrawingTitle(event.target.value)} />
+                  <Button type="button" size="sm" variant="outline" disabled={drawingUploading} onClick={() => drawingInputRef.current?.click()}>
+                    <Upload className="mr-2 h-4 w-4" /> Yükle
+                  </Button>
+                </div>
+              ) : (
+                <Badge variant="outline">Önce ürünü kaydedin</Badge>
+              )}
+            </div>
+            {drawings.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Bu ürüne bağlı teknik resim yok.</p>
+            ) : (
+              <div className="grid gap-2 md:grid-cols-2">
+                {drawings.map((drawing) => (
+                  <div key={drawing.id} className="flex items-center gap-3 rounded-md border p-2">
+                    <button type="button" className="h-14 w-16 overflow-hidden rounded border bg-muted" onClick={() => window.open(productDrawingUrl(drawing), '_blank')}>
+                      <img src={productDrawingUrl(drawing)} alt={safeText(drawing.title, 'Teknik resim')} className="h-full w-full object-contain" />
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{safeText(drawing.title, 'Teknik resim')}</p>
+                      <p className="truncate text-xs text-muted-foreground">{safeText(drawing.original_filename, 'PNG/JPG')}</p>
+                    </div>
+                    <Button type="button" size="icon" variant="ghost" onClick={() => window.open(productDrawingUrl(drawing), '_blank')} title="Görüntüle">
+                      <FileImage className="h-4 w-4" />
+                    </Button>
+                    <Button type="button" size="icon" variant="ghost" className="text-destructive" onClick={() => deleteDrawing(drawing.id)} title="Sil">
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                 ))}
