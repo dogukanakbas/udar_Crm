@@ -1273,7 +1273,7 @@ export function ProductionManagementPage() {
                     <SelectContent>{productionUsers.map((user) => <SelectItem key={user.id} value={String(user.id)}>{userLabel(user)}{user.role ? ` · ${user.role}` : ''}</SelectItem>)}</SelectContent>
                   </Select>
                   {!productionUsers.length && <p className="text-xs text-muted-foreground">PIN verilecek kullanıcı önce üretim yetkisi almalı.</p>}
-                  <Input type="text" inputMode="numeric" pattern="[0-9]*" style={{ WebkitTextSecurity: 'disc' } as any} placeholder="Tablet PIN" value={pinDraft.pin} onChange={(e) => setPinDraft((current) => ({ ...current, pin: e.target.value.replace(/\D/g, '') }))} />
+                  <Input type="text" inputMode="numeric" pattern="[0-9]*" style={{ WebkitTextSecurity: 'disc' } as any} placeholder="Tablet PIN" maxLength={4} value={pinDraft.pin} onChange={(e) => setPinDraft((current) => ({ ...current, pin: e.target.value.replace(/\D/g, '') }))} />
                   <Button onClick={saveOperatorPin} disabled={!pinDraft.user || !pinDraft.pin}>PIN kaydet</Button>
                 </CardContent>
               </Card>
@@ -2941,7 +2941,7 @@ export function ProductionTabletPage() {
               <SelectTrigger><SelectValue placeholder="Çalışan seç" /></SelectTrigger>
               <SelectContent>{(ctx.operators || []).map((operator) => <SelectItem key={operator.id} value={String(operator.id)}>{operator.name}{operator.has_pin ? '' : ' · PIN yok'}</SelectItem>)}</SelectContent>
             </Select>
-            <Input type="text" inputMode="numeric" pattern="[0-9]*" style={{ WebkitTextSecurity: 'disc' } as any} placeholder="Üretim PIN’i" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} disabled={submitting} />
+            <Input type="text" inputMode="numeric" pattern="[0-9]*" style={{ WebkitTextSecurity: 'disc' } as any} placeholder="Üretim PIN’i" maxLength={4} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} disabled={submitting} />
           </div>
           <DialogFooter><Button onClick={login} disabled={!loginUser || !pin || submitting}>Başlat</Button></DialogFooter>
         </DialogContent>
@@ -2958,7 +2958,7 @@ export function ProductionTabletPage() {
               <Label>Yapılan Üretim Miktarı (Adet)</Label>
               <Input type="text" inputMode="numeric" pattern="[0-9]*" value={closingQty} onChange={(e) => setClosingQty(e.target.value)} disabled={submitting} />
             </div>
-            <Input type="text" inputMode="numeric" pattern="[0-9]*" style={{ WebkitTextSecurity: 'disc' } as any} placeholder="Üretim PIN’i" value={closingPin} onChange={(e) => setClosingPin(e.target.value.replace(/\D/g, ''))} disabled={submitting} />
+            <Input type="text" inputMode="numeric" pattern="[0-9]*" style={{ WebkitTextSecurity: 'disc' } as any} placeholder="Üretim PIN’i" maxLength={4} value={closingPin} onChange={(e) => setClosingPin(e.target.value.replace(/\D/g, ''))} disabled={submitting} />
             <Textarea placeholder="Varsa notunuz" value={note} onChange={(e) => setNote(e.target.value)} disabled={submitting} />
           </div>
           <DialogFooter><Button onClick={logout} disabled={!closingQty || !closingPin || submitting}>Çıkışı tamamla</Button></DialogFooter>
@@ -3059,7 +3059,7 @@ export function ProductionTabletPage() {
                   inputMode="numeric"
                   pattern="[0-9]*"
                   style={{ WebkitTextSecurity: 'disc' } as any}
-                  maxLength={6}
+                  maxLength={4}
                   placeholder="PIN"
                   value={batchLogoutPin}
                   onChange={(e) => setBatchLogoutPin(e.target.value.replace(/\D/g, ''))}
