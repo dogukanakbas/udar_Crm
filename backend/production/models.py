@@ -32,6 +32,7 @@ class ProductionDepartment(models.Model):
     code = models.CharField(max_length=50)
     name = models.CharField(max_length=120)
     color = models.CharField(max_length=32, blank=True, default='')
+    notification_group = models.ForeignKey('accounts.UserGroup', on_delete=models.SET_NULL, null=True, blank=True, related_name='production_departments')
     order = models.PositiveIntegerField(default=0, db_index=True)
     is_active = models.BooleanField(default=True)
 
@@ -649,6 +650,7 @@ class ProductionStationAlert(models.Model):
     station = models.ForeignKey(ProductionStation, on_delete=models.CASCADE, null=True, blank=True, related_name='alerts')
     department = models.ForeignKey(ProductionDepartment, on_delete=models.CASCADE, null=True, blank=True, related_name='alerts')
     work_order = models.ForeignKey(ProductionWorkOrder, on_delete=models.CASCADE, null=True, blank=True, related_name='station_alerts')
+    target_group = models.ForeignKey('accounts.UserGroup', on_delete=models.SET_NULL, null=True, blank=True, related_name='targeted_station_alerts')
     title = models.CharField(max_length=160)
     message = models.TextField()
     severity = models.CharField(max_length=20, default='info')

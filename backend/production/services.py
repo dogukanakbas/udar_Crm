@@ -2242,6 +2242,7 @@ def tablet_call_manager(token, title, message):
         target_type='station',
         station=station,
         department=station.department,
+        target_group=station.department.notification_group,
         title=title,
         message=message or f"{station.code} istasyonundan yönetici çağrısı yapıldı.",
         severity='warning',

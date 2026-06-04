@@ -645,6 +645,21 @@ class ProductionStationAlertViewSet(OrgScopedMixin, viewsets.ModelViewSet):
     search_fields = ['title', 'message', 'station__code', 'department__name', 'work_order__number']
     ordering_fields = ['created_at']
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if user.is_authenticated:
+            if user.role == 'Admin' or getattr(user, 'is_superadmin', False):
+                return qs
+            from accounts.models import UserGroupMembership
+            from django.db.models import Q
+            user_groups = UserGroupMembership.objects.filter(user=user).values_list('group_id', flat=True)
+            qs = qs.filter(
+                Q(target_group__isnull=True) |
+                Q(target_group__in=user_groups)
+            )
+        return qs
+
     def create(self, request, *args, **kwargs):
         target_type = request.data.get('target_type') or 'station'
         station = None

@@ -1071,3 +1071,55 @@ class ProductionAutomationTests(TestCase):
         self.assertTrue(alert.requires_ack)
         self.assertEqual(alert.acks.count(), 1)
         self.assertEqual(alert.acks.first().tablet, tablet)
+
+    def test_tablet_call_manager_routes_to_group(self):
+        from accounts.models import UserGroup, UserGroupMembership
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        
+        group = UserGroup.objects.create(group_id='tech-group', title='Tech Group')
+        station = ProductionStation.objects.filter(organization=self.org).first()
+        dept = station.department
+        dept.notification_group = group
+        dept.save()
+        
+        tablet = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=station,
+            name='Test Tablet 2',
+            token='test-token-2',
+        )
+        from .services import tablet_call_manager
+        alert = tablet_call_manager(
+            token=tablet.token,
+            title='Makine Arızası 2',
+            message='CNC-2 makinesinde arıza var.'
+        )
+        
+        self.assertEqual(alert.target_group, group)
+        
+        user_in_group = User.objects.create_user(username='in-group', password='x', organization=self.org, role='Manager')
+        user_out_group = User.objects.create_user(username='out-group', password='x', organization=self.org, role='Manager')
+        UserGroupMembership.objects.create(user=user_in_group, group=group)
+        
+        from rest_framework.test import APIClient
+        client = APIClient()
+        
+        # 1. User in group should see the alert
+        client.force_authenticate(user=user_in_group)
+        res1 = client.get('/api/production/station-alerts/')
+        self.assertEqual(res1.status_code, 200)
+        self.assertTrue(any(a['id'] == alert.id for a in res1.data))
+        
+        # 2. User out of group should NOT see the alert
+        client.force_authenticate(user=user_out_group)
+        res2 = client.get('/api/production/station-alerts/')
+        self.assertEqual(res2.status_code, 200)
+        self.assertFalse(any(a['id'] == alert.id for a in res2.data))
+        
+        # 3. Admin should see it anyway
+        admin_user = User.objects.create_user(username='admin-group', password='x', organization=self.org, role='Admin')
+        client.force_authenticate(user=admin_user)
+        res3 = client.get('/api/production/station-alerts/')
+        self.assertEqual(res3.status_code, 200)
+        self.assertTrue(any(a['id'] == alert.id for a in res3.data))

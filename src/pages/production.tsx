@@ -17,7 +17,8 @@ import { useToast } from '@/components/ui/use-toast'
 import api, { apiOrigin } from '@/lib/api'
 import { formatNumber } from '@/lib/utils'
 
-type Department = { id: number; code: string; name: string; color?: string; order: number; is_active: boolean }
+type Department = { id: number; code: string; name: string; color?: string; notification_group?: number | null; order: number; is_active: boolean }
+type UserGroup = { id: number; group_id: string; title: string; description?: string }
 type Station = { id: number; department: number; department_name?: string; code: string; name: string; order: number; max_workers: number; is_handover: boolean; is_final: boolean; is_active: boolean }
 type UserLite = { id: number; username?: string; email?: string; first_name?: string; last_name?: string; full_name?: string; role?: string; permissions?: string[] }
 type StationAssignment = { id: number; station: number; station_code?: string; user: number; user_name?: string; role: string; is_active: boolean }
@@ -37,7 +38,7 @@ type RouteStep = { id: number; station: number; station_code?: string; station_n
 type RouteTemplate = { id: number; name: string; product_group_key?: string; is_default: boolean; steps?: RouteStep[] }
 type WarehouseLocation = { id: number; code: string; name?: string; warehouse: number; warehouse_name?: string }
 type ProductionSettings = { default_completion_location?: number | null; default_completion_warehouse?: number | null; auto_stock_in_enabled?: boolean }
-type DepartmentDraft = { code: string; name: string; color: string; is_active: boolean }
+type DepartmentDraft = { code: string; name: string; color: string; notification_group: string; is_active: boolean }
 type StationDraft = { department: string; code: string; name: string; max_workers: string; is_handover: boolean; is_final: boolean; is_active: boolean }
 type DeviceDraft = { station: string; name: string; is_active: boolean }
 type TabletDraft = { station: string; name: string; is_active: boolean }
@@ -248,7 +249,7 @@ const formatSeconds = (seconds?: number | null) => {
   return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`
 }
 
-const emptyDepartmentDraft = (): DepartmentDraft => ({ code: '', name: '', color: '#2563eb', is_active: true })
+const emptyDepartmentDraft = (): DepartmentDraft => ({ code: '', name: '', color: '#2563eb', notification_group: '', is_active: true })
 const emptyStationDraft = (): StationDraft => ({ department: '', code: '', name: '', max_workers: '2', is_handover: false, is_final: false, is_active: true })
 const emptyDeviceDraft = (): DeviceDraft => ({ station: '', name: '', is_active: true })
 const emptyTabletDraft = (): TabletDraft => ({ station: '', name: '', is_active: true })
@@ -416,6 +417,7 @@ export function ProductionManagementPage() {
   const [settings, setSettings] = useState<ProductionSettings>({})
   const [summary, setSummary] = useState<any>({})
   const [busy, setBusy] = useState(false)
+  const [userGroups, setUserGroups] = useState<UserGroup[]>([])
   const [editingDepartmentId, setEditingDepartmentId] = useState<number | null>(null)
   const [editingStationId, setEditingStationId] = useState<number | null>(null)
   const [editingDeviceId, setEditingDeviceId] = useState<number | null>(null)
@@ -446,7 +448,7 @@ export function ProductionManagementPage() {
   const productionUsers = useMemo(() => users.filter(canUseProductionTablet), [users])
 
   const load = async () => {
-    const [d, s, assignmentRows, userRows, dev, tabletRows, shiftRows, breakRows, profileRows, alertRows, maps, fields, r, ruleRows, presetRows, l, productRows, folderRows, drawingRows, cfg, dash] = await Promise.all([
+    const [d, s, assignmentRows, userRows, dev, tabletRows, shiftRows, breakRows, profileRows, alertRows, maps, fields, r, ruleRows, presetRows, l, productRows, folderRows, drawingRows, cfg, dash, groups] = await Promise.all([
       fetchAll<Department>('/production/departments/'),
       fetchAll<Station>('/production/stations/'),
       fetchAll<StationAssignment>('/production/station-users/'),
@@ -468,6 +470,7 @@ export function ProductionManagementPage() {
       fetchAll<TechnicalDrawing>('/product-technical-drawings/?active=true').catch(() => []),
       api.get('/production/settings/').then((res) => res.data),
       api.get('/production/reports/summary/').then((res) => res.data).catch(() => ({})),
+      fetchAll<UserGroup>('/user-groups/').catch(() => []),
     ])
     setDepartments(d)
     setStations(s)
@@ -481,6 +484,7 @@ export function ProductionManagementPage() {
     setAlerts(alertRows)
     setDeviceMaps(maps)
     setDataFields(fields)
+    setUserGroups(groups)
     setRoutes(r)
     setRules(ruleRows)
     setPresets(presetRows)
@@ -619,7 +623,11 @@ export function ProductionManagementPage() {
   }
 
   const saveDepartment = async () => {
-    const payload = { ...departmentDraft, order: editingDepartmentId ? departments.find((item) => item.id === editingDepartmentId)?.order ?? departments.length : departments.length }
+    const payload = { 
+      ...departmentDraft, 
+      notification_group: departmentDraft.notification_group ? Number(departmentDraft.notification_group) : null,
+      order: editingDepartmentId ? departments.find((item) => item.id === editingDepartmentId)?.order ?? departments.length : departments.length 
+    }
     if (editingDepartmentId) await api.patch(`/production/departments/${editingDepartmentId}/`, payload)
     else await api.post('/production/departments/', payload)
     resetDepartmentForm()
@@ -738,6 +746,7 @@ export function ProductionManagementPage() {
       code: department.code,
       name: department.name,
       color: department.color || '#2563eb',
+      notification_group: department.notification_group ? String(department.notification_group) : '',
       is_active: department.is_active,
     })
   }
@@ -1095,6 +1104,20 @@ export function ProductionManagementPage() {
                 <Input placeholder="Bölüm adı" value={departmentDraft.name} onChange={(e) => setDepartmentDraft((v) => ({ ...v, name: e.target.value }))} />
                 <Input type="color" value={departmentDraft.color} onChange={(e) => setDepartmentDraft((v) => ({ ...v, color: e.target.value }))} />
                 <label className="flex items-center justify-between rounded-md border p-3 text-sm"><span>Aktif</span><Switch checked={departmentDraft.is_active} onCheckedChange={(checked) => setDepartmentDraft((v) => ({ ...v, is_active: checked }))} /></label>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-muted-foreground">Bildirim Grubu (Yöneticiyi Çağır Alıcıları)</label>
+                  <Select value={departmentDraft.notification_group} onValueChange={(val) => setDepartmentDraft((v) => ({ ...v, notification_group: val }))}>
+                    <SelectTrigger className="h-9 text-xs">
+                      <SelectValue placeholder="Grup Seçin (Tüm yöneticilere gitsin)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none_clear">Tüm yöneticilere gitsin (Genel)</SelectItem>
+                      {userGroups.map((g) => (
+                        <SelectItem key={g.id} value={String(g.id)}>{g.title}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div className="flex gap-2">
                   <Button onClick={saveDepartment} disabled={!departmentDraft.code || !departmentDraft.name}>
                     {editingDepartmentId ? <Save className="mr-2 h-4 w-4" /> : <Plus className="mr-2 h-4 w-4" />}
@@ -1113,6 +1136,11 @@ export function ProductionManagementPage() {
                       <div className="flex items-center gap-2">
                         <span className="h-3 w-3 rounded-full" style={{ background: dep.color || '#21406d' }} />
                         <h3 className="font-semibold">{dep.name}</h3>
+                        {dep.notification_group && (
+                          <Badge variant="outline" className="text-[10px]">
+                            Alıcı: {userGroups.find((g) => g.id === dep.notification_group)?.title || dep.notification_group}
+                          </Badge>
+                        )}
                       </div>
                       <div className="flex gap-2">
                         <Button variant="outline" size="sm" onClick={() => editDepartment(dep)}>
