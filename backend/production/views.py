@@ -80,6 +80,7 @@ from .serializers import (
     StationEventSerializer,
     TabletLoginSlotSerializer,
     TabletLogoutSlotSerializer,
+    TabletBatchLogoutSlotSerializer,
     TabletCheckpointSerializer,
     TabletCompleteWorkItemSerializer,
     TabletShiftCheckpointSerializer,
@@ -113,6 +114,7 @@ from .services import (
     tablet_shift_checkpoint,
     tablet_login_slot,
     tablet_logout_slot,
+    tablet_batch_logout_slots,
     tablet_pause_session,
     tablet_resume_session,
     tablet_call_manager,
@@ -814,6 +816,19 @@ class ProductionTabletLogoutSlotView(APIView):
         except (ProductionError, ProductionWorkSession.DoesNotExist) as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(ProductionEventSerializer(event).data, status=status.HTTP_201_CREATED)
+
+
+class ProductionTabletBatchLogoutSlotView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        serializer = TabletBatchLogoutSlotSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            sessions = tablet_batch_logout_slots(**serializer.validated_data)
+        except (ProductionError, ProductionWorkSession.DoesNotExist) as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ProductionWorkSessionSerializer(sessions, many=True).data, status=status.HTTP_201_CREATED)
 
 
 class ProductionTabletBreakStartView(APIView):

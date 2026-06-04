@@ -2392,6 +2392,12 @@ export function ProductionTabletPage() {
   const [closingQty, setClosingQty] = useState('')
   const [closingPin, setClosingPin] = useState('')
   const [note, setNote] = useState('')
+  const [batchLogoutOpen, setBatchLogoutOpen] = useState(false)
+  const [batchSelectedSessionIds, setBatchSelectedSessionIds] = useState<number[]>([])
+  const [batchLogoutQty, setBatchLogoutQty] = useState('')
+  const [batchLogoutAuthorizerId, setBatchLogoutAuthorizerId] = useState('')
+  const [batchLogoutPin, setBatchLogoutPin] = useState('')
+  const [batchLogoutNote, setBatchLogoutNote] = useState('')
   const [checkpointOpen, setCheckpointOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [checkpointTitle, setCheckpointTitle] = useState('')
@@ -2614,6 +2620,69 @@ export function ProductionTabletPage() {
     }
   }
 
+  const batchLogout = async () => {
+    if (batchSelectedSessionIds.length === 0) {
+      toast({
+        title: 'Hata',
+        description: 'Lütfen çıkış yapacak en az bir çalışan seçin.',
+        variant: 'destructive',
+      })
+      return
+    }
+    if (!batchLogoutQty || isNaN(Number(batchLogoutQty)) || Number(batchLogoutQty) < 0) {
+      toast({
+        title: 'Hata',
+        description: 'Lütfen geçerli bir üretim miktarı girin.',
+        variant: 'destructive',
+      })
+      return
+    }
+    if (!batchLogoutAuthorizerId) {
+      toast({
+        title: 'Hata',
+        description: 'Lütfen onaylayan çalışanı seçin.',
+        variant: 'destructive',
+      })
+      return
+    }
+    if (!batchLogoutPin) {
+      toast({
+        title: 'Hata',
+        description: 'Lütfen onaylayan çalışanın PIN kodunu girin.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setSubmitting(true)
+    try {
+      await api.post('/production/tablet/batch-logout-slots/', {
+        token,
+        user_id: Number(batchLogoutAuthorizerId),
+        pin: batchLogoutPin,
+        session_ids: batchSelectedSessionIds,
+        declared_good_quantity: Number(batchLogoutQty),
+        note: batchLogoutNote,
+      })
+      setBatchLogoutOpen(false)
+      setBatchSelectedSessionIds([])
+      setBatchLogoutQty('')
+      setBatchLogoutAuthorizerId('')
+      setBatchLogoutPin('')
+      setBatchLogoutNote('')
+      toast({ title: 'Toplu çıkış başarıyla yapıldı' })
+      await load()
+    } catch (error: any) {
+      toast({
+        title: 'Çıkış yapılamadı',
+        description: error?.response?.data?.detail || 'Hatalı PIN veya geçersiz değer.',
+        variant: 'destructive',
+      })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   const completeWorkItem = async () => {
     if (!selectedWork) return
     const perform = async (total?: string, checkpointNoteValue?: string) => {
@@ -2733,7 +2802,7 @@ export function ProductionTabletPage() {
       </Card>
 
       <Card>
-        <CardContent className="grid gap-3 p-3 lg:grid-cols-[1fr_250px] lg:items-end">
+        <CardContent className="grid gap-3 p-3 lg:grid-cols-[1fr_320px] lg:items-end">
           <div className="space-y-2">
             <Label>Aktif iş emri</Label>
             <Select value={selectedLineId} onValueChange={setSelectedLineId} disabled={shiftLocked}>
@@ -2748,7 +2817,26 @@ export function ProductionTabletPage() {
             </Select>
           </div>
           <div className="grid gap-2">
-            <Button variant="outline" onClick={load} className="h-14" disabled={submitting}><RefreshCw className="mr-2 h-4 w-4" /> Yenile</Button>
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={load} className="h-14" disabled={submitting}><RefreshCw className="mr-2 h-4 w-4" /> Yenile</Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  setBatchSelectedSessionIds(activeSlots.map(s => s.id))
+                  if (activeSlots.length > 0) {
+                    setBatchLogoutAuthorizerId(String(activeSlots[0].user_id))
+                  }
+                  setBatchLogoutQty('')
+                  setBatchLogoutPin('')
+                  setBatchLogoutNote('')
+                  setBatchLogoutOpen(true)
+                }}
+                disabled={activeSlots.length === 0 || submitting || shiftLocked}
+                className="h-14"
+              >
+                <LogOut className="mr-2 h-4 w-4" /> Toplu Çıkış
+              </Button>
+            </div>
             <Button onClick={completeWorkItem} disabled={!selectedWork || submitting || shiftLocked} className="h-14"><CheckCircle2 className="mr-2 h-4 w-4" /> İşi tamamla</Button>
             <TechnicalDrawingButton drawings={selectedWork?.technical_drawings} compact />
           </div>
@@ -2895,6 +2983,107 @@ export function ProductionTabletPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setCheckpointOpen(false)} disabled={submitting}>Vazgeç</Button>
             <Button onClick={submitCheckpoint} disabled={checkpointTotal === '' || submitting}>Üretim Miktarını Kaydet</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={batchLogoutOpen} onOpenChange={setBatchLogoutOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Toplu Çıkış Yap</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Çıkış Yapacak Çalışanları Seçin</Label>
+              <div className="grid gap-2 rounded-md border p-3">
+                {activeSlots.map((slot) => {
+                  const isChecked = batchSelectedSessionIds.includes(slot.id)
+                  return (
+                    <label key={slot.id} className="flex items-center space-x-3 cursor-pointer p-1 hover:bg-muted/40 rounded">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setBatchSelectedSessionIds([...batchSelectedSessionIds, slot.id])
+                          } else {
+                            setBatchSelectedSessionIds(batchSelectedSessionIds.filter((id) => id !== slot.id))
+                          }
+                        }}
+                        className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                      />
+                      <span className="text-sm font-medium text-foreground">{slot.user_name}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="batch-qty">Ortak Üretim Miktarı</Label>
+              <Input
+                id="batch-qty"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                placeholder="Örn: 50"
+                value={batchLogoutQty}
+                onChange={(e) => setBatchLogoutQty(e.target.value)}
+                className="h-11"
+              />
+              <p className="text-xs text-muted-foreground">Girilen miktar istasyonda çalışan tüm kişilere eşit olarak yansıtılacaktır.</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="batch-auth">Onaylayan Çalışan</Label>
+                <Select value={batchLogoutAuthorizerId} onValueChange={setBatchLogoutAuthorizerId}>
+                  <SelectTrigger id="batch-auth" className="h-11">
+                    <SelectValue placeholder="Seçiniz" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeSlots.map((slot) => (
+                      <SelectItem key={slot.id} value={String(slot.user_id)}>
+                        {slot.user_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="batch-pin">Onaylayan PIN</Label>
+                <Input
+                  id="batch-pin"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  style={{ WebkitTextSecurity: 'disc' } as any}
+                  maxLength={6}
+                  placeholder="PIN"
+                  value={batchLogoutPin}
+                  onChange={(e) => setBatchLogoutPin(e.target.value.replace(/\D/g, ''))}
+                  className="h-11 text-center font-mono tracking-widest"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="batch-note">Not (İsteğe Bağlı)</Label>
+              <Textarea
+                id="batch-note"
+                rows={2}
+                placeholder="Açıklama girin..."
+                value={batchLogoutNote}
+                onChange={(e) => setBatchLogoutNote(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBatchLogoutOpen(false)} disabled={submitting}>İptal</Button>
+            <Button variant="destructive" onClick={batchLogout} disabled={submitting}>
+              {submitting ? 'Çıkış Yapılıyor...' : 'Toplu Çıkış Yap'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

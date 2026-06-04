@@ -2256,3 +2256,44 @@ def tablet_call_manager(token, title, message):
         acknowledged_at=timezone.now()
     )
     return alert
+
+
+@transaction.atomic
+def tablet_batch_logout_slots(*, token, user_id, pin, session_ids, declared_good_quantity, note=''):
+    tablet = _tablet_by_token(token)
+    _assert_tablet_shift_open(tablet)
+    user = _operator_from_pin(organization=tablet.organization, station=tablet.station, user_id=user_id, pin=pin)
+    
+    sessions = list(
+        ProductionWorkSession.objects.select_for_update()
+        .filter(id__in=session_ids, organization=tablet.organization, tablet=tablet)
+    )
+    if not sessions:
+        raise ProductionError('Kapatılacak tablet oturumu bulunamadı.')
+        
+    step = sessions[0].step
+    for s in sessions:
+        if s.step_id != step.id:
+            raise ProductionError('Farklı iş adımlarındaki oturumlar aynı anda kapatılamaz.')
+        if s.status not in ACTIVE_SESSION_STATUSES:
+            raise ProductionError(f'{s.user.get_full_name()} oturumu zaten kapalı.')
+            
+    active = _active_tablet_sessions(tablet, step=step)
+    totals = _require_checkpoint_payload(active, checkpoint_total=declared_good_quantity)
+    closed_win = _close_counting_window(tablet=tablet, step=step, declared_totals=totals, reason='logout', note=note)
+    
+    now = timezone.now()
+    for session in sessions:
+        session.status = 'closed'
+        session.ended_at = now
+        session.note = note or session.note
+        _close_active_break(session, note)
+        session.save(update_fields=['status', 'ended_at', 'note', 'updated_at'])
+        _create_session_event(session=session, event_type='complete', quantity_delta=0, note=note)
+        
+    remaining = [item for item in _active_tablet_sessions(tablet, step=step) if item.status == 'started']
+    if remaining:
+        start_total = closed_win.close_total if closed_win else Decimal('0')
+        _open_window_for_tablet(tablet, step, start_total=start_total, sessions=remaining, note=note)
+        
+    return sessions

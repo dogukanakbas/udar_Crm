@@ -688,6 +688,15 @@ class TabletLogoutSlotSerializer(TabletSessionStateSerializer):
     end_counter = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
 
 
+class TabletBatchLogoutSlotSerializer(serializers.Serializer):
+    token = serializers.CharField()
+    user_id = serializers.IntegerField()
+    pin = serializers.CharField()
+    session_ids = serializers.ListField(child=serializers.IntegerField())
+    declared_good_quantity = serializers.DecimalField(max_digits=14, decimal_places=2)
+    note = serializers.CharField(required=False, allow_blank=True, default='')
+
+
 class StationAlertAckSerializer(serializers.Serializer):
     token = serializers.CharField(required=False, allow_blank=True, default='')
     user_id = serializers.IntegerField(required=False, allow_null=True)

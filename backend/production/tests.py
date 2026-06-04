@@ -1123,3 +1123,70 @@ class ProductionAutomationTests(TestCase):
         res3 = client.get('/api/production/station-alerts/')
         self.assertEqual(res3.status_code, 200)
         self.assertTrue(any(a['id'] == alert.id for a in res3.data))
+
+    def test_tablet_batch_logout_slots(self):
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        line = order.lines.get()
+        first_step = line.steps.select_related('station').order_by('order').first()
+        first_step.target_quantity = Decimal('100')
+        first_step.save(update_fields=['target_quantity'])
+        first_step.station.max_workers = 3
+        first_step.station.save(update_fields=['max_workers'])
+        
+        ali = User.objects.create_user(username='ali-batch', password='x', organization=self.org, role='Worker')
+        veli = User.objects.create_user(username='veli-batch', password='x', organization=self.org, role='Worker')
+        selami = User.objects.create_user(username='selami-batch', password='x', organization=self.org, role='Worker')
+        
+        for worker, pin in [(ali, '1111'), (veli, '2222'), (selami, '3333')]:
+            ProductionStationUser.objects.create(organization=self.org, station=first_step.station, user=worker)
+            profile = ProductionOperatorProfile.objects.create(organization=self.org, user=worker)
+            profile.set_pin(pin)
+            profile.save()
+            
+        tablet = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=first_step.station,
+            name='Üçlü Tablet',
+            token='triple-tablet-token',
+        )
+        
+        ali_session = tablet_login_slot(token=tablet.token, user_id=ali.id, pin='1111', line_id=line.id, slot_index=0)
+        veli_session = tablet_login_slot(token=tablet.token, user_id=veli.id, pin='2222', line_id=line.id, slot_index=1, checkpoint_total=Decimal('0'))
+        selami_session = tablet_login_slot(token=tablet.token, user_id=selami.id, pin='3333', line_id=line.id, slot_index=2, checkpoint_total=Decimal('0'))
+        
+        # Test API Endpoint
+        from rest_framework.test import APIClient
+        client = APIClient()
+        payload = {
+            'token': tablet.token,
+            'user_id': ali.id, # Authorizing user
+            'pin': '1111', # Authorizing user pin
+            'session_ids': [ali_session.id, veli_session.id],
+            'declared_good_quantity': '50.00',
+            'note': 'Toplu çıkış testi'
+        }
+        res = client.post('/api/production/tablet/batch-logout-slots/', payload, format='json')
+        self.assertEqual(res.status_code, 201)
+        
+        # Check sessions state
+        ali_session.refresh_from_db()
+        veli_session.refresh_from_db()
+        selami_session.refresh_from_db()
+        first_step.refresh_from_db()
+        
+        self.assertEqual(ali_session.status, 'closed')
+        self.assertEqual(veli_session.status, 'closed')
+        self.assertEqual(selami_session.status, 'started')
+        self.assertEqual(first_step.completed_quantity, Decimal('50.00'))
+        self.assertEqual(ali_session.declared_good_quantity, Decimal('50.00'))
+        self.assertEqual(veli_session.declared_good_quantity, Decimal('50.00'))
+        self.assertEqual(selami_session.declared_good_quantity, Decimal('50.00'))
+        
+        # Check that a new counting window exists for Selami
+        open_wins = ProductionCountingWindow.objects.filter(tablet=tablet, step=first_step, status='open')
+        self.assertEqual(open_wins.count(), 1)
+        win = open_wins.first()
+        self.assertEqual(win.start_total, Decimal('50.00'))
+        self.assertTrue(win.participants.filter(user=selami).exists())
+        self.assertFalse(win.participants.filter(user=ali).exists())
