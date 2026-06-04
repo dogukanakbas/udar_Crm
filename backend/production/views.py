@@ -1101,6 +1101,42 @@ class ProductionReportSummaryView(APIView):
             .order_by('-total')[:200]
         )
 
+        targets = ProductionStationTarget.objects.filter(organization=org).select_related('station__department')
+        windows = ProductionCountingWindow.objects.filter(organization=org, status='closed').select_related('station__department')
+        if start:
+            targets = targets.filter(target_date__gte=start)
+            windows = windows.filter(closed_at__date__gte=start)
+        if end:
+            targets = targets.filter(target_date__lte=end)
+            windows = windows.filter(closed_at__date__lte=end)
+        if dept_id and dept_id != 'all':
+            targets = targets.filter(station__department_id=dept_id)
+            windows = windows.filter(station__department_id=dept_id)
+        if station_id and station_id != 'all':
+            targets = targets.filter(station_id=station_id)
+            windows = windows.filter(station_id=station_id)
+
+        actual_by_station_date = {
+            (row['station_id'], row['closed_at__date']): row['total'] or 0
+            for row in windows.values('station_id', 'closed_at__date').annotate(total=Sum('official_delta'))
+        }
+        station_target_performance = []
+        for target in targets.order_by('station__department__order', 'station__order', 'target_date', 'id'):
+            actual = actual_by_station_date.get((target.station_id, target.target_date), 0)
+            target_quantity = target.target_quantity or 0
+            percent = float((actual / target_quantity) * 100) if target_quantity else 0
+            station_target_performance.append({
+                'station_id': target.station_id,
+                'station_code': target.station.code,
+                'station_name': target.station.name,
+                'department_name': target.station.department.name,
+                'target_date': target.target_date.isoformat(),
+                'target_quantity': target_quantity,
+                'actual_quantity': actual,
+                'remaining_quantity': max(target_quantity - actual, 0),
+                'completion_percent': min(999, round(percent, 1)),
+            })
+
         detailed_sessions = []
         for s in sessions.select_related('user', 'station', 'line__work_order', 'line').order_by('-started_at')[:200]:
             detailed_sessions.append({
@@ -1129,8 +1165,9 @@ class ProductionReportSummaryView(APIView):
             'by_worker': by_worker,
             'by_date': by_date,
             'worker_station': worker_station,
+            'station_target_performance': station_target_performance,
             'detailed_sessions': detailed_sessions,
-            'departments': departments,
+            'departments_list': departments,
             'stations_list': stations_list,
             'workers_list': workers_list,
             'open_sessions': sessions.filter(status__in=['started', 'paused']).count(),

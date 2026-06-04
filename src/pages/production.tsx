@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, Calendar, CheckCircle2, Copy, Cpu, Download, Edit3, Layers, LogOut, Monitor, Pause, Play, Plus, RefreshCw, Route, Save, Send, TimerReset, Trash2, Upload, UserPlus, Volume2, X } from 'lucide-react'
-import { Area, AreaChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip as ReTooltip, XAxis, YAxis, PieChart, Pie } from 'recharts'
+import { Bell, Calendar, CheckCircle2, Copy, Cpu, Download, Edit3, FileImage, Layers, LogOut, Monitor, Pause, Play, Plus, RefreshCw, Route, Save, Send, TimerReset, Trash2, Upload, UserPlus, Volume2, X } from 'lucide-react'
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip as ReTooltip, XAxis, YAxis, PieChart, Pie } from 'recharts'
 
 import { PageHeader } from '@/components/app-shell'
 import { Badge } from '@/components/ui/badge'
@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
-import api from '@/lib/api'
+import api, { apiOrigin } from '@/lib/api'
 import { formatNumber } from '@/lib/utils'
 
 type Department = { id: number; code: string; name: string; color?: string; order: number; is_active: boolean }
@@ -53,6 +53,25 @@ type WorkOrder = {
   route_name?: string
   lines?: WorkOrderLine[]
 }
+type TechnicalDrawing = {
+  id: number
+  product?: number | string | { id?: number | string; name?: string; sku?: string }
+  product_sku?: string | { id?: number | string; name?: string; sku?: string }
+  product_name?: string | { id?: number | string; name?: string }
+  folder?: number | string | { id?: number | string; name?: string } | null
+  title: string
+  version?: string
+  file?: string
+  file_url?: string
+  file_type?: string
+  folder_name?: string | { id?: number | string; name?: string }
+  description?: string
+  tags?: string[]
+  is_active?: boolean
+  uploaded_at?: string
+}
+type ProductLite = { id: number | string; sku?: string; name?: string; category_name?: string; categoryName?: string; technical_drawing_count?: number; technicalDrawingCount?: number }
+type DrawingFolder = { id: number; name: string; description?: string; order?: number; drawing_count?: number }
 type WorkOrderLine = {
   id: number
   product_sku: string
@@ -61,6 +80,9 @@ type WorkOrderLine = {
   detail_2?: string
   quantity: string | number
   completed_quantity: string | number
+  technical_notes?: string
+  details?: Record<string, any>
+  technical_drawings?: TechnicalDrawing[]
   stock_in_done?: boolean
   steps?: StepProgress[]
 }
@@ -106,6 +128,9 @@ type ConsoleItem = {
   product_name: string
   detail_1?: string
   detail_2?: string
+  technical_notes?: string
+  details?: Record<string, any>
+  technical_drawings?: TechnicalDrawing[]
   station_code: string
   station_name: string
   department_name: string
@@ -138,7 +163,7 @@ type TabletSlot = {
   active_break_id?: number | null
   active_break_started_at?: string | null
 }
-type TabletDailyTarget = { id?: number; date?: string; target_quantity: string | number; actual_quantity: string | number; remaining_quantity: string | number; note?: string }
+type TabletDailyTarget = { id?: number; date?: string; target_quantity: string | number; actual_quantity: string | number; remaining_quantity: string | number; completion_percent?: string | number; note?: string }
 type TabletCountingWindow = {
   id: number
   line_id: number
@@ -189,6 +214,16 @@ const statusLabel: Record<string, string> = {
 }
 
 const n = (value: unknown) => Number(value || 0)
+const asText = (value: unknown, fallback = ''): string => {
+  if (value === null || value === undefined || value === '') return fallback
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) return value.map((item) => asText(item)).filter(Boolean).join(', ') || fallback
+  if (typeof value === 'object') {
+    const data = value as Record<string, unknown>
+    return asText(data.name || data.title || data.sku || data.code || data.label || data.id, fallback)
+  }
+  return fallback
+}
 const todayIso = () => {
   const d = new Date()
   const year = d.getFullYear()
@@ -219,6 +254,7 @@ const emptyDeviceDraft = (): DeviceDraft => ({ station: '', name: '', is_active:
 const emptyTabletDraft = (): TabletDraft => ({ station: '', name: '', is_active: true })
 const emptyShiftDraft = (department = ''): ShiftDraft => ({ department, name: '', weekdays: [0, 1, 2, 3, 4], start_time: '08:00', end_time: '18:00', crosses_midnight: false, is_active: true, note: '' })
 const emptyBreakDraft = (department = ''): BreakDraft => ({ department, schedule: 'none', name: '', start_time: '12:00', end_time: '13:00', requires_checkpoint: true, lock_type: 'break_locked', is_active: true, note: '' })
+const emptyDrawingDraft = () => ({ product: '', folder: 'none', title: '', version: '', tags: '', description: '', is_active: true })
 
 function pct(done: unknown, target: unknown) {
   const total = n(target)
@@ -229,9 +265,61 @@ function pct(done: unknown, target: unknown) {
 function ProgressBar({ done, target }: { done: unknown; target: unknown }) {
   const value = pct(done, target)
   return (
-    <div className="h-2 overflow-hidden rounded-full bg-muted">
+    <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
       <div className="h-full rounded-full bg-primary" style={{ width: `${value}%` }} />
     </div>
+  )
+}
+
+function drawingUrl(drawing?: TechnicalDrawing | null) {
+  const raw = drawing?.file_url || drawing?.file || ''
+  if (!raw) return ''
+  if (/^https?:\/\//i.test(raw)) return raw
+  return `${apiOrigin}${raw.startsWith('/') ? raw : `/${raw}`}`
+}
+
+function TechnicalDrawingButton({ drawings, compact = false }: { drawings?: TechnicalDrawing[]; compact?: boolean }) {
+  const activeDrawings = (drawings || []).filter((item) => drawingUrl(item))
+  const [selected, setSelected] = useState<TechnicalDrawing | null>(null)
+  if (!activeDrawings.length) {
+    return (
+      <Button size={compact ? 'sm' : 'default'} variant="outline" disabled className={compact ? 'h-8 px-2 text-xs' : ''}>
+        <FileImage className="mr-2 h-4 w-4" /> Teknik resim yok
+      </Button>
+    )
+  }
+  const current = selected || activeDrawings[0]
+  return (
+    <>
+      <Button size={compact ? 'sm' : 'default'} variant="outline" onClick={() => setSelected(activeDrawings[0])} className={compact ? 'h-8 px-2 text-xs' : ''}>
+        <FileImage className="mr-2 h-4 w-4" /> Teknik resim {activeDrawings.length > 1 ? `(${activeDrawings.length})` : ''}
+      </Button>
+      <Dialog open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
+        <DialogContent className="max-h-[94vh] max-w-6xl">
+          <DialogHeader>
+            <DialogTitle>{asText(current?.title, 'Teknik resim')}{current?.version ? ` · ${asText(current.version)}` : ''}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 lg:grid-cols-[220px_1fr]">
+            <div className="space-y-2 overflow-y-auto lg:max-h-[74vh]">
+              {activeDrawings.map((drawing) => (
+                <button
+                  key={drawing.id}
+                  type="button"
+                  onClick={() => setSelected(drawing)}
+                  className={`w-full rounded-md border p-2 text-left text-sm ${current?.id === drawing.id ? 'border-primary bg-primary/10' : 'hover:bg-muted/40'}`}
+                >
+                  <p className="font-medium">{asText(drawing.title, 'Teknik resim')}</p>
+                  <p className="text-xs text-muted-foreground">{asText(drawing.folder_name, 'Genel')}{drawing.version ? ` · ${asText(drawing.version)}` : ''}</p>
+                </button>
+              ))}
+            </div>
+            <div className="flex min-h-[58vh] items-center justify-center overflow-hidden rounded-lg border bg-muted/20">
+              <img src={drawingUrl(current)} alt={asText(current?.title, 'Teknik resim')} className="max-h-[74vh] max-w-full object-contain" />
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
@@ -304,6 +392,7 @@ function StationCard({ station, assignments = [], onEdit, onDelete }: { station:
 export function ProductionManagementPage() {
   const { toast } = useToast()
   const configImportRef = useRef<HTMLInputElement | null>(null)
+  const drawingFileRef = useRef<HTMLInputElement | null>(null)
   const [departments, setDepartments] = useState<Department[]>([])
   const [stations, setStations] = useState<Station[]>([])
   const [stationAssignments, setStationAssignments] = useState<StationAssignment[]>([])
@@ -321,6 +410,9 @@ export function ProductionManagementPage() {
   const [rules, setRules] = useState<RuleSet[]>([])
   const [presets, setPresets] = useState<TemplatePreset[]>([])
   const [locations, setLocations] = useState<WarehouseLocation[]>([])
+  const [products, setProducts] = useState<ProductLite[]>([])
+  const [drawingFolders, setDrawingFolders] = useState<DrawingFolder[]>([])
+  const [drawings, setDrawings] = useState<TechnicalDrawing[]>([])
   const [settings, setSettings] = useState<ProductionSettings>({})
   const [summary, setSummary] = useState<any>({})
   const [busy, setBusy] = useState(false)
@@ -348,10 +440,13 @@ export function ProductionManagementPage() {
   const [mapDraft, setMapDraft] = useState({ device: '', source_path: '$.', target_key: '', target_type: 'text', is_required: false })
   const [fieldDraft, setFieldDraft] = useState({ station: 'global', key: '', label: '', field_type: 'text', source: 'manual' })
   const [ruleDraft, setRuleDraft] = useState({ name: '', scope: 'station', station: 'none', route: 'none', trigger_event: 'pi_event' })
+  const [drawingDraft, setDrawingDraft] = useState(emptyDrawingDraft)
+  const [drawingFolderDraft, setDrawingFolderDraft] = useState('')
+  const [drawingSearch, setDrawingSearch] = useState('')
   const productionUsers = useMemo(() => users.filter(canUseProductionTablet), [users])
 
   const load = async () => {
-    const [d, s, assignmentRows, userRows, dev, tabletRows, shiftRows, breakRows, profileRows, alertRows, maps, fields, r, ruleRows, presetRows, l, cfg, dash] = await Promise.all([
+    const [d, s, assignmentRows, userRows, dev, tabletRows, shiftRows, breakRows, profileRows, alertRows, maps, fields, r, ruleRows, presetRows, l, productRows, folderRows, drawingRows, cfg, dash] = await Promise.all([
       fetchAll<Department>('/production/departments/'),
       fetchAll<Station>('/production/stations/'),
       fetchAll<StationAssignment>('/production/station-users/'),
@@ -368,6 +463,9 @@ export function ProductionManagementPage() {
       fetchAll<RuleSet>('/production/rules/'),
       fetchAll<TemplatePreset>('/production/template-presets/'),
       fetchAll<WarehouseLocation>('/inventory-locations/'),
+      fetchAll<ProductLite>('/products/').catch(() => []),
+      fetchAll<DrawingFolder>('/technical-drawing-folders/').catch(() => []),
+      fetchAll<TechnicalDrawing>('/product-technical-drawings/?active=true').catch(() => []),
       api.get('/production/settings/').then((res) => res.data),
       api.get('/production/reports/summary/').then((res) => res.data).catch(() => ({})),
     ])
@@ -387,6 +485,9 @@ export function ProductionManagementPage() {
     setRules(ruleRows)
     setPresets(presetRows)
     setLocations(l)
+    setProducts(productRows)
+    setDrawingFolders(folderRows)
+    setDrawings(drawingRows)
     setSettings(cfg || {})
     setSummary(dash || {})
   }
@@ -408,10 +509,63 @@ export function ProductionManagementPage() {
     }
   }, [targetDraft.target_date])
 
+  const filteredDrawings = useMemo(() => {
+    const q = drawingSearch.trim().toLowerCase()
+    if (!q) return drawings
+    return drawings.filter((drawing) => [
+      asText(drawing.product_sku),
+      asText(drawing.product_name),
+      asText(drawing.title),
+      asText(drawing.folder_name),
+      asText(drawing.description),
+      asText(drawing.tags),
+    ].join(' ').toLowerCase().includes(q))
+  }, [drawings, drawingSearch])
+
   const saveSettings = async () => {
     await api.patch('/production/settings/', settings)
     toast({ title: 'İmalat ayarları kaydedildi' })
     await load()
+  }
+
+  const createDrawingFolder = async () => {
+    const name = drawingFolderDraft.trim()
+    if (!name) return
+    await api.post('/technical-drawing-folders/', { name, order: drawingFolders.length })
+    setDrawingFolderDraft('')
+    toast({ title: 'Teknik resim klasörü oluşturuldu' })
+    await load()
+  }
+
+  const uploadTechnicalDrawing = async () => {
+    const file = drawingFileRef.current?.files?.[0]
+    if (!drawingDraft.product || !file) {
+      toast({ title: 'Ürün ve PNG/JPG dosyası seçin', variant: 'destructive' })
+      return
+    }
+    const extension = file.name.split('.').pop()?.toLowerCase() || ''
+    if (!['png', 'jpg', 'jpeg'].includes(extension)) {
+      toast({ title: 'Teknik resim yalnız PNG veya JPG olabilir', variant: 'destructive' })
+      return
+    }
+    const form = new FormData()
+    form.append('product', drawingDraft.product)
+    if (drawingDraft.folder !== 'none') form.append('folder', drawingDraft.folder)
+    form.append('title', drawingDraft.title || file.name)
+    form.append('version', drawingDraft.version)
+    form.append('tags', drawingDraft.tags)
+    form.append('description', drawingDraft.description)
+    form.append('is_active', String(drawingDraft.is_active))
+    form.append('file', file)
+    await api.post('/product-technical-drawings/', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+    if (drawingFileRef.current) drawingFileRef.current.value = ''
+    setDrawingDraft(emptyDrawingDraft())
+    toast({ title: 'Teknik resim yüklendi' })
+    await load()
+  }
+
+  const deleteDrawing = async (drawing: TechnicalDrawing) => {
+    await deleteItem(`/product-technical-drawings/${drawing.id}/`, asText(drawing.title, 'Teknik resim'))
   }
 
   const resetDepartmentForm = () => {
@@ -912,6 +1066,7 @@ export function ProductionManagementPage() {
           <TabsTrigger value="tablets">Tablet & PIN</TabsTrigger>
           <TabsTrigger value="shifts">Vardiyalar</TabsTrigger>
           <TabsTrigger value="alerts">Bildirimler</TabsTrigger>
+          <TabsTrigger value="drawings">Teknik Resimler</TabsTrigger>
           <TabsTrigger value="devices">Cihaz & Veri</TabsTrigger>
           <TabsTrigger value="flow">Akış Tasarımcısı</TabsTrigger>
           <TabsTrigger value="presets">Şablonlar</TabsTrigger>
@@ -1353,6 +1508,104 @@ export function ProductionManagementPage() {
           </div>
         </TabsContent>
 
+        <TabsContent value="drawings">
+          <div className="grid gap-4 xl:grid-cols-[430px_1fr]">
+            <div className="space-y-4">
+              <Card>
+                <CardHeader><CardTitle>Teknik resim yükle</CardTitle></CardHeader>
+                <CardContent className="space-y-3">
+                  <Select value={drawingDraft.product} onValueChange={(value) => setDrawingDraft((current) => ({ ...current, product: value }))}>
+                    <SelectTrigger><SelectValue placeholder="Ürün seç" /></SelectTrigger>
+                    <SelectContent>
+                      {products.map((product) => (
+                        <SelectItem key={String(product.id)} value={String(product.id)}>
+                          {asText(product.sku, 'Kodsuz')} - {asText(product.name, 'Ürün')}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={drawingDraft.folder} onValueChange={(value) => setDrawingDraft((current) => ({ ...current, folder: value }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Genel klasör</SelectItem>
+                      {drawingFolders.map((folder) => (
+                        <SelectItem key={folder.id} value={String(folder.id)}>{folder.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input placeholder="Başlık" value={drawingDraft.title} onChange={(event) => setDrawingDraft((current) => ({ ...current, title: event.target.value }))} />
+                  <Input placeholder="Versiyon / revizyon" value={drawingDraft.version} onChange={(event) => setDrawingDraft((current) => ({ ...current, version: event.target.value }))} />
+                  <Input placeholder="Etiketler: pres, montaj, kanat..." value={drawingDraft.tags} onChange={(event) => setDrawingDraft((current) => ({ ...current, tags: event.target.value }))} />
+                  <Textarea placeholder="Açıklama" value={drawingDraft.description} onChange={(event) => setDrawingDraft((current) => ({ ...current, description: event.target.value }))} />
+                  <input ref={drawingFileRef} type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" className="block w-full rounded-md border p-2 text-sm" />
+                  <label className="flex items-center justify-between rounded-md border p-3 text-sm">
+                    <span>Aktif</span>
+                    <Switch checked={drawingDraft.is_active} onCheckedChange={(checked) => setDrawingDraft((current) => ({ ...current, is_active: checked }))} />
+                  </label>
+                  <Button onClick={uploadTechnicalDrawing} disabled={!drawingDraft.product}>
+                    <Upload className="mr-2 h-4 w-4" /> PNG/JPG yükle
+                  </Button>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle>Klasör oluştur</CardTitle></CardHeader>
+                <CardContent className="space-y-3">
+                  <Input placeholder="Klasör adı" value={drawingFolderDraft} onChange={(event) => setDrawingFolderDraft(event.target.value)} />
+                  <Button variant="outline" onClick={createDrawingFolder} disabled={!drawingFolderDraft.trim()}>
+                    <Plus className="mr-2 h-4 w-4" /> Klasör ekle
+                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    {drawingFolders.map((folder) => (
+                      <Badge key={folder.id} variant="outline">{folder.name} · {folder.drawing_count || 0}</Badge>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+            <Card>
+              <CardHeader>
+                <CardTitle>Ürün teknik resimleri</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Input value={drawingSearch} onChange={(event) => setDrawingSearch(event.target.value)} placeholder="Ürün kodu, ürün adı, başlık, klasör veya etiket ara" />
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {filteredDrawings.map((drawing) => (
+                    <div key={drawing.id} className="rounded-lg border bg-muted/10 p-3">
+                      <button
+                        type="button"
+                        className="mb-3 flex aspect-video w-full items-center justify-center overflow-hidden rounded-md border bg-background"
+                        onClick={() => window.open(drawingUrl(drawing), '_blank', 'noopener,noreferrer')}
+                      >
+                        {drawingUrl(drawing) ? (
+                          <img src={drawingUrl(drawing)} alt={asText(drawing.title, 'Teknik resim')} className="h-full w-full object-contain" />
+                        ) : (
+                          <FileImage className="h-10 w-10 text-muted-foreground" />
+                        )}
+                      </button>
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold">{asText(drawing.product_sku, 'Kodsuz')} · {asText(drawing.title, 'Teknik resim')}</p>
+                        <p className="truncate text-xs text-muted-foreground">{asText(drawing.product_name, 'Ürün')} · {asText(drawing.folder_name, 'Genel')}</p>
+                        {drawing.description ? <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{asText(drawing.description)}</p> : null}
+                      </div>
+                      <div className="mt-3 flex items-center justify-between gap-2">
+                        <TechnicalDrawingButton drawings={[drawing]} compact />
+                        <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteDrawing(drawing)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                  {!filteredDrawings.length && (
+                    <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground md:col-span-2 xl:col-span-3">
+                      Teknik resim bulunamadı. Ürün seçip PNG/JPG yükleyin; tablet ve iş emri ekranlarında otomatik görünür.
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
         <TabsContent value="devices">
           <div className="grid gap-4 xl:grid-cols-3">
             <Card>
@@ -1603,6 +1856,9 @@ export function ProductionWorkOrdersPage() {
   const [stepTargetDraft, setStepTargetDraft] = useState<Record<number, string>>({})
   const [contractId, setContractId] = useState('')
   const [query, setQuery] = useState('')
+  const [drawingQuery, setDrawingQuery] = useState('')
+  const [drawingResults, setDrawingResults] = useState<TechnicalDrawing[]>([])
+  const [drawingSearching, setDrawingSearching] = useState(false)
   const [publishingId, setPublishingId] = useState<number | null>(null)
 
   const load = async () => {
@@ -1685,6 +1941,16 @@ export function ProductionWorkOrdersPage() {
     await load()
   }
 
+  const searchDrawings = async () => {
+    setDrawingSearching(true)
+    try {
+      const response = await api.get('/product-technical-drawings/', { params: { search: drawingQuery, active: 'true' } })
+      setDrawingResults(Array.isArray(response.data) ? response.data : response.data?.results || [])
+    } finally {
+      setDrawingSearching(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -1713,7 +1979,7 @@ export function ProductionWorkOrdersPage() {
                   <SelectTrigger><SelectValue placeholder="Onaylı sözleşme seç" /></SelectTrigger>
                   <SelectContent>
                     {contracts.map((item) => (
-                      <SelectItem key={item.id} value={String(item.id)}>{item.number} - {item.customer_name || item.customerName || 'Cari'}</SelectItem>
+                      <SelectItem key={item.id} value={String(item.id)}>{asText(item.number)} - {asText(item.customer_name || item.customerName, 'Cari')}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1726,6 +1992,29 @@ export function ProductionWorkOrdersPage() {
       <Card>
         <CardContent className="pt-6">
           <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="İş emri, sözleşme veya müşteri ara" />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent className="space-y-3 pt-4">
+          <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+            <Input value={drawingQuery} onChange={(event) => setDrawingQuery(event.target.value)} placeholder="Teknik resim ara: ürün kodu, ürün adı, kategori veya dosya başlığı" onKeyDown={(event) => { if (event.key === 'Enter') void searchDrawings() }} />
+            <Button variant="outline" onClick={searchDrawings} disabled={drawingSearching}>
+              <FileImage className="mr-2 h-4 w-4" /> Ara
+            </Button>
+          </div>
+          {drawingResults.length > 0 && (
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              {drawingResults.map((drawing) => (
+                <div key={drawing.id} className="flex items-center justify-between gap-2 rounded-md border p-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{asText(drawing.product_sku, 'Kodsuz')} · {asText(drawing.title, 'Teknik resim')}</p>
+                    <p className="truncate text-xs text-muted-foreground">{asText(drawing.product_name || drawing.folder_name, 'Teknik resim')}</p>
+                  </div>
+                  <TechnicalDrawingButton drawings={[drawing]} compact />
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
       <div className="space-y-3">
@@ -1750,17 +2039,28 @@ export function ProductionWorkOrdersPage() {
                 <Badge>{statusLabel[order.status] || order.status}</Badge>
               </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-3">
               {(order.lines || []).map((line) => (
                 <div key={line.id} className="rounded-lg border p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold">{line.product_sku} · {line.product_name}</p>
-                      <p className="text-xs text-muted-foreground">{line.detail_1 || '-'} / {line.detail_2 || '-'}</p>
+                  <div className="grid gap-3 xl:grid-cols-[1.4fr_160px_auto] xl:items-start">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate font-semibold">{asText(line.product_sku, 'Kodsuz')} · {asText(line.product_name, 'Ürün')}</p>
+                        {line.technical_drawings?.length ? <Badge variant="secondary">{line.technical_drawings.length} teknik resim</Badge> : null}
+                      </div>
+                      <div className="mt-1 grid gap-1 text-xs text-muted-foreground md:grid-cols-2">
+                        <p><span className="font-medium text-foreground">Detay-1:</span> {asText(line.detail_1, '-')}</p>
+                        <p><span className="font-medium text-foreground">Detay-2:</span> {asText(line.detail_2, '-')}</p>
+                      </div>
+                      {line.technical_notes ? <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{asText(line.technical_notes)}</p> : null}
                     </div>
-                    <div className="text-right text-sm">
+                    <div className="text-sm xl:text-right">
                       <p>{formatNumber(n(line.completed_quantity))} / {formatNumber(n(line.quantity))}</p>
+                      <ProgressBar done={line.completed_quantity} target={line.quantity} />
                       {line.stock_in_done && <Badge variant="secondary">Depoya işlendi</Badge>}
+                    </div>
+                    <div className="flex justify-start xl:justify-end">
+                      <TechnicalDrawingButton drawings={line.technical_drawings} compact />
                     </div>
                   </div>
                   <div className="mt-3 grid gap-2 md:grid-cols-4 xl:grid-cols-6">
@@ -1886,8 +2186,8 @@ export function ProductionConsolePage() {
             <CardHeader>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <CardTitle>{item.station_code} · {item.product_name}</CardTitle>
-                  <p className="text-sm text-muted-foreground">{item.work_order_number} · {item.customer_name || '-'} · {item.detail_1 || '-'} / {item.detail_2 || '-'}</p>
+                  <CardTitle>{asText(item.station_code)} · {asText(item.product_name, 'Ürün')}</CardTitle>
+                  <p className="text-sm text-muted-foreground">{asText(item.work_order_number)} · {asText(item.customer_name, '-')} · {asText(item.detail_1, '-')} / {asText(item.detail_2, '-')}</p>
                 </div>
                 <div className="flex flex-wrap justify-end gap-2">
                   <Badge>{statusLabel[item.status] || item.status}</Badge>
@@ -2256,19 +2556,27 @@ export function ProductionTabletPage() {
   }
 
   return (
-    <div className="min-h-screen space-y-4 bg-background p-4">
-      <div className="rounded-xl border bg-card p-5 text-center">
-        <p className="text-sm uppercase tracking-[0.3em] text-muted-foreground">{ctx.station?.department_name || 'İmalat'}</p>
-        <h1 className="mt-2 text-4xl font-black tracking-wide md:text-6xl">{ctx.station?.code} · {ctx.station?.name}</h1>
-        <div className="mt-5 grid gap-3 md:grid-cols-3">
-          <MetricBlock label="Günlük hedef" value={formatNumber(n(ctx.daily_target?.target_quantity))} />
-          <MetricBlock label="Bugün yapılan" value={formatNumber(n(ctx.daily_target?.actual_quantity))} />
-          <MetricBlock label="Kalan" value={formatNumber(n(ctx.daily_target?.remaining_quantity))} />
+    <div className="min-h-screen space-y-3 bg-background p-3">
+      <div className="rounded-xl border bg-card p-3">
+        <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr] lg:items-center">
+          <div>
+            <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{ctx.station?.department_name || 'İmalat'}</p>
+            <h1 className="mt-1 text-3xl font-black tracking-wide md:text-5xl">{ctx.station?.code} · {ctx.station?.name}</h1>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <MetricBlock label="Hedef" value={formatNumber(n(ctx.daily_target?.target_quantity))} />
+            <MetricBlock label="Yapılan" value={formatNumber(n(ctx.daily_target?.actual_quantity))} />
+            <MetricBlock label="Kalan" value={formatNumber(n(ctx.daily_target?.remaining_quantity))} />
+          </div>
+        </div>
+        <div className="mt-2 flex items-center gap-3">
+          <ProgressBar done={ctx.daily_target?.actual_quantity} target={ctx.daily_target?.target_quantity} />
+          <span className="min-w-12 text-right text-sm font-semibold">%{formatNumber(n(ctx.daily_target?.completion_percent ?? pct(ctx.daily_target?.actual_quantity, ctx.daily_target?.target_quantity)))}</span>
         </div>
       </div>
 
       <Card className={shiftLocked ? 'border-amber-500/70 bg-amber-500/10' : ''}>
-        <CardContent className="grid gap-3 pt-6 lg:grid-cols-[1fr_auto] lg:items-center">
+        <CardContent className="grid gap-3 p-3 lg:grid-cols-[1fr_auto] lg:items-center">
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={shiftLocked ? 'destructive' : 'secondary'}>{ctx.shift_state?.label || 'Vardiya'}</Badge>
@@ -2301,7 +2609,7 @@ export function ProductionTabletPage() {
       </Card>
 
       <Card>
-        <CardContent className="grid gap-3 pt-6 lg:grid-cols-[1fr_280px] lg:items-end">
+        <CardContent className="grid gap-3 p-3 lg:grid-cols-[1fr_250px] lg:items-end">
           <div className="space-y-2">
             <Label>Aktif iş emri</Label>
             <Select value={selectedLineId} onValueChange={setSelectedLineId} disabled={shiftLocked}>
@@ -2309,7 +2617,7 @@ export function ProductionTabletPage() {
               <SelectContent>
                 {(ctx.work_items || []).map((item) => (
                   <SelectItem key={item.line_id} value={String(item.line_id)}>
-                    {item.work_order_number} · {item.product_sku} · {item.product_name}
+                    {asText(item.work_order_number)} · {asText(item.product_sku, 'Kodsuz')} · {asText(item.product_name, 'Ürün')}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -2318,39 +2626,45 @@ export function ProductionTabletPage() {
           <div className="grid gap-2">
             <Button variant="outline" onClick={load} className="h-14" disabled={submitting}><RefreshCw className="mr-2 h-4 w-4" /> Yenile</Button>
             <Button onClick={completeWorkItem} disabled={!selectedWork || submitting || shiftLocked} className="h-14"><CheckCircle2 className="mr-2 h-4 w-4" /> İşi tamamla</Button>
+            <TechnicalDrawingButton drawings={selectedWork?.technical_drawings} compact />
           </div>
         </CardContent>
       </Card>
 
       {selectedWork && (
         <Card>
-          <CardContent className="grid gap-4 pt-6 md:grid-cols-5">
-            <div className="md:col-span-2">
-              <p className="text-2xl font-bold">{selectedWork.product_name}</p>
-              <p className="text-muted-foreground">{selectedWork.detail_1 || '-'} / {selectedWork.detail_2 || '-'}</p>
+          <CardContent className="grid gap-3 p-3 lg:grid-cols-[1.5fr_repeat(4,minmax(90px,1fr))_auto] lg:items-center">
+            <div className="min-w-0">
+              <p className="truncate text-xl font-bold">{asText(selectedWork.product_sku, 'Kodsuz')} · {asText(selectedWork.product_name, 'Ürün')}</p>
+              <div className="mt-1 grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+                <p><span className="font-medium text-foreground">Detay-1:</span> {asText(selectedWork.detail_1, '-')}</p>
+                <p><span className="font-medium text-foreground">Detay-2:</span> {asText(selectedWork.detail_2, '-')}</p>
+              </div>
+              {selectedWork.technical_notes ? <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{asText(selectedWork.technical_notes)}</p> : null}
             </div>
             <MetricBlock label="Hedef" value={formatNumber(n(selectedWork.target_quantity))} />
             <MetricBlock label="Resmi sağlam" value={formatNumber(n(selectedWork.completed_quantity))} />
             <MetricBlock label="Makine" value={formatNumber(n(selectedWork.machine_quantity))} />
             <MetricBlock label="Pencere" value={formatNumber(n(ctx.active_window?.machine_delta))} />
+            <TechnicalDrawingButton drawings={selectedWork.technical_drawings} compact />
           </CardContent>
         </Card>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {slots.map((slot, index) => (
-          <Card key={index} className="min-h-72">
-            <CardHeader>
+          <Card key={index} className="min-h-56">
+            <CardHeader className="p-3 pb-1">
               <CardTitle className="flex items-center justify-between">
                 <span>Slot {index + 1}</span>
                 {slot?.status === 'paused' && <Badge variant="outline">Molada</Badge>}
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-3 p-3">
               {slot ? (
                 <>
                   <div>
-                    <p className="text-2xl font-bold">{slot.user_name}</p>
+                    <p className="text-xl font-bold">{slot.user_name}</p>
                     <p className="text-sm text-muted-foreground">{slot.work_order_number} · {slot.product_sku}</p>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
@@ -2382,7 +2696,7 @@ export function ProductionTabletPage() {
                 </>
               ) : (
                 <button
-                  className="flex h-48 w-full flex-col items-center justify-center rounded-lg border border-dashed text-muted-foreground hover:bg-muted/40"
+                  className="flex h-36 w-full flex-col items-center justify-center rounded-lg border border-dashed text-muted-foreground hover:bg-muted/40"
                   onClick={() => setLoginSlot(index)}
                   disabled={submitting || shiftLocked}
                 >
@@ -2396,8 +2710,8 @@ export function ProductionTabletPage() {
       </div>
 
       <Card>
-        <CardHeader><CardTitle>Bugünkü kişi toplamları</CardTitle></CardHeader>
-        <CardContent className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+        <CardHeader className="p-3 pb-1"><CardTitle>Bugünkü kişi toplamları</CardTitle></CardHeader>
+        <CardContent className="grid gap-2 p-3 md:grid-cols-3 xl:grid-cols-6">
           {(ctx.operators || []).map((operator) => (
             <div key={operator.id} className="rounded-md border p-3">
               <p className="font-medium">{operator.name}</p>
@@ -2551,6 +2865,7 @@ export function ProductionReportsPage() {
   const totalProducedInRange = useMemo(() => {
     return (summary.by_station || []).reduce((acc: number, row: any) => acc + (parseFloat(row.total) || 0), 0)
   }, [summary.by_station])
+  const stationTargetPerformance = summary.station_target_performance || []
 
   const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f43f5e', '#14b8a6', '#eab308']
 
@@ -2603,7 +2918,7 @@ export function ProductionReportsPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Tüm Bölümler</SelectItem>
-                {(summary.departments || []).map((d: any) => (
+                {(summary.departments_list || []).map((d: any) => (
                   <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -2652,7 +2967,7 @@ export function ProductionReportsPage() {
             <Layers className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-foreground">{summary.departments?.length || 0}</div>
+            <div className="text-2xl font-bold text-foreground">{summary.departments || 0}</div>
             <p className="text-[10px] text-muted-foreground mt-0.5">Aktif üretim departmanları</p>
           </CardContent>
         </Card>
@@ -2662,7 +2977,7 @@ export function ProductionReportsPage() {
             <Cpu className="h-4 w-4 text-indigo-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-foreground">{summary.stations_list?.length || 0}</div>
+            <div className="text-2xl font-bold text-foreground">{summary.stations || 0}</div>
             <p className="text-[10px] text-muted-foreground mt-0.5">Aktif hat istasyonları</p>
           </CardContent>
         </Card>
@@ -2690,6 +3005,38 @@ export function ProductionReportsPage() {
 
       {/* Charts section */}
       <div className="grid gap-4 md:grid-cols-2">
+        <Card className="border border-border/80 bg-card/40 backdrop-blur-sm md:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <TimerReset className="h-4 w-4 text-emerald-500" /> İstasyon Hedef Gerçekleşme
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="h-[300px]">
+            {stationTargetPerformance.length === 0 ? (
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                Seçilen aralıkta istasyon hedefi bulunamadı.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={stationTargetPerformance} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border/40" />
+                  <XAxis dataKey="station_code" tick={{ fontSize: 10 }} stroke="#888888" />
+                  <YAxis tick={{ fontSize: 10 }} stroke="#888888" allowDecimals={false} />
+                  <ReTooltip
+                    formatter={(value, name) => [
+                      name === 'completion_percent' ? `%${formatNumber(Number(value))}` : `${formatNumber(Number(value))} adet`,
+                      name === 'target_quantity' ? 'Hedef' : name === 'actual_quantity' ? 'Gerçekleşen' : 'Yüzde',
+                    ]}
+                    labelFormatter={(label) => `İstasyon: ${label}`}
+                  />
+                  <Bar dataKey="target_quantity" fill="#64748b" name="Hedef" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="actual_quantity" fill="#10b981" name="Gerçekleşen" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
         <Card className="border border-border/80 bg-card/40 backdrop-blur-sm">
           <CardHeader>
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
