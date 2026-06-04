@@ -409,7 +409,12 @@ class QuoteSerializer(serializers.ModelSerializer):
         quote._audit_user = self.context.get('request').user if self.context.get('request') else None
         self._create_lines(quote, lines_data)
         self._recalc(quote)
-        schedule_contract_production_if_approved(quote)
+        send_to_production = True
+        request = self.context.get('request')
+        if request and 'send_to_production' in request.data:
+            send_to_production = request.data.get('send_to_production') in [True, 'true', '1']
+        if send_to_production:
+            schedule_contract_production_if_approved(quote)
         return quote
 
     def validate(self, attrs):
@@ -458,7 +463,12 @@ class QuoteSerializer(serializers.ModelSerializer):
             if previous_lines_snapshot != next_lines_snapshot:
                 log_entity_action(instance, 'updated', user=request_user, field='lines', old_value=previous_lines_snapshot, new_value=next_lines_snapshot)
         self._recalc(instance)
-        schedule_contract_production_if_approved(instance)
+        send_to_production = True
+        request = self.context.get('request')
+        if request and 'send_to_production' in request.data:
+            send_to_production = request.data.get('send_to_production') in [True, 'true', '1']
+        if send_to_production:
+            schedule_contract_production_if_approved(instance)
         return instance
 
     def _serialize_quote_lines(self, lines):

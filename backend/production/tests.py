@@ -927,3 +927,22 @@ class ProductionAutomationTests(TestCase):
 
         self.assertEqual(second_step.status, 'locked')
         self.assertEqual(context['work_items'], [])
+
+    def test_contract_route_fallback_and_steel_door_draft_status(self):
+        self.org.production_route_templates.update(product_group_key='', is_default=True)
+        
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        self.assertIsNotNone(order)
+        self.assertEqual(order.status, 'waiting')
+        
+        quote_steel = self.make_contract()
+        line = quote_steel.lines.first()
+        line.name = "Çelik Kapı Ürünü"
+        line.save()
+        
+        # Delete any pre-existing work order for quote_steel to avoid idempotency match
+        ProductionWorkOrder.objects.filter(source_id=str(quote_steel.id)).delete()
+        order_steel = create_work_order_from_contract(quote_steel, user=self.user)
+        self.assertIsNotNone(order_steel)
+        self.assertEqual(order_steel.status, 'draft')

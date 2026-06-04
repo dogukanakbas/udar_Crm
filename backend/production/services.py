@@ -624,13 +624,24 @@ def create_work_order_from_contract(quote, *, user=None):
     route_lines = []
     for line in quote.lines.select_related('product__category').all().order_by('sort_order', 'id'):
         group_key = quote_line_product_group_key(line)
-        if not group_key:
-            continue
-        route = ProductionRouteTemplate.objects.filter(
-            organization=quote.organization,
-            product_group_key=group_key,
-            is_active=True,
-        ).prefetch_related('steps__station__department').first()
+        route = None
+        if group_key:
+            route = ProductionRouteTemplate.objects.filter(
+                organization=quote.organization,
+                product_group_key=group_key,
+                is_active=True,
+            ).prefetch_related('steps__station__department').first()
+        if not route:
+            route = ProductionRouteTemplate.objects.filter(
+                organization=quote.organization,
+                is_default=True,
+                is_active=True,
+            ).prefetch_related('steps__station__department').first()
+        if not route:
+            route = ProductionRouteTemplate.objects.filter(
+                organization=quote.organization,
+                is_active=True,
+            ).prefetch_related('steps__station__department').first()
         if route:
             route_lines.append((line, route))
     lines = [line for line, _route in route_lines]
@@ -641,6 +652,28 @@ def create_work_order_from_contract(quote, *, user=None):
     if not route.steps.exists():
         raise ProductionError('Secilen uretim rotasinda istasyon yok.')
 
+    def _is_steel_door_line(l):
+        prod = getattr(l, 'product', None)
+        cat = getattr(prod, 'category', None) if prod else None
+        
+        name = (getattr(l, 'name', '') or '').lower()
+        if 'çelik kapı' in name or 'celik kapi' in name or 'steel door' in name:
+            return True
+            
+        if cat:
+            cat_name = (cat.name or '').lower()
+            if 'çelik kapı' in cat_name or 'celik kapi' in cat_name or 'steel door' in cat_name:
+                return True
+                
+        gk = quote_line_product_group_key(l)
+        if gk == 'celik_kapi':
+            return True
+            
+        return False
+
+    has_steel_door = any(_is_steel_door_line(l) for l, _ in route_lines)
+    initial_status = 'draft' if has_steel_door else 'waiting'
+
     try:
         order = ProductionWorkOrder.objects.create(
             organization=quote.organization,
@@ -649,7 +682,7 @@ def create_work_order_from_contract(quote, *, user=None):
             source_id=str(quote.id),
             source_number=quote.number,
             customer_name=getattr(quote.customer, 'name', ''),
-            status='waiting',
+            status=initial_status,
             route=route,
             planned_start=timezone.localdate(),
             due_date=quote.valid_until,
@@ -1602,6 +1635,7 @@ def tablet_context(token):
             station=station,
             status__in=open_statuses,
         )
+        .exclude(line__work_order__status='draft')
         .select_related('line__work_order', 'station', 'route_step')
         .prefetch_related('tablet_assignments')
         .order_by('line__work_order__due_date', 'line__work_order__number', 'order')[:100]
@@ -2111,6 +2145,7 @@ def dashboard_summary(organization):
         ),
         'station_load': list(
             ProductionStepProgress.objects.filter(line__work_order__organization=organization, status__in=['ready', 'in_progress'])
+            .exclude(line__work_order__status='draft')
             .values('station__code', 'station__name', 'station__department__name')
             .annotate(total_target=Sum('target_quantity'), total_done=Sum('completed_quantity'))
             .order_by('station__department__order', 'station__order')

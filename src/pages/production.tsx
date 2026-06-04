@@ -1592,6 +1592,7 @@ export function ProductionWorkOrdersPage() {
   const [stepTargetDraft, setStepTargetDraft] = useState<Record<number, string>>({})
   const [contractId, setContractId] = useState('')
   const [query, setQuery] = useState('')
+  const [publishingId, setPublishingId] = useState<number | null>(null)
 
   const load = async () => {
     const [wo, qs, tabletRows] = await Promise.all([
@@ -1620,6 +1621,19 @@ export function ProductionWorkOrdersPage() {
     toast({ title: 'Sözleşme üretim iş emrine aktarıldı' })
     setContractId('')
     await load()
+  }
+
+  const sendDraftToProduction = async (id: number) => {
+    setPublishingId(id)
+    try {
+      await api.patch(`/production/work-orders/${id}/`, { status: 'waiting' })
+      toast({ title: 'İş emri üretime gönderildi' })
+      await load()
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'İş emri güncellenemedi', variant: 'destructive' })
+    } finally {
+      setPublishingId(null)
+    }
   }
 
   const exportWorkOrders = async () => {
@@ -1711,7 +1725,19 @@ export function ProductionWorkOrdersPage() {
                 <CardTitle>{order.number}</CardTitle>
                 <p className="text-sm text-muted-foreground">{order.customer_name || 'Cari yok'} · {order.source_number || 'Manuel'} · {order.route_name || 'Rota'}</p>
               </div>
-              <Badge>{statusLabel[order.status] || order.status}</Badge>
+              <div className="flex items-center gap-2">
+                {order.status === 'draft' && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => sendDraftToProduction(order.id)}
+                    disabled={publishingId === order.id}
+                  >
+                    Üretime Gönder
+                  </Button>
+                )}
+                <Badge>{statusLabel[order.status] || order.status}</Badge>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               {(order.lines || []).map((line) => (

@@ -400,7 +400,9 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             approval.status = 'Waiting'
         quote.save(update_fields=['status'])
         approval.save(update_fields=['status'])
-        schedule_contract_production_if_approved(quote)
+        send_to_production = request.data.get('send_to_production', True) in [True, 'true', '1']
+        if send_to_production:
+            schedule_contract_production_if_approved(quote)
         log_entity_action(quote, f'approved_{role}', user=request.user)
         return Response({'status': 'approved', 'role': role})
 

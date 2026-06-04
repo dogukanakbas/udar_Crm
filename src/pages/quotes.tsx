@@ -1133,6 +1133,7 @@ export function QuotesPage() {
   const [editingQuote, setEditingQuote] = useState<Quote | null>(null)
   const [loadingQuoteId, setLoadingQuoteId] = useState<string | null>(null)
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null)
+  const [productionConfirmQuote, setProductionConfirmQuote] = useState<Quote | null>(null)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkEditOpen, setBulkEditOpen] = useState(false)
   const [bulkEditIds, setBulkEditIds] = useState<string[]>([])
@@ -1255,10 +1256,22 @@ export function QuotesPage() {
 
   const handleStatusChange = async (quote: Quote, nextStatus: string) => {
     const normalizedStatus = normalizeQuoteWorkflowStatus(nextStatus)
+    if (quote.documentType === 'Contract' && normalizedStatus === 'Approved') {
+      setProductionConfirmQuote(quote)
+      return
+    }
+    await proceedStatusChange(quote, normalizedStatus)
+  }
+
+  const proceedStatusChange = async (quote: Quote, nextStatus: string, sendToProduction?: boolean) => {
     setStatusUpdatingId(quote.id)
     try {
-      await updateQuote(quote.id, { status: normalizedStatus as Quote['status'] })
-      toast({ title: `${DOCUMENT_TYPE_TR[quote.documentType]} durumu ${quoteStatusTr(normalizedStatus)} yapıldı` })
+      const payload: any = { status: nextStatus as Quote['status'] }
+      if (sendToProduction !== undefined) {
+        payload.send_to_production = sendToProduction
+      }
+      await updateQuote(quote.id, payload)
+      toast({ title: `${DOCUMENT_TYPE_TR[quote.documentType]} durumu ${quoteStatusTr(nextStatus)} yapıldı` })
     } catch (error: any) {
       toast({ title: error?.response?.data?.detail || 'Durum güncellenemedi', variant: 'destructive' })
     } finally {
@@ -1516,6 +1529,57 @@ export function QuotesPage() {
             <Button type="button" variant="outline" onClick={() => setBulkEditOpen(false)} disabled={bulkBusy}>Vazgeç</Button>
             <Button type="button" onClick={handleBulkEditSave} disabled={bulkBusy || bulkEditIds.length === 0}>
               {bulkBusy ? 'Güncelleniyor...' : `${bulkEditIds.length} belgeyi güncelle`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(productionConfirmQuote)} onOpenChange={(open) => { if (!open) setProductionConfirmQuote(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>İş Emri Üretime Gönderilsin mi?</DialogTitle>
+          </DialogHeader>
+          <div className="py-2 text-sm text-muted-foreground space-y-2">
+            <p>
+              <strong>{productionConfirmQuote?.number}</strong> nolu sözleşme onaylanıyor. Bu sözleşme için üretim iş emri oluşturulup üretime gönderilsin mi?
+            </p>
+            <p className="text-xs">
+              Eğer depodaki hazır ürünlerden teslimat yapacaksanız <strong>"Hayır, Sadece Onayla"</strong> seçeneğini kullanabilirsiniz.
+            </p>
+          </div>
+          <DialogFooter className="flex flex-col sm:flex-row gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setProductionConfirmQuote(null)}
+              disabled={statusUpdatingId !== null}
+            >
+              Vazgeç
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                if (productionConfirmQuote) {
+                  proceedStatusChange(productionConfirmQuote, 'Approved', false)
+                  setProductionConfirmQuote(null)
+                }
+              }}
+              disabled={statusUpdatingId !== null}
+            >
+              Hayır, Sadece Onayla
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                if (productionConfirmQuote) {
+                  proceedStatusChange(productionConfirmQuote, 'Approved', true)
+                  setProductionConfirmQuote(null)
+                }
+              }}
+              disabled={statusUpdatingId !== null}
+            >
+              Evet, Üretime Gönder
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2356,6 +2420,7 @@ export function QuoteDetailPage() {
   const [statusUpdating, setStatusUpdating] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [fullQuote, setFullQuote] = useState<Quote | null>(null)
+  const [productionConfirmQuote, setProductionConfirmQuote] = useState<Quote | null>(null)
   const storeQuote = data.quotes.find((item) => item.id === params.quoteId) ?? data.quotes[0]
   const quote = fullQuote ?? storeQuote
   const company = data.companies.find((item) => item.id === quote?.customerId)
@@ -2402,11 +2467,23 @@ export function QuoteDetailPage() {
 
   const handleDetailStatusChange = async (nextStatus: string) => {
     const normalizedStatus = normalizeQuoteWorkflowStatus(nextStatus)
+    if (quote.documentType === 'Contract' && normalizedStatus === 'Approved') {
+      setProductionConfirmQuote(quote)
+      return
+    }
+    await proceedDetailStatusChange(normalizedStatus)
+  }
+
+  const proceedDetailStatusChange = async (nextStatus: string, sendToProduction?: boolean) => {
     setStatusUpdating(true)
     try {
-      await updateQuote(quote.id, { status: normalizedStatus as Quote['status'] })
-      setFullQuote((current) => (current ? { ...current, status: normalizedStatus as Quote['status'] } : current))
-      toast({ title: `Belge durumu ${quoteStatusTr(normalizedStatus)} yapıldı` })
+      const payload: any = { status: nextStatus as Quote['status'] }
+      if (sendToProduction !== undefined) {
+        payload.send_to_production = sendToProduction
+      }
+      await updateQuote(quote.id, payload)
+      setFullQuote((current) => (current ? { ...current, status: nextStatus as Quote['status'] } : current))
+      toast({ title: `Belge durumu ${quoteStatusTr(nextStatus)} yapıldı` })
     } catch (error: any) {
       toast({ title: error?.response?.data?.detail || 'Durum güncellenemedi', variant: 'destructive' })
     } finally {
@@ -2481,6 +2558,57 @@ export function QuoteDetailPage() {
         <TabsContent value="pricing"><Card><CardContent className="pt-4 space-y-2 text-sm"><p>Fiyatlama kuralları müşteri, ürün kategorisi ve hacim bazlı uygulanır.</p><div className="flex gap-2"><Badge>VIP müşteri %8</Badge><Badge>Donanım %5</Badge><Badge>50k+ %3</Badge></div></CardContent></Card></TabsContent>
         <TabsContent value="history"><AuditHistoryList logs={auditLogs} companies={data.companies} users={data.users} currency={quote.currency} /></TabsContent>
       </Tabs>
+
+      <Dialog open={Boolean(productionConfirmQuote)} onOpenChange={(open) => { if (!open) setProductionConfirmQuote(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>İş Emri Üretime Gönderilsin mi?</DialogTitle>
+          </DialogHeader>
+          <div className="py-2 text-sm text-muted-foreground space-y-2">
+            <p>
+              <strong>{productionConfirmQuote?.number}</strong> nolu sözleşme onaylanıyor. Bu sözleşme için üretim iş emri oluşturulup üretime gönderilsin mi?
+            </p>
+            <p className="text-xs">
+              Eğer depodaki hazır ürünlerden teslimat yapacaksanız <strong>"Hayır, Sadece Onayla"</strong> seçeneğini kullanabilirsiniz.
+            </p>
+          </div>
+          <DialogFooter className="flex flex-col sm:flex-row gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setProductionConfirmQuote(null)}
+              disabled={statusUpdating}
+            >
+              Vazgeç
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                if (productionConfirmQuote) {
+                  proceedDetailStatusChange('Approved', false)
+                  setProductionConfirmQuote(null)
+                }
+              }}
+              disabled={statusUpdating}
+            >
+              Hayır, Sadece Onayla
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                if (productionConfirmQuote) {
+                  proceedDetailStatusChange('Approved', true)
+                  setProductionConfirmQuote(null)
+                }
+              }}
+              disabled={statusUpdating}
+            >
+              Evet, Üretime Gönder
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
