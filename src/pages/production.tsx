@@ -1892,6 +1892,7 @@ export function ProductionWorkOrdersPage() {
   const [drawingResults, setDrawingResults] = useState<TechnicalDrawing[]>([])
   const [drawingSearching, setDrawingSearching] = useState(false)
   const [publishingId, setPublishingId] = useState<number | null>(null)
+  const [expandedLines, setExpandedLines] = useState<Record<number, boolean>>({})
 
   const load = async () => {
     const [wo, qs, tabletRows] = await Promise.all([
@@ -2091,56 +2092,80 @@ export function ProductionWorkOrdersPage() {
                       <ProgressBar done={line.completed_quantity} target={line.quantity} />
                       {line.stock_in_done && <Badge variant="secondary">Depoya işlendi</Badge>}
                     </div>
-                    <div className="flex justify-start xl:justify-end">
+                    <div className="flex justify-start xl:justify-end gap-2">
                       <TechnicalDrawingButton drawings={line.technical_drawings} compact />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setExpandedLines(prev => ({ ...prev, [line.id]: !prev[line.id] }))}
+                        className="h-9 gap-1 font-semibold text-xs border-primary/30"
+                      >
+                        {expandedLines[line.id] ? (
+                          <>
+                            <X className="h-4 w-4" /> Gizle
+                          </>
+                        ) : (
+                          <>
+                            <Monitor className="h-4 w-4" /> İstasyon & Tablet Atamaları ({line.steps?.length || 0})
+                          </>
+                        )}
+                      </Button>
                     </div>
                   </div>
-                  <div className="mt-3 grid gap-2 md:grid-cols-4 xl:grid-cols-6">
-                    {(line.steps || []).map((step) => (
-                      <div key={step.id} className="rounded-md border p-2">
-                        <div className="flex items-center justify-between gap-2 text-xs">
-                          <span className="font-medium">{step.station_code}</span>
-                          <Badge variant="outline">{statusLabel[step.status] || step.status}</Badge>
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-1 text-xs">
-                          {step.start_policy === 'parallel' ? <Badge variant="secondary">Paralel</Badge> : <Badge variant="outline">Sırayla</Badge>}
-                          {(step.assigned_tablets || []).length ? <Badge>Tablete özel</Badge> : <Badge variant="outline">Tüm tabletler</Badge>}
-                        </div>
-                        <div className="mt-2"><ProgressBar done={step.completed_quantity} target={step.target_quantity} /></div>
-                        <div className="mt-3 space-y-2 border-t pt-2">
-                          {(step.assigned_tablets || []).length > 0 && (
-                            <div className="space-y-1 text-xs text-muted-foreground">
-                              {(step.assigned_tablets || []).map((assignment) => (
-                                <div key={assignment.id} className="flex items-center justify-between gap-2 rounded bg-muted/40 px-2 py-1">
-                                  <span>{assignment.tablet_name}</span>
-                                  {assignment.is_pinned && <Badge variant="secondary">Öne çıkar</Badge>}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          <div className="flex flex-col gap-2">
-                            <Select value={stepTargetDraft[step.id] || ''} onValueChange={(value) => setStepTargetDraft((current) => ({ ...current, [step.id]: value }))}>
-                              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Belirli tablete ata" /></SelectTrigger>
-                              <SelectContent>
-                                {tabletsForStep(step).map((tablet) => (
-                                  <SelectItem key={tablet.id} value={String(tablet.id)}>{tablet.name}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <div className="flex gap-2">
-                              <Button size="sm" variant="outline" className="h-8 flex-1 text-xs" disabled={!stepTargetDraft[step.id]} onClick={() => assignStepToTablet(step)}>
-                                Tablete ata
-                              </Button>
-                              <Button size="sm" variant="ghost" className="h-8 flex-1 text-xs" disabled={!(step.assigned_tablets || []).length} onClick={() => clearStepTabletAssignments(step)}>
-                                Tüm tabletler
-                              </Button>
-                            </div>
-                            {!tabletsForStep(step).length && <p className="text-[11px] text-muted-foreground">Bu istasyona bağlı tablet yok.</p>}
-                          </div>
-                        </div>
+                  {expandedLines[line.id] && (
+                    <div className="mt-4 border-t pt-3 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-bold text-foreground">İstasyon Akışı & Tablet Atamaları</h4>
+                        <span className="text-xs text-muted-foreground">{line.steps?.length || 0} Adım</span>
                       </div>
-                    ))}
-                  </div>
+                      <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-6">
+                        {(line.steps || []).map((step) => (
+                          <div key={step.id} className="rounded-md border p-2 bg-muted/10">
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span className="font-medium">{step.station_code}</span>
+                              <Badge variant="outline">{statusLabel[step.status] || step.status}</Badge>
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-1 text-xs">
+                              {step.start_policy === 'parallel' ? <Badge variant="secondary">Paralel</Badge> : <Badge variant="outline">Sırayla</Badge>}
+                              {(step.assigned_tablets || []).length ? <Badge>Tablete özel</Badge> : <Badge variant="outline">Tüm tabletler</Badge>}
+                            </div>
+                            <div className="mt-2"><ProgressBar done={step.completed_quantity} target={step.target_quantity} /></div>
+                            <div className="mt-3 space-y-2 border-t pt-2">
+                              {(step.assigned_tablets || []).length > 0 && (
+                                <div className="space-y-1 text-xs text-muted-foreground">
+                                  {(step.assigned_tablets || []).map((assignment) => (
+                                    <div key={assignment.id} className="flex items-center justify-between gap-2 rounded bg-muted/40 px-2 py-1">
+                                      <span>{assignment.tablet_name}</span>
+                                      {assignment.is_pinned && <Badge variant="secondary">Öne çıkar</Badge>}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="flex flex-col gap-2">
+                                <Select value={stepTargetDraft[step.id] || ''} onValueChange={(value) => setStepTargetDraft((current) => ({ ...current, [step.id]: value }))}>
+                                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Belirli tablete ata" /></SelectTrigger>
+                                  <SelectContent>
+                                    {tabletsForStep(step).map((tablet) => (
+                                      <SelectItem key={tablet.id} value={String(tablet.id)}>{tablet.name}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <div className="flex gap-2">
+                                  <Button size="sm" variant="outline" className="h-8 flex-1 text-xs" disabled={!stepTargetDraft[step.id]} onClick={() => assignStepToTablet(step)}>
+                                    Tablete ata
+                                  </Button>
+                                  <Button size="sm" variant="ghost" className="h-8 flex-1 text-xs" disabled={!(step.assigned_tablets || []).length} onClick={() => clearStepTabletAssignments(step)}>
+                                    Tüm tabletler
+                                  </Button>
+                                </div>
+                                {!tabletsForStep(step).length && <p className="text-[11px] text-muted-foreground">Bu istasyona bağlı tablet yok.</p>}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </CardContent>
