@@ -3,22 +3,26 @@ from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from django.http import HttpResponse
+from django.db import IntegrityError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.utils import user_has_perm
-from addons.models import Addon, AddonCompiledTemplate, AddonPhrase, AddonStyleAsset, AddonTemplate, AddonTemplateModification
+from addons.models import Addon, AddonCompiledTemplate, AddonPhrase, AddonStyleAsset, AddonTemplate, AddonTemplateModification, NavigationItem
 from addons.services import (
     AddonError,
     delete_addon,
     disable_addon,
     enable_addon,
+    editable_navigation_payload,
     filtered_navigation,
     filtered_routes,
     install_addon,
+    navigation_item_payload,
     permission_catalog_payload,
     rebuild_templates,
     phrase_bundle,
+    reset_organization_navigation,
     safe_extract_addon_zip,
     style_bundle,
     sync_discovered_addons,
@@ -161,7 +165,91 @@ class AddonNavigationView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response({"navigation": filtered_navigation(request.user)})
+        return Response({"navigation": filtered_navigation(request.user), "designed": True})
+
+
+class NavigationDesignerView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _check(self, request):
+        if not user_has_perm(request.user, "addons.manage"):
+            return Response({"detail": "Sol menü tasarımını yönetme yetkiniz yok"}, status=status.HTTP_403_FORBIDDEN)
+        return None
+
+    def get(self, request):
+        denied = self._check(request)
+        if denied:
+            return denied
+        return Response({"navigation": editable_navigation_payload(request.user.organization)})
+
+    def post(self, request):
+        denied = self._check(request)
+        if denied:
+            return denied
+        if request.data.get("action") == "reset":
+            reset_organization_navigation(request.user.organization)
+            return Response({"navigation": editable_navigation_payload(request.user.organization)})
+        payload = {
+            "organization": request.user.organization,
+            "key": request.data.get("key") or "",
+            "label": request.data.get("label") or "",
+            "parent_key": request.data.get("parent_key") or request.data.get("parent") or "",
+            "route": request.data.get("route") or "",
+            "icon": request.data.get("icon") or "FolderKanban",
+            "required_permission": request.data.get("required_permission") or request.data.get("permission") or "",
+            "display_order": int(request.data.get("display_order") or 0),
+            "is_active": bool(request.data.get("is_active", True)),
+            "is_system": False,
+            "meta": request.data.get("meta") if isinstance(request.data.get("meta"), dict) else {},
+        }
+        if not payload["key"] or not payload["label"]:
+            return Response({"detail": "key ve label zorunludur"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            item = NavigationItem.objects.create(**payload)
+        except IntegrityError:
+            return Response({"detail": "Bu menü anahtarı zaten kullanılıyor."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"item": navigation_item_payload(item, include_inactive=True), "id": item.id}, status=status.HTTP_201_CREATED)
+
+
+class NavigationDesignerDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _item(self, request, pk):
+        if not user_has_perm(request.user, "addons.manage"):
+            return None, Response({"detail": "Sol menü tasarımını yönetme yetkiniz yok"}, status=status.HTTP_403_FORBIDDEN)
+        item = NavigationItem.objects.filter(pk=pk, organization=request.user.organization).first()
+        if not item:
+            return None, Response({"detail": "Menü kaydı bulunamadı"}, status=status.HTTP_404_NOT_FOUND)
+        return item, None
+
+    def patch(self, request, pk):
+        item, denied = self._item(request, pk)
+        if denied:
+            return denied
+        for field in ["key", "label", "route", "icon"]:
+            if field in request.data:
+                setattr(item, field, request.data.get(field) or "")
+        if "parent_key" in request.data or "parent" in request.data:
+            item.parent_key = request.data.get("parent_key") or request.data.get("parent") or ""
+        if "required_permission" in request.data or "permission" in request.data:
+            item.required_permission = request.data.get("required_permission") or request.data.get("permission") or ""
+        if "display_order" in request.data:
+            item.display_order = int(request.data.get("display_order") or 0)
+        if "is_active" in request.data:
+            item.is_active = bool(request.data.get("is_active"))
+        if isinstance(request.data.get("meta"), dict):
+            item.meta = request.data["meta"]
+        if not item.key or not item.label:
+            return Response({"detail": "key ve label zorunludur"}, status=status.HTTP_400_BAD_REQUEST)
+        item.save()
+        return Response({"navigation": editable_navigation_payload(request.user.organization)})
+
+    def delete(self, request, pk):
+        item, denied = self._item(request, pk)
+        if denied:
+            return denied
+        item.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class AddonRoutesView(APIView):

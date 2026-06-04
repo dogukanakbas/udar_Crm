@@ -128,6 +128,32 @@ class AddonNavigation(models.Model):
         ordering = ["display_order", "label"]
 
 
+class NavigationItem(models.Model):
+    organization = models.ForeignKey(
+        "organizations.Organization",
+        on_delete=models.CASCADE,
+        related_name="navigation_items",
+        null=True,
+        blank=True,
+    )
+    key = models.CharField(max_length=160)
+    label = models.CharField(max_length=180)
+    parent_key = models.CharField(max_length=160, blank=True, default="")
+    route = models.CharField(max_length=260, blank=True, default="")
+    icon = models.CharField(max_length=80, blank=True, default="FolderKanban")
+    required_permission = models.CharField(max_length=120, blank=True, default="")
+    display_order = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    is_system = models.BooleanField(default=True)
+    meta = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("organization", "key")
+        ordering = ["display_order", "label"]
+
+
 class AddonAsset(models.Model):
     addon = models.ForeignKey(Addon, on_delete=models.CASCADE, related_name="assets")
     key = models.CharField(max_length=160)

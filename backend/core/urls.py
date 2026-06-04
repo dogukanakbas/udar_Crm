@@ -83,6 +83,8 @@ from addons.views import (
     AddonTemplateView,
     AddonUploadView,
     AddonViewSet,
+    NavigationDesignerDetailView,
+    NavigationDesignerView,
     PermissionCatalogView,
     PhraseBundleView,
 )
@@ -188,6 +190,8 @@ urlpatterns = [
     path('api/auth/', include('accounts.urls')),
     path('api/addons/upload/', AddonUploadView.as_view(), name='addons-upload'),
     path('api/addons/navigation/', AddonNavigationView.as_view(), name='addons-navigation'),
+    path('api/addons/navigation-items/', NavigationDesignerView.as_view(), name='addons-navigation-items'),
+    path('api/addons/navigation-items/<int:pk>/', NavigationDesignerDetailView.as_view(), name='addons-navigation-item-detail'),
     path('api/addons/routes/', AddonRoutesView.as_view(), name='addons-routes'),
     path('api/addons/templates/', AddonTemplateView.as_view(), name='addons-templates'),
     path('api/addons/template-modifications/', AddonTemplateModificationView.as_view(), name='addons-template-modifications'),

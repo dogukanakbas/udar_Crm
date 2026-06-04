@@ -26,6 +26,7 @@ from addons.models import (
     AddonTemplate,
     AddonTemplateModification,
     AddonVersion,
+    NavigationItem,
 )
 
 
@@ -39,6 +40,42 @@ SYSTEM_GROUPS = [
     ("Support", "Destek", 50),
     ("Warehouse", "Depo", 60),
     ("Worker", "Çalışan", 70),
+]
+
+DEFAULT_NAVIGATION_ITEMS = [
+    {"key": "dashboard", "label": "Kontrol Paneli", "route": "/", "icon": "Home", "permission": "settings.view", "order": 10},
+    {"key": "worker_home", "label": "Görevlerim", "route": "/", "icon": "Home", "order": 20, "meta": {"roles": ["Worker"]}},
+    {"key": "task_history", "label": "Geçmiş görevler", "route": "/task-history", "icon": "CalendarClock", "permission": "tasks.view.own", "order": 30},
+    {"key": "change_password", "label": "Şifre değiştir", "route": "/change-password", "icon": "KeyRound", "order": 40},
+    {"key": "crm", "label": "CRM", "icon": "Gauge", "order": 100},
+    {"key": "opportunities", "label": "Fırsatlar", "parent": "crm", "route": "/crm/opportunities", "permission": "opportunities.view", "order": 110},
+    {"key": "partners", "label": "Cari Kartı", "parent": "crm", "route": "/crm/companies", "permission": "partners.view", "order": 120},
+    {"key": "contacts", "label": "Kişiler", "parent": "crm", "route": "/crm/contacts", "permission": "contacts.view", "order": 130},
+    {"key": "quotes", "label": "Teklif & Sözleşmeler", "parent": "crm", "route": "/crm/quotes", "permission": "quotes.view.own", "order": 140},
+    {"key": "seller_companies", "label": "Satıcı Firmalar", "parent": "crm", "route": "/crm/seller-companies", "permission": "templates.seller_companies.edit", "order": 150},
+    {"key": "quote_templates", "label": "Şablon Yönetimi", "parent": "crm", "route": "/crm/quote-templates", "permission": "templates.view", "order": 160},
+    {"key": "erp", "label": "ERP", "icon": "Package", "permission": "erp.view", "order": 200},
+    {"key": "sales_orders", "label": "Satış Siparişleri", "parent": "erp", "route": "/erp/sales-orders", "permission": "orders.view", "order": 210},
+    {"key": "purchases", "label": "Satınalma", "parent": "erp", "route": "/erp/purchases", "permission": "orders.view", "order": 220},
+    {"key": "inventory", "label": "Stok", "parent": "erp", "route": "/erp/inventory", "permission": "inventory.view", "order": 230},
+    {"key": "warehouse_management", "label": "Depo Yönetimi", "parent": "erp", "route": "/erp/warehouse-management", "permission": "warehouses.manage", "order": 240},
+    {"key": "warehouse", "label": "Depo", "parent": "erp", "route": "/erp/warehouse", "permission": "warehouse_stock.view", "order": 250},
+    {"key": "production", "label": "İmalat Yönetimi", "parent": "erp", "route": "/erp/production", "permission": "production.view", "order": 260},
+    {"key": "production_orders", "label": "İş Emirleri", "parent": "erp", "route": "/erp/production/orders", "permission": "production.work_orders.view", "order": 270},
+    {"key": "production_console", "label": "İstasyon Konsolu", "parent": "erp", "route": "/erp/production/console", "permission": "production.station.operate", "order": 280},
+    {"key": "production_reports", "label": "İmalat Raporları", "parent": "erp", "route": "/erp/production/reports", "permission": "production.reports.view", "order": 290},
+    {"key": "invoicing", "label": "Faturalama", "parent": "erp", "route": "/erp/invoicing", "permission": "invoices.view", "order": 300},
+    {"key": "accounting", "label": "Muhasebe", "parent": "erp", "route": "/erp/accounting", "permission": "accounting.view", "order": 310},
+    {"key": "logistics", "label": "Lojistik Takip", "parent": "erp", "route": "/logistics/tracking", "permission": "logistics.view", "order": 320},
+    {"key": "mdf", "label": "MDF Yönetimi", "parent": "erp", "route": "/mdf", "permission": "inventory.view", "order": 330},
+    {"key": "mdf_history", "label": "MDF Giriş / Çıkış", "parent": "erp", "route": "/mdf/history", "permission": "inventory.view", "order": 340},
+    {"key": "support", "label": "Destek", "icon": "Activity", "order": 400},
+    {"key": "tickets", "label": "Destek talepleri", "parent": "support", "route": "/support/tickets", "permission": "tickets.view", "order": 410},
+    {"key": "tasks", "label": "Görevler", "route": "/tasks", "icon": "FolderKanban", "permission": "tasks.view", "order": 500},
+    {"key": "worker_tracking", "label": "Çalışan Takibi", "route": "/worker-tracking", "icon": "Activity", "permission": "worker_tracking.view", "order": 510},
+    {"key": "calendar", "label": "Takvim", "route": "/calendar", "icon": "CalendarClock", "permission": "tasks.calendar.view", "order": 520},
+    {"key": "reports", "label": "Raporlar", "route": "/reports", "icon": "BarChart3", "permission": "reports.view", "order": 530},
+    {"key": "settings", "label": "Ayarlar", "route": "/settings", "icon": "Settings", "permission": "settings.view", "order": 540},
 ]
 
 
@@ -190,6 +227,84 @@ def _import_navigation(addon: Addon, addon_path: Path) -> int:
     AddonNavigation.objects.filter(addon=addon).exclude(key__in=seen).update(is_active=False)
     _record_import(addon, "navigation", payload, len(seen))
     return len(seen)
+
+
+def seed_default_navigation_items():
+    for item in DEFAULT_NAVIGATION_ITEMS:
+        NavigationItem.objects.update_or_create(
+            organization=None,
+            key=item["key"],
+            defaults={
+                "label": item["label"],
+                "parent_key": item.get("parent", ""),
+                "route": item.get("route", ""),
+                "icon": item.get("icon", "FolderKanban"),
+                "required_permission": item.get("permission", ""),
+                "display_order": item.get("order", 0),
+                "is_active": True,
+                "is_system": True,
+                "meta": item.get("meta", {}),
+            },
+        )
+
+
+def ensure_organization_navigation(organization):
+    seed_default_navigation_items()
+    if not organization:
+        return False
+    if NavigationItem.objects.filter(organization=organization).exists():
+        return True
+    defaults = NavigationItem.objects.filter(organization__isnull=True).order_by("display_order", "label")
+    for item in defaults:
+        NavigationItem.objects.create(
+            organization=organization,
+            key=item.key,
+            label=item.label,
+            parent_key=item.parent_key,
+            route=item.route,
+            icon=item.icon,
+            required_permission=item.required_permission,
+            display_order=item.display_order,
+            is_active=item.is_active,
+            is_system=item.is_system,
+            meta=item.meta,
+        )
+    return True
+
+
+def reset_organization_navigation(organization):
+    if not organization:
+        return
+    NavigationItem.objects.filter(organization=organization).delete()
+    ensure_organization_navigation(organization)
+
+
+def navigation_item_payload(item: NavigationItem, user=None, include_inactive=False) -> dict | None:
+    from accounts.utils import user_has_perm
+
+    roles = item.meta.get("roles") if isinstance(item.meta, dict) else None
+    if user is not None and roles and getattr(user, "role", "") not in roles:
+        return None
+    if user is not None and item.required_permission and not user_has_perm(user, item.required_permission):
+        return None
+    if not include_inactive and not item.is_active:
+        return None
+    return {
+        "id": item.id,
+        "key": item.key,
+        "label": item.label,
+        "parent": item.parent_key,
+        "parent_key": item.parent_key,
+        "route": item.route,
+        "icon": item.icon,
+        "permission": item.required_permission,
+        "required_permission": item.required_permission,
+        "display_order": item.display_order,
+        "is_active": item.is_active,
+        "is_system": item.is_system,
+        "source": "designer",
+        "meta": item.meta,
+    }
 
 
 def _import_routes(addon: Addon, addon_path: Path) -> int:
@@ -658,9 +773,22 @@ def install_builtin_addons():
 def filtered_navigation(user) -> list[dict]:
     from accounts.utils import user_has_perm
 
-    rows = AddonNavigation.objects.filter(addon__is_installed=True, addon__is_enabled=True, is_active=True).select_related("addon")
+    organization = getattr(user, "organization", None)
+    ensure_organization_navigation(organization)
+    org_rows = NavigationItem.objects.filter(organization=organization, is_active=True).order_by("display_order", "label")
     visible = []
+    seen = set()
+    for item in org_rows:
+        payload = navigation_item_payload(item, user=user)
+        if not payload:
+            continue
+        visible.append(payload)
+        seen.add(item.key)
+
+    rows = AddonNavigation.objects.filter(addon__is_installed=True, addon__is_enabled=True, is_active=True).select_related("addon")
     for item in rows:
+        if item.key in seen:
+            continue
         if item.required_permission and not user_has_perm(user, item.required_permission):
             continue
         visible.append({
@@ -673,8 +801,15 @@ def filtered_navigation(user) -> list[dict]:
             "display_order": item.display_order,
             "addon_id": item.addon.addon_id,
             "meta": item.meta,
+            "source": "addon",
         })
     return visible
+
+
+def editable_navigation_payload(organization) -> list[dict]:
+    ensure_organization_navigation(organization)
+    rows = NavigationItem.objects.filter(organization=organization).order_by("display_order", "label")
+    return [navigation_item_payload(item, include_inactive=True) for item in rows]
 
 
 def filtered_routes(user) -> list[dict]:

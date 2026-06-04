@@ -18,7 +18,7 @@ import { formatNumber } from '@/lib/utils'
 
 type Department = { id: number; code: string; name: string; color?: string; order: number; is_active: boolean }
 type Station = { id: number; department: number; department_name?: string; code: string; name: string; order: number; max_workers: number; is_handover: boolean; is_final: boolean; is_active: boolean }
-type UserLite = { id: number; username?: string; email?: string; first_name?: string; last_name?: string; full_name?: string; role?: string }
+type UserLite = { id: number; username?: string; email?: string; first_name?: string; last_name?: string; full_name?: string; role?: string; permissions?: string[] }
 type StationAssignment = { id: number; station: number; station_code?: string; user: number; user_name?: string; role: string; is_active: boolean }
 type Device = { id: number; station: number; station_code?: string; name: string; token?: string; is_active: boolean; last_seen_at?: string }
 type Tablet = { id: number; station: number; station_code?: string; station_name?: string; name: string; token?: string; is_active: boolean; last_seen_at?: string }
@@ -256,6 +256,13 @@ function userLabel(user?: UserLite) {
   return user.full_name || `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username || user.email || `#${user.id}`
 }
 
+function canUseProductionTablet(user?: UserLite) {
+  if (!user) return false
+  if (user.role === 'Admin' || user.permissions?.includes('*')) return true
+  const permissions = user.permissions || []
+  return permissions.some((code) => ['production.view', 'production.tablet.operate', 'production.station.operate'].includes(code))
+}
+
 function assignmentRoleLabel(role: string) {
   if (role === 'lead') return 'Usta başı'
   if (role === 'observer') return 'Gözlemci'
@@ -340,6 +347,7 @@ export function ProductionManagementPage() {
   const [mapDraft, setMapDraft] = useState({ device: '', source_path: '$.', target_key: '', target_type: 'text', is_required: false })
   const [fieldDraft, setFieldDraft] = useState({ station: 'global', key: '', label: '', field_type: 'text', source: 'manual' })
   const [ruleDraft, setRuleDraft] = useState({ name: '', scope: 'station', station: 'none', route: 'none', trigger_event: 'pi_event' })
+  const productionUsers = useMemo(() => users.filter(canUseProductionTablet), [users])
 
   const load = async () => {
     const [d, s, assignmentRows, userRows, dev, tabletRows, shiftRows, breakRows, profileRows, alertRows, maps, fields, r, ruleRows, presetRows, l, cfg, dash] = await Promise.all([
@@ -1003,9 +1011,10 @@ export function ProductionManagementPage() {
                   <Select value={assignmentDraft.user} onValueChange={(value) => setAssignmentDraft((current) => ({ ...current, user: value }))}>
                     <SelectTrigger><SelectValue placeholder="Kullanıcı seç" /></SelectTrigger>
                     <SelectContent>
-                      {users.map((user) => <SelectItem key={user.id} value={String(user.id)}>{userLabel(user)}{user.role ? ` · ${user.role}` : ''}</SelectItem>)}
+                      {productionUsers.map((user) => <SelectItem key={user.id} value={String(user.id)}>{userLabel(user)}{user.role ? ` · ${user.role}` : ''}</SelectItem>)}
                     </SelectContent>
                   </Select>
+                  {!productionUsers.length && <p className="text-xs text-muted-foreground">Üretim görüntüleme veya tablet kullanma izni olan kullanıcı yok.</p>}
                   <Select value={assignmentDraft.role} onValueChange={(value) => setAssignmentDraft((current) => ({ ...current, role: value }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -1063,8 +1072,9 @@ export function ProductionManagementPage() {
                 <CardContent className="space-y-3">
                   <Select value={pinDraft.user} onValueChange={(value) => setPinDraft((current) => ({ ...current, user: value }))}>
                     <SelectTrigger><SelectValue placeholder="Kullanıcı seç" /></SelectTrigger>
-                    <SelectContent>{users.map((user) => <SelectItem key={user.id} value={String(user.id)}>{userLabel(user)}{user.role ? ` · ${user.role}` : ''}</SelectItem>)}</SelectContent>
+                    <SelectContent>{productionUsers.map((user) => <SelectItem key={user.id} value={String(user.id)}>{userLabel(user)}{user.role ? ` · ${user.role}` : ''}</SelectItem>)}</SelectContent>
                   </Select>
+                  {!productionUsers.length && <p className="text-xs text-muted-foreground">PIN verilecek kullanıcı önce üretim yetkisi almalı.</p>}
                   <Input type="text" inputMode="numeric" pattern="[0-9]*" style={{ WebkitTextSecurity: 'disc' } as any} placeholder="Tablet PIN" value={pinDraft.pin} onChange={(e) => setPinDraft((current) => ({ ...current, pin: e.target.value.replace(/\D/g, '') }))} />
                   <Button onClick={saveOperatorPin} disabled={!pinDraft.user || !pinDraft.pin}>PIN kaydet</Button>
                 </CardContent>
@@ -1109,7 +1119,7 @@ export function ProductionManagementPage() {
                   ))}
                 </div>
                 <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                  {users.filter((user) => stationAssignments.some((assignment) => assignment.user === user.id && assignment.is_active)).map((user) => {
+                  {productionUsers.filter((user) => stationAssignments.some((assignment) => assignment.user === user.id && assignment.is_active)).map((user) => {
                     const profile = operatorProfiles.find((item) => item.user === user.id)
                     return (
                       <div key={user.id} className="flex items-center justify-between rounded-md border p-3 text-sm">

@@ -12,6 +12,7 @@ import {
   Home,
   KeyRound,
   Menu,
+  Monitor,
   Moon,
   Package,
   Search,
@@ -88,6 +89,7 @@ const iconMap: Record<string, React.ComponentType<any>> = {
   Gauge,
   Home,
   KeyRound,
+  Monitor,
   Package,
   Settings,
   Settings2,
@@ -147,46 +149,57 @@ const fallbackNav: NavItem[] = [
 ]
 
 type AddonNavRow = {
+  id?: number
   key: string
   label: string
   parent?: string
+  parent_key?: string
   route?: string
   icon?: string
   permission?: string
+  required_permission?: string
   display_order?: number
+  is_active?: boolean
+  meta?: Record<string, any>
 }
 
-const mergeAddonNavigation = (rows: AddonNavRow[]) => {
-  const merged: NavItem[] = fallbackNav.map((item) => ({
+const mergeAddonNavigation = (rows: AddonNavRow[], useFallback = true) => {
+  const merged: NavItem[] = useFallback ? fallbackNav.map((item) => ({
     ...item,
     children: item.children ? item.children.map((child) => ({ ...child })) : undefined,
-  }))
+  })) : []
   const findGroup = (key?: string, label?: string) => merged.find((item) => item.key === key || item.label === label)
   rows
     .slice()
     .sort((a, b) => Number(a.display_order || 0) - Number(b.display_order || 0))
     .forEach((row) => {
+      if (row.is_active === false) return
       const Icon = iconMap[row.icon || ''] || FolderKanban
-      if (!row.parent) {
+      const parentKey = row.parent || row.parent_key || ''
+      const permission = row.permission || row.required_permission || undefined
+      const roles = Array.isArray(row.meta?.roles) ? row.meta.roles : undefined
+      if (!parentKey) {
         const existing = findGroup(row.key, row.label)
         if (existing) {
           existing.label = row.label
           existing.icon = Icon
-          existing.perm = row.permission || existing.perm
+          existing.perm = permission || existing.perm
+          existing.roles = roles || existing.roles
           existing.displayOrder = row.display_order
+          if (row.route) existing.to = row.route
         } else {
-          merged.push({ key: row.key, label: row.label, to: row.route || undefined, icon: Icon, perm: row.permission, displayOrder: row.display_order })
+          merged.push({ key: row.key, label: row.label, to: row.route || undefined, icon: Icon, perm: permission, roles, displayOrder: row.display_order })
         }
         return
       }
-      let parent = findGroup(row.parent)
+      let parent = findGroup(parentKey)
       if (!parent) {
-        parent = { key: row.parent, label: row.parent, icon: FolderKanban, children: [] }
+        parent = { key: parentKey, label: parentKey, icon: FolderKanban, children: [] }
         merged.push(parent)
       }
       parent.children = parent.children || []
       const existingChild = parent.children.find((child) => child.key === row.key || child.to === row.route)
-      const child = { key: row.key, label: row.label, to: row.route || '#', perm: row.permission, displayOrder: row.display_order }
+      const child = { key: row.key, label: row.label, to: row.route || '#', perm: permission, roles, displayOrder: row.display_order }
       if (existingChild) {
         Object.assign(existingChild, child)
       } else {
@@ -227,6 +240,7 @@ export function AppShell() {
   const { theme, setTheme } = useTheme()
   const [searchOpen, setSearchOpen] = useState(false)
   const [addonNavigation, setAddonNavigation] = useState<AddonNavRow[]>([])
+  const [navigationDesigned, setNavigationDesigned] = useState(false)
   const routerState = useRouterState()
   const loggedIn = !!getTokens()
   const isPublic = !loggedIn
@@ -245,11 +259,17 @@ export function AppShell() {
   useEffect(() => {
     if (!loggedIn) return
     api.get('/addons/navigation/', { suppressAuthToast: true } as any)
-      .then((res) => setAddonNavigation(Array.isArray(res.data?.navigation) ? res.data.navigation : []))
-      .catch(() => setAddonNavigation([]))
+      .then((res) => {
+        setAddonNavigation(Array.isArray(res.data?.navigation) ? res.data.navigation : [])
+        setNavigationDesigned(!!res.data?.designed)
+      })
+      .catch(() => {
+        setAddonNavigation([])
+        setNavigationDesigned(false)
+      })
   }, [loggedIn, data.rolePermissions])
 
-  const nav = useMemo(() => mergeAddonNavigation(addonNavigation), [addonNavigation])
+  const nav = useMemo(() => mergeAddonNavigation(addonNavigation, !navigationDesigned), [addonNavigation, navigationDesigned])
 
   const activePath = routerState.location.pathname
   const isQuotesWorkspace = activePath.startsWith('/crm/quotes')

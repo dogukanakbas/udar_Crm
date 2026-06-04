@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from accounts.utils import user_has_any_perm
+
 from .models import (
     ProductionDataField,
     ProductionCountingParticipant,
@@ -34,6 +36,15 @@ from .models import (
     ProductionWorkSession,
 )
 from .services import make_device_token
+
+
+PRODUCTION_OPERATOR_PERMISSIONS = ('production.view', 'production.tablet.operate', 'production.station.operate')
+
+
+def validate_production_operator_user(user):
+    if not user_has_any_perm(user, PRODUCTION_OPERATOR_PERMISSIONS):
+        raise serializers.ValidationError('Kullanıcı üretim/tablet kullanım iznine sahip değil.')
+    return user
 
 
 class ProductionSettingsSerializer(serializers.ModelSerializer):
@@ -71,6 +82,13 @@ class ProductionStationUserSerializer(serializers.ModelSerializer):
     def get_user_name(self, obj):
         return obj.user.get_full_name() or obj.user.username
 
+    def validate_user(self, user):
+        request = self.context.get('request')
+        organization = getattr(getattr(request, 'user', None), 'organization', None)
+        if organization and getattr(user, 'organization_id', None) != organization.id:
+            raise serializers.ValidationError('Kullanıcı bu organizasyona ait değil.')
+        return validate_production_operator_user(user)
+
 
 class ProductionDeviceSerializer(serializers.ModelSerializer):
     station_code = serializers.CharField(source='station.code', read_only=True)
@@ -106,7 +124,7 @@ class ProductionOperatorProfileSerializer(serializers.ModelSerializer):
         organization = getattr(getattr(request, 'user', None), 'organization', None)
         if organization and getattr(user, 'organization_id', None) != organization.id:
             raise serializers.ValidationError('Kullanıcı bu organizasyona ait değil.')
-        return user
+        return validate_production_operator_user(user)
 
     def create(self, validated_data):
         raw_pin = validated_data.pop('pin', '')

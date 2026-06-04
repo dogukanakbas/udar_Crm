@@ -20,7 +20,7 @@ import { ROLE_LABEL_TR } from '@/lib/role-labels'
 import { DataTable } from '@/components/data-table'
 import { type ColumnDef } from '@tanstack/react-table'
 import type { UserLite } from '@/types'
-import { AlertCircle, ShieldCheck, Plus, Trash2, ImageIcon, Pencil, Upload } from 'lucide-react'
+import { AlertCircle, ShieldCheck, Plus, Trash2, ImageIcon, Pencil, Upload, Save, RotateCcw } from 'lucide-react'
 import { RbacGuard } from '@/components/rbac'
 import { RolesPermissionPanel } from '@/pages/roles'
 import { resolveBrandingUrl } from '@/lib/branding'
@@ -118,6 +118,25 @@ export function SettingsPage() {
   const canManageAddons = hasPermission(data.settings.role, data.rolePermissions || [], 'addons.manage')
   const [addons, setAddons] = useState<Array<{ id: number; addon_id: string; title: string; version: string; is_installed: boolean; is_enabled: boolean; can_delete?: boolean; counts?: Record<string, number> }>>([])
   const [addonUploading, setAddonUploading] = useState(false)
+  type NavigationItem = {
+    id: number
+    key: string
+    label: string
+    parent_key?: string
+    parent?: string
+    route?: string
+    icon?: string
+    required_permission?: string
+    permission?: string
+    display_order: number
+    is_active: boolean
+    is_system?: boolean
+    meta?: Record<string, any>
+  }
+  const emptyNavDraft = () => ({ key: '', label: '', parent_key: 'none', route: '', icon: 'FolderKanban', required_permission: '', display_order: '100', is_active: true })
+  const [navigationItems, setNavigationItems] = useState<NavigationItem[]>([])
+  const [editingNavId, setEditingNavId] = useState<number | null>(null)
+  const [navDraft, setNavDraft] = useState(emptyNavDraft)
   const [editingUser, setEditingUser] = useState<UserLite | null>(null)
   const [editUserOpen, setEditUserOpen] = useState(false)
   const [editUserUsername, setEditUserUsername] = useState('')
@@ -145,6 +164,73 @@ export function SettingsPage() {
     } catch {
       setAddons([])
     }
+  }
+
+  const loadNavigationItems = async () => {
+    if (!canManageAddons) return
+    try {
+      const res = await api.get('/addons/navigation-items/', { suppressAuthToast: true } as any)
+      setNavigationItems(Array.isArray(res.data?.navigation) ? res.data.navigation : [])
+    } catch {
+      setNavigationItems([])
+    }
+  }
+
+  const resetNavDraft = () => {
+    setEditingNavId(null)
+    setNavDraft(emptyNavDraft())
+  }
+
+  const editNavigationItem = (item: NavigationItem) => {
+    setEditingNavId(item.id)
+    setNavDraft({
+      key: item.key,
+      label: item.label,
+      parent_key: item.parent_key || item.parent || 'none',
+      route: item.route || '',
+      icon: item.icon || 'FolderKanban',
+      required_permission: item.required_permission || item.permission || '',
+      display_order: String(item.display_order ?? 100),
+      is_active: item.is_active,
+    })
+  }
+
+  const saveNavigationItem = async () => {
+    const payload = {
+      ...navDraft,
+      parent_key: navDraft.parent_key === 'none' ? '' : navDraft.parent_key,
+      display_order: Number(navDraft.display_order || 0),
+    }
+    try {
+      if (editingNavId) await api.patch(`/addons/navigation-items/${editingNavId}/`, payload)
+      else await api.post('/addons/navigation-items/', payload)
+      resetNavDraft()
+      await loadNavigationItems()
+      await useAppStore.getState().hydrateFromApi({ force: true })
+      toast({ title: editingNavId ? 'Menü kaydı güncellendi' : 'Menü kaydı eklendi' })
+    } catch (err) {
+      toast({ title: 'Menü kaydedilemedi', description: formatApiError(err), variant: 'destructive' })
+    }
+  }
+
+  const deleteNavigationItem = async (item: NavigationItem) => {
+    if (!window.confirm(`${item.label} menü kaydı silinsin mi?`)) return
+    try {
+      await api.delete(`/addons/navigation-items/${item.id}/`)
+      await loadNavigationItems()
+      toast({ title: 'Menü kaydı silindi' })
+    } catch (err) {
+      toast({ title: 'Menü silinemedi', description: formatApiError(err), variant: 'destructive' })
+    }
+  }
+
+  const resetNavigationItems = async () => {
+    if (!window.confirm('Sol menü varsayılan yapıya dönsün mü?')) return
+    await api.post('/addons/navigation-items/', { action: 'reset' })
+    resetNavDraft()
+    await loadNavigationItems()
+    await useAppStore.getState().hydrateFromApi({ force: true })
+    toast({ title: 'Sol menü varsayılana döndü' })
   }
 
   const uploadAddonZip = async (file?: File | null) => {
@@ -294,6 +380,7 @@ export function SettingsPage() {
 
   useEffect(() => {
     loadAddons()
+    loadNavigationItems()
   }, [canManageAddons])
 
   useEffect(() => {
@@ -466,6 +553,130 @@ export function SettingsPage() {
                 </div>
               ))}
               {addons.length === 0 && <div className="p-4 text-sm text-muted-foreground">Kayıtlı add-on bulunamadı.</div>}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {canManageAddons && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Sol menü tasarımı</CardTitle>
+            <CardDescription>Kategorileri ve linkleri düzenleyin; gizleyin, sıralayın veya yeni bağlantı ekleyin.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 xl:grid-cols-[420px_1fr]">
+            <div className="space-y-3 rounded-lg border p-3">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <Label>Anahtar</Label>
+                  <Input value={navDraft.key} onChange={(e) => setNavDraft((v) => ({ ...v, key: e.target.value.replace(/\s+/g, '_').toLowerCase() }))} placeholder="custom_link" />
+                </div>
+                <div>
+                  <Label>Başlık</Label>
+                  <Input value={navDraft.label} onChange={(e) => setNavDraft((v) => ({ ...v, label: e.target.value }))} placeholder="Menü başlığı" />
+                </div>
+              </div>
+              <div>
+                <Label>Üst kategori</Label>
+                <Select value={navDraft.parent_key} onValueChange={(value) => setNavDraft((v) => ({ ...v, parent_key: value }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Ana kategori / tekil link</SelectItem>
+                    {navigationItems.filter((item) => !item.parent_key && !item.parent && item.key !== navDraft.key).map((item) => (
+                      <SelectItem key={item.id} value={item.key}>{item.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Route / link</Label>
+                <Input value={navDraft.route} onChange={(e) => setNavDraft((v) => ({ ...v, route: e.target.value }))} placeholder="/crm/quotes veya https://..." />
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <div>
+                  <Label>İkon</Label>
+                  <Select value={navDraft.icon} onValueChange={(value) => setNavDraft((v) => ({ ...v, icon: value }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {['FolderKanban', 'Home', 'Gauge', 'Package', 'Building2', 'FileText', 'Settings', 'Settings2', 'Activity', 'BarChart3', 'CalendarClock', 'KeyRound', 'Monitor'].map((icon) => (
+                        <SelectItem key={icon} value={icon}>{icon}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Sıra</Label>
+                  <Input inputMode="numeric" value={navDraft.display_order} onChange={(e) => setNavDraft((v) => ({ ...v, display_order: e.target.value.replace(/\D/g, '') }))} />
+                </div>
+                <label className="mt-6 flex h-10 items-center justify-between rounded-md border px-3 text-sm">
+                  <span>Aktif</span>
+                  <Switch checked={navDraft.is_active} onCheckedChange={(checked) => setNavDraft((v) => ({ ...v, is_active: checked }))} />
+                </label>
+              </div>
+              <div>
+                <Label>Gerekli izin</Label>
+                <Input value={navDraft.required_permission} onChange={(e) => setNavDraft((v) => ({ ...v, required_permission: e.target.value }))} placeholder="quotes.view.own" />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={saveNavigationItem} disabled={!navDraft.key || !navDraft.label}>
+                  <Save className="mr-2 h-4 w-4" /> {editingNavId ? 'Güncelle' : 'Ekle'}
+                </Button>
+                {editingNavId && <Button variant="outline" onClick={resetNavDraft}>İptal</Button>}
+                <Button variant="outline" onClick={resetNavigationItems}>
+                  <RotateCcw className="mr-2 h-4 w-4" /> Varsayılan
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <div className="flex justify-end">
+                <Button variant="outline" size="sm" onClick={loadNavigationItems}>Yenile</Button>
+              </div>
+              <div className="space-y-3">
+                {navigationItems
+                  .filter((item) => !item.parent_key && !item.parent)
+                  .sort((a, b) => Number(a.display_order || 0) - Number(b.display_order || 0))
+                  .map((parent) => {
+                    const children = navigationItems
+                      .filter((item) => (item.parent_key || item.parent) === parent.key)
+                      .sort((a, b) => Number(a.display_order || 0) - Number(b.display_order || 0))
+                    return (
+                      <div key={parent.id} className="rounded-lg border p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-medium">{parent.label}</p>
+                              <Badge variant={parent.is_active ? 'secondary' : 'outline'}>{parent.is_active ? 'Aktif' : 'Pasif'}</Badge>
+                              <Badge variant="outline">{parent.key}</Badge>
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">{parent.route || 'Kategori'} · {parent.required_permission || parent.permission || 'izin yok'} · sıra {parent.display_order}</p>
+                          </div>
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="icon" onClick={() => editNavigationItem(parent)}><Pencil className="h-4 w-4" /></Button>
+                            <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteNavigationItem(parent)}><Trash2 className="h-4 w-4" /></Button>
+                          </div>
+                        </div>
+                        {!!children.length && (
+                          <div className="mt-3 space-y-2">
+                            {children.map((child) => (
+                              <div key={child.id} className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2 text-sm">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="font-medium">{child.label}</span>
+                                    <Badge variant={child.is_active ? 'secondary' : 'outline'}>{child.is_active ? 'Aktif' : 'Pasif'}</Badge>
+                                  </div>
+                                  <p className="truncate text-xs text-muted-foreground">{child.route || '#'} · {child.required_permission || child.permission || 'izin yok'} · sıra {child.display_order}</p>
+                                </div>
+                                <div className="flex shrink-0 gap-1">
+                                  <Button variant="ghost" size="icon" onClick={() => editNavigationItem(child)}><Pencil className="h-4 w-4" /></Button>
+                                  <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteNavigationItem(child)}><Trash2 className="h-4 w-4" /></Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+              </div>
             </div>
           </CardContent>
         </Card>
