@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Bell, Calendar, CheckCircle2, Copy, Cpu, Download, Edit3, FileImage, Layers, LogOut, Monitor, Pause, Play, Plus, RefreshCw, Route, Save, Send, TimerReset, Trash2, Upload, UserPlus, Volume2, X } from 'lucide-react'
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip as ReTooltip, XAxis, YAxis, PieChart, Pie } from 'recharts'
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip as ReTooltip, XAxis, YAxis, PieChart, Pie } from 'recharts'
 
 import { PageHeader } from '@/components/app-shell'
 import { Badge } from '@/components/ui/badge'
@@ -3018,19 +3018,50 @@ export function ProductionReportsPage() {
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={stationTargetPerformance} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <BarChart data={stationTargetPerformance} margin={{ top: 20, right: 10, left: -10, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border/40" />
                   <XAxis dataKey="station_code" tick={{ fontSize: 10 }} stroke="#888888" />
-                  <YAxis tick={{ fontSize: 10 }} stroke="#888888" allowDecimals={false} />
-                  <ReTooltip
-                    formatter={(value, name) => [
-                      name === 'completion_percent' ? `%${formatNumber(Number(value))}` : `${formatNumber(Number(value))} adet`,
-                      name === 'target_quantity' ? 'Hedef' : name === 'actual_quantity' ? 'Gerçekleşen' : 'Yüzde',
-                    ]}
-                    labelFormatter={(label) => `İstasyon: ${label}`}
+                  <YAxis 
+                    tick={{ fontSize: 10 }} 
+                    stroke="#888888" 
+                    tickFormatter={(val) => `%${val}`}
+                    domain={[0, (dataMax: number) => Math.max(120, Math.ceil(dataMax / 10) * 10)]}
                   />
-                  <Bar dataKey="target_quantity" fill="#64748b" name="Hedef" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="actual_quantity" fill="#10b981" name="Gerçekleşen" radius={[4, 4, 0, 0]} />
+                  <ReTooltip
+                    formatter={(value: any, name?: string) => {
+                      if (name === 'completion_percent') {
+                        return [`%${formatNumber(Number(value))}`, 'Verimlilik Oranı'];
+                      }
+                      return [value, name];
+                    }}
+                    labelFormatter={(label, items) => {
+                      const row = items[0]?.payload || {};
+                      return (
+                        <div className="text-xs space-y-1">
+                          <p className="font-bold">İstasyon: {label} - {row.station_name || ''}</p>
+                          <p className="text-muted-foreground">Departman: {row.department_name || ''}</p>
+                          <p>Hedef: {formatNumber(row.target_quantity || 0)} adet</p>
+                          <p>Gerçekleşen: {formatNumber(row.actual_quantity || 0)} adet</p>
+                          <p>Kalan Hedef: {formatNumber(row.remaining_quantity || 0)} adet</p>
+                        </div>
+                      );
+                    }}
+                  />
+                  <ReferenceLine 
+                    y={100} 
+                    stroke="#f59e0b" 
+                    strokeDasharray="4 4" 
+                    label={{ value: 'Hedef %100', fill: '#f59e0b', fontSize: 10, position: 'top' }} 
+                  />
+                  <Bar dataKey="completion_percent" name="completion_percent" radius={[4, 4, 0, 0]}>
+                    {stationTargetPerformance.map((entry: any, index: number) => {
+                      const percent = entry.completion_percent || 0;
+                      let fill = '#ef4444'; // Red
+                      if (percent >= 100) fill = '#10b981'; // Green
+                      else if (percent >= 70) fill = '#3b82f6'; // Blue
+                      return <Cell key={`cell-${index}`} fill={fill} />;
+                    })}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             )}
