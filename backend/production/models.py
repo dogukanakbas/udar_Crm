@@ -161,6 +161,90 @@ class ProductionStationTarget(models.Model):
         return f'{self.station.code} - {self.target_date}'
 
 
+class ProductionShiftSchedule(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_shift_schedules')
+    department = models.ForeignKey(ProductionDepartment, on_delete=models.CASCADE, related_name='shift_schedules')
+    name = models.CharField(max_length=120)
+    weekdays = models.JSONField(default=list, blank=True)
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    crosses_midnight = models.BooleanField(default=False)
+    order = models.PositiveIntegerField(default=0, db_index=True)
+    is_active = models.BooleanField(default=True)
+    note = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['department__order', 'order', 'start_time', 'id']
+        indexes = [
+            models.Index(fields=['organization', 'is_active']),
+            models.Index(fields=['department', 'is_active']),
+        ]
+
+    def __str__(self):
+        return f'{self.department.name} - {self.name}'
+
+
+class ProductionShiftBreak(models.Model):
+    LOCK_TYPES = [
+        ('break_locked', 'Planli mola'),
+        ('checkpoint_only', 'Sadece checkpoint'),
+    ]
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_shift_breaks')
+    department = models.ForeignKey(ProductionDepartment, on_delete=models.CASCADE, related_name='shift_breaks')
+    schedule = models.ForeignKey(ProductionShiftSchedule, on_delete=models.CASCADE, null=True, blank=True, related_name='breaks')
+    name = models.CharField(max_length=120)
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    requires_checkpoint = models.BooleanField(default=True)
+    lock_type = models.CharField(max_length=30, choices=LOCK_TYPES, default='break_locked')
+    order = models.PositiveIntegerField(default=0, db_index=True)
+    is_active = models.BooleanField(default=True)
+    note = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['department__order', 'order', 'start_time', 'id']
+        indexes = [
+            models.Index(fields=['organization', 'is_active']),
+            models.Index(fields=['department', 'is_active']),
+            models.Index(fields=['schedule', 'is_active']),
+        ]
+
+    def __str__(self):
+        return f'{self.department.name} - {self.name}'
+
+
+class ProductionShiftOccurrence(models.Model):
+    STATUSES = [
+        ('active', 'Aktif'),
+        ('closed', 'Kapandi'),
+    ]
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_shift_occurrences')
+    department = models.ForeignKey(ProductionDepartment, on_delete=models.CASCADE, related_name='shift_occurrences')
+    schedule = models.ForeignKey(ProductionShiftSchedule, on_delete=models.CASCADE, related_name='occurrences')
+    name = models.CharField(max_length=120)
+    report_date = models.DateField(db_index=True)
+    starts_at = models.DateTimeField(db_index=True)
+    ends_at = models.DateTimeField(db_index=True)
+    status = models.CharField(max_length=20, choices=STATUSES, default='active')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-starts_at', '-id']
+        unique_together = ('organization', 'schedule', 'report_date', 'starts_at')
+        indexes = [
+            models.Index(fields=['organization', 'report_date']),
+            models.Index(fields=['department', 'starts_at', 'ends_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.name} - {self.report_date}'
+
+
 class ProductionDataField(models.Model):
     FIELD_TYPES = [
         ('text', 'Metin'),
@@ -460,6 +544,8 @@ class ProductionCountingWindow(models.Model):
         ('break_end', 'Mola donusu'),
         ('logout', 'Cikis'),
         ('work_complete', 'Is emri tamamlandi'),
+        ('shift_end', 'Vardiya sonu'),
+        ('scheduled_break', 'Planli mola'),
         ('manual', 'Manuel checkpoint'),
     ]
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_counting_windows')
@@ -490,6 +576,35 @@ class ProductionCountingWindow(models.Model):
 
     def __str__(self):
         return f'{self.station.code} - {self.status} - {self.opened_at:%Y-%m-%d %H:%M}'
+
+
+class ProductionShiftCheckpoint(models.Model):
+    REASONS = [
+        ('shift_end', 'Vardiya sonu'),
+        ('scheduled_break', 'Planli mola'),
+        ('manual', 'Manuel'),
+    ]
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_shift_checkpoints')
+    occurrence = models.ForeignKey(ProductionShiftOccurrence, on_delete=models.SET_NULL, null=True, blank=True, related_name='checkpoints')
+    break_row = models.ForeignKey(ProductionShiftBreak, on_delete=models.SET_NULL, null=True, blank=True, related_name='checkpoints')
+    window = models.ForeignKey(ProductionCountingWindow, on_delete=models.SET_NULL, null=True, blank=True, related_name='shift_checkpoints')
+    station = models.ForeignKey(ProductionStation, on_delete=models.PROTECT, related_name='shift_checkpoints')
+    tablet = models.ForeignKey(ProductionStationTablet, on_delete=models.SET_NULL, null=True, blank=True, related_name='shift_checkpoints')
+    reason = models.CharField(max_length=30, choices=REASONS, default='manual')
+    participant_totals = models.JSONField(default=dict, blank=True)
+    official_delta = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    note = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(fields=['organization', 'created_at']),
+            models.Index(fields=['station', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.station.code} - {self.reason} - {self.created_at:%Y-%m-%d %H:%M}'
 
 
 class ProductionCountingParticipant(models.Model):

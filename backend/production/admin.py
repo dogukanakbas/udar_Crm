@@ -16,6 +16,10 @@ from .models import (
     ProductionRouteTemplate,
     ProductionSettings,
     ProductionSessionBreak,
+    ProductionShiftBreak,
+    ProductionShiftCheckpoint,
+    ProductionShiftOccurrence,
+    ProductionShiftSchedule,
     ProductionStation,
     ProductionStationTarget,
     ProductionStationAlert,
@@ -38,6 +42,10 @@ admin.site.register(ProductionDevice)
 admin.site.register(ProductionOperatorProfile)
 admin.site.register(ProductionStationTablet)
 admin.site.register(ProductionStationTarget)
+admin.site.register(ProductionShiftSchedule)
+admin.site.register(ProductionShiftBreak)
+admin.site.register(ProductionShiftOccurrence)
+admin.site.register(ProductionShiftCheckpoint)
 admin.site.register(ProductionDataField)
 admin.site.register(ProductionDevicePayloadMap)
 admin.site.register(ProductionRouteTemplate)

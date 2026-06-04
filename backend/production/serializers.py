@@ -16,6 +16,10 @@ from .models import (
     ProductionRouteTemplate,
     ProductionSettings,
     ProductionSessionBreak,
+    ProductionShiftBreak,
+    ProductionShiftCheckpoint,
+    ProductionShiftOccurrence,
+    ProductionShiftSchedule,
     ProductionStation,
     ProductionStationTarget,
     ProductionStationAlert,
@@ -157,6 +161,79 @@ class ProductionStationTargetSerializer(serializers.ModelSerializer):
         if organization and station.organization_id != organization.id:
             raise serializers.ValidationError('İstasyon bu organizasyona ait değil.')
         return station
+
+
+class ProductionShiftScheduleSerializer(serializers.ModelSerializer):
+    department_name = serializers.CharField(source='department.name', read_only=True)
+
+    class Meta:
+        model = ProductionShiftSchedule
+        fields = '__all__'
+        read_only_fields = ['organization', 'department_name', 'created_at', 'updated_at']
+
+    def validate_department(self, department):
+        request = self.context.get('request')
+        organization = getattr(getattr(request, 'user', None), 'organization', None)
+        if organization and department.organization_id != organization.id:
+            raise serializers.ValidationError('Bölüm bu organizasyona ait değil.')
+        return department
+
+    def validate_weekdays(self, value):
+        rows = value or []
+        clean = []
+        for item in rows:
+            day = int(item)
+            if day < 0 or day > 6:
+                raise serializers.ValidationError('Hafta günü 0-6 arasında olmalı.')
+            if day not in clean:
+                clean.append(day)
+        return clean
+
+
+class ProductionShiftBreakSerializer(serializers.ModelSerializer):
+    department_name = serializers.CharField(source='department.name', read_only=True)
+    schedule_name = serializers.CharField(source='schedule.name', read_only=True)
+
+    class Meta:
+        model = ProductionShiftBreak
+        fields = '__all__'
+        read_only_fields = ['organization', 'department_name', 'schedule_name', 'created_at', 'updated_at']
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        organization = getattr(getattr(request, 'user', None), 'organization', None)
+        department = attrs.get('department') or getattr(self.instance, 'department', None)
+        schedule = attrs.get('schedule') or getattr(self.instance, 'schedule', None)
+        if organization and department and department.organization_id != organization.id:
+            raise serializers.ValidationError({'department': 'Bölüm bu organizasyona ait değil.'})
+        if schedule:
+            if organization and schedule.organization_id != organization.id:
+                raise serializers.ValidationError({'schedule': 'Vardiya bu organizasyona ait değil.'})
+            if department and schedule.department_id != department.id:
+                raise serializers.ValidationError({'schedule': 'Vardiya aynı bölüme ait olmalı.'})
+        return attrs
+
+
+class ProductionShiftOccurrenceSerializer(serializers.ModelSerializer):
+    department_name = serializers.CharField(source='department.name', read_only=True)
+    schedule_name = serializers.CharField(source='schedule.name', read_only=True)
+
+    class Meta:
+        model = ProductionShiftOccurrence
+        fields = '__all__'
+        read_only_fields = fields
+
+
+class ProductionShiftCheckpointSerializer(serializers.ModelSerializer):
+    station_code = serializers.CharField(source='station.code', read_only=True)
+    tablet_name = serializers.CharField(source='tablet.name', read_only=True)
+    shift_name = serializers.CharField(source='occurrence.name', read_only=True)
+    break_name = serializers.CharField(source='break_row.name', read_only=True)
+
+    class Meta:
+        model = ProductionShiftCheckpoint
+        fields = '__all__'
+        read_only_fields = fields
 
 
 class ProductionDataFieldSerializer(serializers.ModelSerializer):
@@ -403,6 +480,7 @@ class ProductionWorkSessionSerializer(serializers.ModelSerializer):
     reviewed_by_name = serializers.SerializerMethodField()
     break_seconds = serializers.SerializerMethodField()
     active_break_id = serializers.SerializerMethodField()
+    active_break_started_at = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductionWorkSession
@@ -435,6 +513,7 @@ class ProductionWorkSessionSerializer(serializers.ModelSerializer):
             'reviewed_by_name',
             'break_seconds',
             'active_break_id',
+            'active_break_started_at',
         ]
 
     def get_user_name(self, obj):
@@ -451,6 +530,10 @@ class ProductionWorkSessionSerializer(serializers.ModelSerializer):
     def get_active_break_id(self, obj):
         active = obj.breaks.filter(ended_at__isnull=True).order_by('-started_at', '-id').first()
         return active.id if active else None
+
+    def get_active_break_started_at(self, obj):
+        active = obj.breaks.filter(ended_at__isnull=True).order_by('-started_at', '-id').first()
+        return active.started_at if active else None
 
 
 class ProductionSessionBreakSerializer(serializers.ModelSerializer):
@@ -587,6 +670,14 @@ class TabletCheckpointSerializer(serializers.Serializer):
     checkpoint_total = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
     participant_totals = serializers.DictField(child=serializers.DecimalField(max_digits=14, decimal_places=2), required=False)
     reason = serializers.CharField(required=False, allow_blank=True, default='manual')
+    note = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class TabletShiftCheckpointSerializer(serializers.Serializer):
+    token = serializers.CharField()
+    line_id = serializers.IntegerField(required=False, allow_null=True)
+    checkpoint_total = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+    participant_totals = serializers.DictField(child=serializers.DecimalField(max_digits=14, decimal_places=2), required=False)
     note = serializers.CharField(required=False, allow_blank=True, default='')
 
 

@@ -4,6 +4,7 @@ import hashlib
 import json
 import unicodedata
 from copy import deepcopy
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
@@ -31,6 +32,10 @@ from .models import (
     ProductionRouteTemplate,
     ProductionSettings,
     ProductionSessionBreak,
+    ProductionShiftBreak,
+    ProductionShiftCheckpoint,
+    ProductionShiftOccurrence,
+    ProductionShiftSchedule,
     ProductionStation,
     ProductionStationTarget,
     ProductionStationAlert,
@@ -71,6 +76,7 @@ class ProductionError(ValueError):
 
 ACTIVE_SESSION_STATUSES = ['started', 'paused']
 User = get_user_model()
+SHIFT_BLOCKING_STATES = {'break_locked', 'off_shift', 'checkpoint_required'}
 
 
 def _norm(value: object) -> str:
@@ -103,6 +109,221 @@ def _signed_decimal(value, label='Miktar') -> Decimal:
         return Decimal(str(value or 0))
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise ProductionError(f'{label} sayisal olmalidir.') from exc
+
+
+def _aware_at(day, clock):
+    value = datetime.combine(day, clock)
+    if timezone.is_naive(value):
+        return timezone.make_aware(value, timezone.get_current_timezone())
+    return value
+
+
+def _schedule_interval(schedule, start_day):
+    starts_at = _aware_at(start_day, schedule.start_time)
+    crosses = schedule.crosses_midnight or schedule.end_time <= schedule.start_time
+    end_day = start_day + timedelta(days=1) if crosses else start_day
+    ends_at = _aware_at(end_day, schedule.end_time)
+    return starts_at, ends_at
+
+
+def _break_interval(break_row, occurrence):
+    start_day = occurrence.report_date
+    if break_row.start_time < occurrence.schedule.start_time:
+        start_day = start_day + timedelta(days=1)
+    starts_at = _aware_at(start_day, break_row.start_time)
+    end_day = start_day + timedelta(days=1) if break_row.end_time <= break_row.start_time else start_day
+    ends_at = _aware_at(end_day, break_row.end_time)
+    return starts_at, ends_at
+
+
+def _shift_schedules_for_department(department):
+    return ProductionShiftSchedule.objects.filter(
+        organization=department.organization,
+        department=department,
+        is_active=True,
+    ).order_by('order', 'start_time', 'id')
+
+
+def _get_or_create_shift_occurrence(schedule, starts_at, ends_at, report_date):
+    occurrence, _ = ProductionShiftOccurrence.objects.update_or_create(
+        organization=schedule.organization,
+        schedule=schedule,
+        report_date=report_date,
+        starts_at=starts_at,
+        defaults={
+            'department': schedule.department,
+            'name': schedule.name,
+            'ends_at': ends_at,
+            'status': 'active' if ends_at > timezone.now() else 'closed',
+        },
+    )
+    return occurrence
+
+
+def _active_shift_occurrence(department, now=None):
+    now = timezone.localtime(now or timezone.now())
+    schedules = list(_shift_schedules_for_department(department))
+    if not schedules:
+        return None, False
+    for schedule in schedules:
+        for day in [now.date(), now.date() - timedelta(days=1)]:
+            weekdays = schedule.weekdays or list(range(7))
+            if day.weekday() not in weekdays:
+                continue
+            starts_at, ends_at = _schedule_interval(schedule, day)
+            if starts_at <= now < ends_at:
+                return _get_or_create_shift_occurrence(schedule, starts_at, ends_at, day), True
+    return None, True
+
+
+def _next_shift_for_department(department, now=None):
+    now = timezone.localtime(now or timezone.now())
+    schedules = list(_shift_schedules_for_department(department))
+    candidates = []
+    for day_offset in range(0, 8):
+        day = now.date() + timedelta(days=day_offset)
+        for schedule in schedules:
+            weekdays = schedule.weekdays or list(range(7))
+            if day.weekday() not in weekdays:
+                continue
+            starts_at, ends_at = _schedule_interval(schedule, day)
+            if starts_at > now:
+                candidates.append((starts_at, ends_at, schedule))
+    if not candidates:
+        return None
+    starts_at, ends_at, schedule = sorted(candidates, key=lambda item: item[0])[0]
+    return {
+        'id': schedule.id,
+        'name': schedule.name,
+        'starts_at': starts_at,
+        'ends_at': ends_at,
+    }
+
+
+def _active_shift_break(occurrence, now=None):
+    if not occurrence:
+        return None
+    now = timezone.localtime(now or timezone.now())
+    breaks = ProductionShiftBreak.objects.filter(
+        organization=occurrence.organization,
+        department=occurrence.department,
+        is_active=True,
+    ).filter(models.Q(schedule__isnull=True) | models.Q(schedule=occurrence.schedule)).order_by('order', 'start_time', 'id')
+    for break_row in breaks:
+        starts_at, ends_at = _break_interval(break_row, occurrence)
+        if starts_at <= now < ends_at:
+            return break_row, starts_at, ends_at
+    return None
+
+
+def _next_shift_break(occurrence, now=None):
+    if not occurrence:
+        return None
+    now = timezone.localtime(now or timezone.now())
+    rows = []
+    breaks = ProductionShiftBreak.objects.filter(
+        organization=occurrence.organization,
+        department=occurrence.department,
+        is_active=True,
+    ).filter(models.Q(schedule__isnull=True) | models.Q(schedule=occurrence.schedule)).order_by('order', 'start_time', 'id')
+    for break_row in breaks:
+        starts_at, ends_at = _break_interval(break_row, occurrence)
+        if starts_at > now:
+            rows.append((starts_at, ends_at, break_row))
+    if not rows:
+        return None
+    starts_at, ends_at, break_row = sorted(rows, key=lambda item: item[0])[0]
+    return {
+        'id': break_row.id,
+        'name': break_row.name,
+        'starts_at': starts_at,
+        'ends_at': ends_at,
+        'requires_checkpoint': break_row.requires_checkpoint,
+    }
+
+
+def _tablet_shift_payload(tablet, *, now=None):
+    now = timezone.localtime(now or timezone.now())
+    occurrence, has_schedule = _active_shift_occurrence(tablet.station.department, now)
+    active_window = ProductionCountingWindow.objects.filter(
+        organization=tablet.organization,
+        tablet=tablet,
+        status='open',
+    ).select_related('line', 'step').prefetch_related('participants__user', 'participants__session').first()
+    active_sessions = _active_tablet_sessions(tablet, step=active_window.step if active_window else None) if active_window else _active_tablet_sessions(tablet)
+    names = [session.user.get_full_name() or session.user.username for session in active_sessions]
+
+    base = {
+        'state': 'active',
+        'label': 'Aktif',
+        'message': '',
+        'has_schedule': has_schedule,
+        'requires_checkpoint': False,
+        'locked': False,
+        'checkpoint_names': names,
+        'active_window_id': active_window.id if active_window else None,
+        'line_id': active_window.line_id if active_window else None,
+        'now': now,
+        'active_shift': None,
+        'active_break': None,
+        'next_shift': _next_shift_for_department(tablet.station.department, now),
+        'next_break': None,
+        'seconds_until_change': None,
+    }
+    if not has_schedule:
+        base['label'] = 'Vardiya tanımı yok'
+        base['message'] = 'Bu bölüm için vardiya tanımlanmadığı için tablet açık.'
+        return base
+    if not occurrence:
+        base.update({
+            'state': 'checkpoint_required' if active_window else 'off_shift',
+            'label': 'Vardiya dışı',
+            'message': 'Şu anda bu bölümde aktif vardiya yok.',
+            'requires_checkpoint': bool(active_window),
+            'locked': True,
+        })
+        return base
+
+    base['active_shift'] = {
+        'id': occurrence.id,
+        'name': occurrence.name,
+        'report_date': occurrence.report_date,
+        'starts_at': occurrence.starts_at,
+        'ends_at': occurrence.ends_at,
+    }
+    base['seconds_until_change'] = max(0, int((occurrence.ends_at - now).total_seconds()))
+    active_break = _active_shift_break(occurrence, now)
+    if active_break:
+        break_row, starts_at, ends_at = active_break
+        base['active_break'] = {
+            'id': break_row.id,
+            'name': break_row.name,
+            'starts_at': starts_at,
+            'ends_at': ends_at,
+            'requires_checkpoint': break_row.requires_checkpoint,
+            'lock_type': break_row.lock_type,
+        }
+        base.update({
+            'state': 'checkpoint_required' if active_window and break_row.requires_checkpoint else 'break_locked',
+            'label': 'Planlı mola',
+            'message': f'{break_row.name} devam ediyor.',
+            'requires_checkpoint': bool(active_window and break_row.requires_checkpoint),
+            'locked': True,
+            'seconds_until_change': max(0, int((ends_at - now).total_seconds())),
+        })
+        return base
+
+    base['next_break'] = _next_shift_break(occurrence, now)
+    return base
+
+
+def _assert_tablet_shift_open(tablet):
+    shift = _tablet_shift_payload(tablet)
+    if shift['state'] in SHIFT_BLOCKING_STATES:
+        if shift['state'] == 'checkpoint_required':
+            raise ProductionError('Vardiya veya planlı mola öncesi üretim miktarı yazılmalı.')
+        raise ProductionError(shift['message'] or 'Tablet şu anda vardiya kilidinde.')
+    return shift
 
 
 def _is_station_user(organization, user, station):
@@ -1340,6 +1561,7 @@ def _serialize_session_for_tablet(session):
         'declared_good_quantity': session.declared_good_quantity,
         'break_seconds': sum(item.duration_seconds for item in session.breaks.all()),
         'active_break_id': active_break.id if active_break else None,
+        'active_break_started_at': active_break.started_at if active_break else None,
     }
 
 
@@ -1372,6 +1594,7 @@ def _work_item_for_step(step, tablet=None):
 def tablet_context(token):
     tablet = _tablet_by_token(token)
     station = tablet.station
+    shift_payload = _tablet_shift_payload(tablet)
     open_statuses = ['ready', 'in_progress', 'waiting_handover']
     steps = (
         ProductionStepProgress.objects.filter(
@@ -1440,6 +1663,7 @@ def tablet_context(token):
             'max_workers': station.max_workers,
         },
         'daily_target': target_payload,
+        'shift_state': shift_payload,
         'operators': operators,
         'work_items': sorted(
             [_work_item_for_step(step, tablet) for step in visible_steps],
@@ -1470,6 +1694,7 @@ def tablet_context(token):
 @transaction.atomic
 def tablet_login_slot(*, token, user_id, pin, line_id=None, slot_index, start_counter=None, note='', checkpoint_total=None, participant_totals=None):
     tablet = _tablet_by_token(token)
+    _assert_tablet_shift_open(tablet)
     user = _operator_from_pin(organization=tablet.organization, station=tablet.station, user_id=user_id, pin=pin)
     if line_id:
         line, station, step = _step_for_session_action(tablet.organization, line_id, tablet.station.code)
@@ -1499,6 +1724,7 @@ def tablet_login_slot(*, token, user_id, pin, line_id=None, slot_index, start_co
 @transaction.atomic
 def tablet_logout_slot(*, token, user_id, pin, session_id, declared_good_quantity, end_counter=None, note=''):
     tablet = _tablet_by_token(token)
+    _assert_tablet_shift_open(tablet)
     user = _operator_from_pin(organization=tablet.organization, station=tablet.station, user_id=user_id, pin=pin)
     session = ProductionWorkSession.objects.select_for_update().filter(pk=session_id, organization=tablet.organization, tablet=tablet).first()
     if not session:
@@ -1527,6 +1753,7 @@ def tablet_logout_slot(*, token, user_id, pin, session_id, declared_good_quantit
 @transaction.atomic
 def tablet_pause_session(*, token, session_id, note='', checkpoint_total=None, participant_totals=None):
     tablet = _tablet_by_token(token)
+    _assert_tablet_shift_open(tablet)
     session = ProductionWorkSession.objects.filter(pk=session_id, organization=tablet.organization, tablet=tablet).select_related('user').first()
     if not session:
         raise ProductionError('Tablet oturumu bulunamadı.')
@@ -1544,6 +1771,7 @@ def tablet_pause_session(*, token, session_id, note='', checkpoint_total=None, p
 @transaction.atomic
 def tablet_resume_session(*, token, session_id, note='', checkpoint_total=None, participant_totals=None):
     tablet = _tablet_by_token(token)
+    _assert_tablet_shift_open(tablet)
     session = ProductionWorkSession.objects.filter(pk=session_id, organization=tablet.organization, tablet=tablet).select_related('user').first()
     if not session:
         raise ProductionError('Tablet oturumu bulunamadı.')
@@ -1564,6 +1792,7 @@ def tablet_resume_session(*, token, session_id, note='', checkpoint_total=None, 
 @transaction.atomic
 def tablet_checkpoint(*, token, line_id, checkpoint_total=None, participant_totals=None, reason='manual', note=''):
     tablet = _tablet_by_token(token)
+    _assert_tablet_shift_open(tablet)
     line, station, step = _step_for_session_action(tablet.organization, line_id, tablet.station.code)
     active = _active_tablet_sessions(tablet, step=step)
     totals = _require_checkpoint_payload(active, checkpoint_total=checkpoint_total, participant_totals=participant_totals)
@@ -1578,6 +1807,7 @@ def tablet_checkpoint(*, token, line_id, checkpoint_total=None, participant_tota
 @transaction.atomic
 def tablet_complete_work_item(*, token, line_id, checkpoint_total=None, participant_totals=None, note=''):
     tablet = _tablet_by_token(token)
+    _assert_tablet_shift_open(tablet)
     line, station, step = _step_for_session_action(tablet.organization, line_id, tablet.station.code)
     active = _active_tablet_sessions(tablet, step=step)
     if active:
@@ -1594,6 +1824,55 @@ def tablet_complete_work_item(*, token, line_id, checkpoint_total=None, particip
         nxt.save(update_fields=['status'])
     _refresh_line_and_order(line)
     return step
+
+
+@transaction.atomic
+def tablet_shift_checkpoint(*, token, line_id=None, checkpoint_total=None, participant_totals=None, note=''):
+    tablet = _tablet_by_token(token)
+    shift = _tablet_shift_payload(tablet)
+    if shift['state'] != 'checkpoint_required':
+        raise ProductionError('Bu tablet için zorunlu vardiya checkpoint yok.')
+    active_window = (
+        ProductionCountingWindow.objects.select_for_update()
+        .filter(organization=tablet.organization, tablet=tablet, status='open')
+        .first()
+    )
+    if not active_window:
+        raise ProductionError('Kapatılacak açık üretim penceresi yok.')
+    if line_id and active_window.line_id and int(line_id) != active_window.line_id:
+        raise ProductionError('Checkpoint aktif iş emriyle eşleşmiyor.')
+    active = _active_tablet_sessions(tablet, step=active_window.step)
+    totals = _require_checkpoint_payload(active, checkpoint_total=checkpoint_total, participant_totals=participant_totals)
+    reason = 'scheduled_break' if shift.get('active_break') else 'shift_end'
+    window = _close_counting_window(tablet=tablet, step=active_window.step, declared_totals=totals, reason=reason, note=note)
+    checkpoint = ProductionShiftCheckpoint.objects.create(
+        organization=tablet.organization,
+        occurrence_id=(shift.get('active_shift') or {}).get('id'),
+        break_row_id=(shift.get('active_break') or {}).get('id'),
+        window=window,
+        station=tablet.station,
+        tablet=tablet,
+        reason=reason,
+        participant_totals={str(key): str(value) for key, value in totals.items()},
+        official_delta=window.official_delta if window else Decimal('0'),
+        note=note or '',
+    )
+    now = timezone.now()
+    if reason == 'scheduled_break':
+        for session in active:
+            if session.status == 'started':
+                session.status = 'paused'
+                session.save(update_fields=['status', 'updated_at'])
+                _open_break(session, note or 'Planlı mola')
+    else:
+        for session in active:
+            session.status = 'closed'
+            session.ended_at = now
+            session.note = note or session.note
+            _close_active_break(session, note)
+            session.save(update_fields=['status', 'ended_at', 'note', 'updated_at'])
+            _create_session_event(session=session, event_type='complete', quantity_delta=0, note=note or 'Vardiya sonu')
+    return checkpoint
 
 
 def send_station_alert(*, organization, user, target_type, title, message, severity='info', station=None, department=None, work_order=None, expires_at=None):

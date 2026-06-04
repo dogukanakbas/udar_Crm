@@ -1,7 +1,7 @@
 import tempfile
 
 from django.core.management import call_command
-from django.db import IntegrityError
+from django.db import IntegrityError, models
 from django.db.models import ProtectedError, Sum
 from django.http import HttpResponse
 from django.utils import timezone
@@ -17,6 +17,7 @@ from permissions import HasAPIPermission, IsOrgMember
 
 from .models import (
     ProductionDataField,
+    ProductionCountingParticipant,
     ProductionCountingWindow,
     ProductionDepartment,
     ProductionDevice,
@@ -29,6 +30,10 @@ from .models import (
     ProductionRouteTemplate,
     ProductionSettings,
     ProductionStationAlert,
+    ProductionShiftBreak,
+    ProductionShiftCheckpoint,
+    ProductionShiftOccurrence,
+    ProductionShiftSchedule,
     ProductionStationTablet,
     ProductionStation,
     ProductionStationTarget,
@@ -54,6 +59,10 @@ from .serializers import (
     ProductionRouteTemplateSerializer,
     ProductionSettingsSerializer,
     ProductionStationAlertSerializer,
+    ProductionShiftBreakSerializer,
+    ProductionShiftCheckpointSerializer,
+    ProductionShiftOccurrenceSerializer,
+    ProductionShiftScheduleSerializer,
     ProductionStationTabletSerializer,
     ProductionStationSerializer,
     ProductionStationTargetSerializer,
@@ -72,6 +81,7 @@ from .serializers import (
     TabletLogoutSlotSerializer,
     TabletCheckpointSerializer,
     TabletCompleteWorkItemSerializer,
+    TabletShiftCheckpointSerializer,
     TabletSessionStateSerializer,
 )
 from .services import (
@@ -98,6 +108,7 @@ from .services import (
     tablet_context,
     tablet_checkpoint,
     tablet_complete_work_item,
+    tablet_shift_checkpoint,
     tablet_login_slot,
     tablet_logout_slot,
     tablet_pause_session,
@@ -279,6 +290,77 @@ class ProductionStationTargetViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.
             qs = qs.filter(station_id=station_id)
         if target_date:
             qs = qs.filter(target_date=target_date)
+        return qs
+
+
+class ProductionShiftScheduleViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
+    serializer_class = ProductionShiftScheduleSerializer
+    queryset = ProductionShiftSchedule.objects.select_related('department')
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.shifts.view'
+    write_perm = 'production.shifts.manage'
+    permission_map = {
+        'create': 'production.shifts.manage',
+        'update': 'production.shifts.manage',
+        'partial_update': 'production.shifts.manage',
+        'destroy': 'production.shifts.manage',
+    }
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name', 'department__name', 'department__code']
+    ordering_fields = ['department__order', 'order', 'start_time']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        department_id = self.request.query_params.get('department')
+        if department_id:
+            qs = qs.filter(department_id=department_id)
+        return qs
+
+
+class ProductionShiftBreakViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
+    serializer_class = ProductionShiftBreakSerializer
+    queryset = ProductionShiftBreak.objects.select_related('department', 'schedule')
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.shifts.view'
+    write_perm = 'production.shifts.manage'
+    permission_map = {
+        'create': 'production.shifts.manage',
+        'update': 'production.shifts.manage',
+        'partial_update': 'production.shifts.manage',
+        'destroy': 'production.shifts.manage',
+    }
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name', 'department__name', 'schedule__name']
+    ordering_fields = ['department__order', 'order', 'start_time']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        department_id = self.request.query_params.get('department')
+        schedule_id = self.request.query_params.get('schedule')
+        if department_id:
+            qs = qs.filter(department_id=department_id)
+        if schedule_id:
+            qs = qs.filter(schedule_id=schedule_id)
+        return qs
+
+
+class ProductionShiftOccurrenceViewSet(OrgScopedMixin, viewsets.ReadOnlyModelViewSet):
+    serializer_class = ProductionShiftOccurrenceSerializer
+    queryset = ProductionShiftOccurrence.objects.select_related('department', 'schedule')
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.shift_reports.view'
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name', 'department__name', 'schedule__name']
+    ordering_fields = ['report_date', 'starts_at', 'ends_at']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        report_date = self.request.query_params.get('report_date')
+        department_id = self.request.query_params.get('department')
+        if report_date:
+            qs = qs.filter(report_date=report_date)
+        if department_id:
+            qs = qs.filter(department_id=department_id)
         return qs
 
 
@@ -757,6 +839,19 @@ class ProductionTabletCheckpointView(APIView):
         return Response(ProductionCountingWindowSerializer(window).data, status=status.HTTP_201_CREATED)
 
 
+class ProductionTabletShiftCheckpointView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        serializer = TabletShiftCheckpointSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            checkpoint = tablet_shift_checkpoint(**serializer.validated_data)
+        except ProductionError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ProductionShiftCheckpointSerializer(checkpoint).data, status=status.HTTP_201_CREATED)
+
+
 class ProductionTabletCompleteWorkItemView(APIView):
     permission_classes = []
 
@@ -981,6 +1076,59 @@ class ProductionReportSummaryView(APIView):
             'discrepancies_pending': sessions.filter(discrepancy_status='needs_review').count(),
         })
         return Response(data)
+
+
+class ProductionShiftReportSummaryView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.shift_reports.view'
+
+    def get(self, request):
+        org = request.user.organization
+        report_date = request.query_params.get('report_date') or timezone.localdate().isoformat()
+        department_id = request.query_params.get('department')
+        windows = ProductionCountingWindow.objects.filter(
+            organization=org,
+            status='closed',
+        ).filter(
+            models.Q(closed_at__date=report_date)
+            | models.Q(shift_checkpoints__occurrence__report_date=report_date)
+        ).select_related('station__department', 'work_order', 'line').distinct()
+        checkpoints = ProductionShiftCheckpoint.objects.filter(
+            organization=org,
+        ).filter(
+            models.Q(created_at__date=report_date)
+            | models.Q(occurrence__report_date=report_date)
+        ).select_related('station__department', 'occurrence', 'break_row', 'tablet')
+        participants = ProductionCountingParticipant.objects.filter(
+            organization=org,
+            window__status='closed',
+        ).filter(
+            models.Q(window__closed_at__date=report_date)
+            | models.Q(window__shift_checkpoints__occurrence__report_date=report_date)
+        ).select_related('user', 'window__station__department', 'window__line').distinct()
+        if department_id:
+            windows = windows.filter(station__department_id=department_id)
+            checkpoints = checkpoints.filter(station__department_id=department_id)
+            participants = participants.filter(window__station__department_id=department_id)
+
+        by_station = list(
+            windows.values('station_id', 'station__code', 'station__name', 'station__department__name')
+            .annotate(total=Sum('official_delta'))
+            .order_by('station__department__order', 'station__order')
+        )
+        by_worker = list(
+            participants.values('user_id', 'user__username', 'user__first_name', 'user__last_name')
+            .annotate(total=Sum('credited_quantity'), discrepancy_total=Sum('discrepancy_quantity'))
+            .order_by('-total')[:100]
+        )
+        return Response({
+            'report_date': report_date,
+            'total_quantity': windows.aggregate(total=Sum('official_delta'))['total'] or 0,
+            'checkpoint_count': checkpoints.count(),
+            'by_station': by_station,
+            'by_worker': by_worker,
+            'checkpoints': ProductionShiftCheckpointSerializer(checkpoints.order_by('-created_at')[:100], many=True).data,
+        })
 
 
 class ProductionReportExportView(APIView):

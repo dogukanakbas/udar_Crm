@@ -1,3 +1,4 @@
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -21,6 +22,9 @@ from .models import (
     ProductionOperatorProfile,
     ProductionSessionBreak,
     ProductionSettings,
+    ProductionShiftBreak,
+    ProductionShiftCheckpoint,
+    ProductionShiftSchedule,
     ProductionStationTarget,
     ProductionStationTablet,
     ProductionStationUser,
@@ -45,6 +49,7 @@ from .services import (
     tablet_pause_session,
     tablet_resume_session,
     tablet_checkpoint,
+    tablet_shift_checkpoint,
     tablet_complete_work_item,
     tablet_context,
 )
@@ -644,6 +649,183 @@ class ProductionAutomationTests(TestCase):
         self.assertEqual(context['daily_target']['target_quantity'], Decimal('250.00'))
         self.assertEqual(context['daily_target']['actual_quantity'], Decimal('25.00'))
         self.assertEqual(context['daily_target']['remaining_quantity'], Decimal('225.00'))
+
+    def test_department_shift_schedule_supports_three_or_four_shifts(self):
+        department = self.org.production_departments.order_by('order').first()
+
+        for index, start in enumerate([time(0, 0), time(6, 0), time(12, 0), time(18, 0)], start=1):
+            ProductionShiftSchedule.objects.create(
+                organization=self.org,
+                department=department,
+                name=f'{index}. Vardiya',
+                weekdays=[0, 1, 2, 3, 4, 5, 6],
+                start_time=start,
+                end_time=time((index * 6) % 24, 0),
+                crosses_midnight=index == 4,
+                order=index,
+            )
+
+        self.assertEqual(ProductionShiftSchedule.objects.filter(department=department).count(), 4)
+
+    def test_night_shift_reports_to_start_date(self):
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        line = order.lines.get()
+        first_step = line.steps.select_related('station__department').order_by('order').first()
+        tablet = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=first_step.station,
+            name='Gece Tablet',
+            token='night-shift-tablet',
+        )
+        start_day = timezone.localdate()
+        now = timezone.make_aware(datetime.combine(start_day + timedelta(days=1), time(2, 0)))
+        ProductionShiftSchedule.objects.create(
+            organization=self.org,
+            department=first_step.station.department,
+            name='Gece vardiyası',
+            weekdays=[start_day.weekday()],
+            start_time=time(22, 0),
+            end_time=time(6, 0),
+            crosses_midnight=True,
+        )
+
+        with patch('production.services.timezone.now', return_value=now):
+            context = tablet_context(tablet.token)
+
+        self.assertEqual(context['shift_state']['state'], 'active')
+        self.assertEqual(context['shift_state']['active_shift']['report_date'], start_day)
+
+    def test_tablet_is_locked_outside_defined_shift(self):
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        line = order.lines.get()
+        first_step = line.steps.select_related('station__department').order_by('order').first()
+        worker = User.objects.create_user(username='locked-worker', password='x', organization=self.org, role='Worker')
+        ProductionStationUser.objects.create(organization=self.org, station=first_step.station, user=worker)
+        profile = ProductionOperatorProfile.objects.create(organization=self.org, user=worker)
+        profile.set_pin('5555')
+        profile.save()
+        tablet = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=first_step.station,
+            name='Kilit Tablet',
+            token='locked-shift-tablet',
+        )
+        day = timezone.localdate()
+        ProductionShiftSchedule.objects.create(
+            organization=self.org,
+            department=first_step.station.department,
+            name='Gündüz',
+            weekdays=[day.weekday()],
+            start_time=time(8, 0),
+            end_time=time(16, 0),
+        )
+        now = timezone.make_aware(datetime.combine(day, time(18, 0)))
+
+        with patch('production.services.timezone.now', return_value=now):
+            context = tablet_context(tablet.token)
+            with self.assertRaisesMessage(ProductionError, 'aktif vardiya yok'):
+                tablet_login_slot(token=tablet.token, user_id=worker.id, pin='5555', line_id=line.id, slot_index=0)
+
+        self.assertEqual(context['shift_state']['state'], 'off_shift')
+
+    def test_shift_end_checkpoint_closes_window_and_session(self):
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        line = order.lines.get()
+        first_step = line.steps.select_related('station__department').order_by('order').first()
+        first_step.target_quantity = Decimal('100')
+        first_step.save(update_fields=['target_quantity'])
+        worker = User.objects.create_user(username='shift-end-worker', password='x', organization=self.org, role='Worker')
+        ProductionStationUser.objects.create(organization=self.org, station=first_step.station, user=worker)
+        profile = ProductionOperatorProfile.objects.create(organization=self.org, user=worker)
+        profile.set_pin('6666')
+        profile.save()
+        tablet = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=first_step.station,
+            name='Vardiya Sonu Tablet',
+            token='shift-end-tablet',
+        )
+        day = timezone.localdate()
+        ProductionShiftSchedule.objects.create(
+            organization=self.org,
+            department=first_step.station.department,
+            name='Kısa vardiya',
+            weekdays=[day.weekday()],
+            start_time=time(8, 0),
+            end_time=time(16, 0),
+        )
+        active_now = timezone.make_aware(datetime.combine(day, time(10, 0)))
+        end_now = timezone.make_aware(datetime.combine(day, time(16, 5)))
+
+        with patch('production.services.timezone.now', return_value=active_now):
+            session = tablet_login_slot(token=tablet.token, user_id=worker.id, pin='6666', line_id=line.id, slot_index=0)
+        with patch('production.services.timezone.now', return_value=end_now):
+            context = tablet_context(tablet.token)
+            checkpoint = tablet_shift_checkpoint(token=tablet.token, line_id=line.id, checkpoint_total=Decimal('5'))
+
+        session.refresh_from_db()
+        first_step.refresh_from_db()
+        self.assertEqual(context['shift_state']['state'], 'checkpoint_required')
+        self.assertEqual(checkpoint.reason, 'shift_end')
+        self.assertEqual(session.status, 'closed')
+        self.assertEqual(first_step.completed_quantity, Decimal('5.00'))
+
+    def test_scheduled_break_checkpoint_pauses_sessions_and_locks_tablet(self):
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        line = order.lines.get()
+        first_step = line.steps.select_related('station__department').order_by('order').first()
+        first_step.target_quantity = Decimal('100')
+        first_step.save(update_fields=['target_quantity'])
+        worker = User.objects.create_user(username='break-worker', password='x', organization=self.org, role='Worker')
+        ProductionStationUser.objects.create(organization=self.org, station=first_step.station, user=worker)
+        profile = ProductionOperatorProfile.objects.create(organization=self.org, user=worker)
+        profile.set_pin('7777')
+        profile.save()
+        tablet = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=first_step.station,
+            name='Mola Tablet',
+            token='scheduled-break-tablet',
+        )
+        day = timezone.localdate()
+        schedule = ProductionShiftSchedule.objects.create(
+            organization=self.org,
+            department=first_step.station.department,
+            name='Gündüz',
+            weekdays=[day.weekday()],
+            start_time=time(8, 0),
+            end_time=time(18, 0),
+        )
+        ProductionShiftBreak.objects.create(
+            organization=self.org,
+            department=first_step.station.department,
+            schedule=schedule,
+            name='Öğle molası',
+            start_time=time(12, 0),
+            end_time=time(12, 30),
+            requires_checkpoint=True,
+        )
+        active_now = timezone.make_aware(datetime.combine(day, time(10, 0)))
+        break_now = timezone.make_aware(datetime.combine(day, time(12, 5)))
+
+        with patch('production.services.timezone.now', return_value=active_now):
+            session = tablet_login_slot(token=tablet.token, user_id=worker.id, pin='7777', line_id=line.id, slot_index=0)
+        with patch('production.services.timezone.now', return_value=break_now):
+            context = tablet_context(tablet.token)
+            checkpoint = tablet_shift_checkpoint(token=tablet.token, line_id=line.id, checkpoint_total=Decimal('12'))
+
+        session.refresh_from_db()
+        first_step.refresh_from_db()
+        self.assertEqual(context['shift_state']['state'], 'checkpoint_required')
+        self.assertEqual(checkpoint.reason, 'scheduled_break')
+        self.assertEqual(session.status, 'paused')
+        self.assertEqual(ProductionSessionBreak.objects.filter(session=session, ended_at__isnull=True).count(), 1)
+        self.assertEqual(first_step.completed_quantity, Decimal('12.00'))
+        self.assertEqual(ProductionShiftCheckpoint.objects.filter(station=first_step.station).count(), 1)
 
     def test_station_work_queue_is_broadcast_to_all_station_tablets_by_default(self):
         quote = self.make_contract()

@@ -43,6 +43,10 @@ from production.views import (
     ProductionStationAlertAckView,
     ProductionStationAlertViewSet,
     ProductionStationConsoleView,
+    ProductionShiftBreakViewSet,
+    ProductionShiftOccurrenceViewSet,
+    ProductionShiftReportSummaryView,
+    ProductionShiftScheduleViewSet,
     ProductionStationTabletViewSet,
     ProductionStationTargetViewSet,
     ProductionTabletBreakEndView,
@@ -52,6 +56,7 @@ from production.views import (
     ProductionTabletContextView,
     ProductionTabletLoginSlotView,
     ProductionTabletLogoutSlotView,
+    ProductionTabletShiftCheckpointView,
     ProductionSessionCloseView,
     ProductionSessionHandoverView,
     ProductionSessionPauseView,
@@ -130,6 +135,9 @@ router.register(r'production/devices', ProductionDeviceViewSet, basename='produc
 router.register(r'production/operator-profiles', ProductionOperatorProfileViewSet, basename='production-operator-profiles')
 router.register(r'production/tablets', ProductionStationTabletViewSet, basename='production-tablets')
 router.register(r'production/station-targets', ProductionStationTargetViewSet, basename='production-station-targets')
+router.register(r'production/shift-schedules', ProductionShiftScheduleViewSet, basename='production-shift-schedules')
+router.register(r'production/shift-breaks', ProductionShiftBreakViewSet, basename='production-shift-breaks')
+router.register(r'production/shift-occurrences', ProductionShiftOccurrenceViewSet, basename='production-shift-occurrences')
 router.register(r'production/step-tablet-assignments', ProductionStepTabletAssignmentViewSet, basename='production-step-tablet-assignments')
 router.register(r'production/device-maps', ProductionDevicePayloadMapViewSet, basename='production-device-maps')
 router.register(r'production/data-fields', ProductionDataFieldViewSet, basename='production-data-fields')
@@ -205,6 +213,7 @@ urlpatterns = [
     path('api/production/tablet/break/start/', ProductionTabletBreakStartView.as_view(), name='production-tablet-break-start'),
     path('api/production/tablet/break/end/', ProductionTabletBreakEndView.as_view(), name='production-tablet-break-end'),
     path('api/production/tablet/checkpoint/', ProductionTabletCheckpointView.as_view(), name='production-tablet-checkpoint'),
+    path('api/production/tablet/shift-checkpoint/', ProductionTabletShiftCheckpointView.as_view(), name='production-tablet-shift-checkpoint'),
     path('api/production/tablet/complete-work-item/', ProductionTabletCompleteWorkItemView.as_view(), name='production-tablet-complete-work-item'),
     path('api/production/station-sessions/start/', ProductionSessionStartView.as_view(), name='production-session-start'),
     path('api/production/station-sessions/pause/', ProductionSessionPauseView.as_view(), name='production-session-pause'),
@@ -216,6 +225,7 @@ urlpatterns = [
     path('api/production/my-daily-sessions/', MyDailyProductionSessionsView.as_view(), name='production-my-daily-sessions'),
     path('api/production/pi/events/', ProductionPiEventView.as_view(), name='production-pi-events'),
     path('api/production/reports/summary/', ProductionReportSummaryView.as_view(), name='production-report-summary'),
+    path('api/production/reports/shift-summary/', ProductionShiftReportSummaryView.as_view(), name='production-shift-report-summary'),
     path('api/production/reports/export/', ProductionReportExportView.as_view(), name='production-report-export'),
     path('api/search/', GlobalSearchView.as_view(), name='global-search'),
     path('api/uploads/presign/', UploadPresignView.as_view(), name='upload-presign'),

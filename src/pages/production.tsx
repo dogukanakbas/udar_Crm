@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, CheckCircle2, Copy, Download, LogOut, Monitor, Pause, Play, Plus, RefreshCw, Route, Save, Send, TimerReset, Trash2, Upload, UserPlus, Volume2 } from 'lucide-react'
+import { Bell, CheckCircle2, Copy, Download, Edit3, LogOut, Monitor, Pause, Play, Plus, RefreshCw, Route, Save, Send, TimerReset, Trash2, Upload, UserPlus, Volume2, X } from 'lucide-react'
 
 import { PageHeader } from '@/components/app-shell'
 import { Badge } from '@/components/ui/badge'
@@ -23,6 +23,8 @@ type StationAssignment = { id: number; station: number; station_code?: string; u
 type Device = { id: number; station: number; station_code?: string; name: string; token?: string; is_active: boolean; last_seen_at?: string }
 type Tablet = { id: number; station: number; station_code?: string; station_name?: string; name: string; token?: string; is_active: boolean; last_seen_at?: string }
 type StationTarget = { id: number; station: number; station_code?: string; station_name?: string; target_date: string; target_quantity: string | number; note?: string }
+type ShiftSchedule = { id: number; department: number; department_name?: string; name: string; weekdays: number[]; start_time: string; end_time: string; crosses_midnight: boolean; order: number; is_active: boolean; note?: string }
+type ShiftBreak = { id: number; department: number; department_name?: string; schedule?: number | null; schedule_name?: string; name: string; start_time: string; end_time: string; requires_checkpoint: boolean; lock_type: string; order: number; is_active: boolean; note?: string }
 type OperatorProfile = { id: number; user: number; user_name?: string; has_pin?: boolean; is_active: boolean; last_pin_change_at?: string }
 type StationAlert = { id: number; target_type: string; station?: number | null; station_code?: string; department?: number | null; department_name?: string; work_order?: number | null; work_order_number?: string; title: string; message: string; severity: string; created_at?: string; acks?: any[] }
 type DeviceMap = { id: number; device: number; device_name?: string; station?: number; station_code?: string; source_path: string; target_key: string; target_type: string; is_required: boolean; is_active: boolean; order: number }
@@ -34,6 +36,12 @@ type RouteStep = { id: number; station: number; station_code?: string; station_n
 type RouteTemplate = { id: number; name: string; product_group_key?: string; is_default: boolean; steps?: RouteStep[] }
 type WarehouseLocation = { id: number; code: string; name?: string; warehouse: number; warehouse_name?: string }
 type ProductionSettings = { default_completion_location?: number | null; default_completion_warehouse?: number | null; auto_stock_in_enabled?: boolean }
+type DepartmentDraft = { code: string; name: string; color: string; is_active: boolean }
+type StationDraft = { department: string; code: string; name: string; max_workers: string; is_handover: boolean; is_final: boolean; is_active: boolean }
+type DeviceDraft = { station: string; name: string; is_active: boolean }
+type TabletDraft = { station: string; name: string; is_active: boolean }
+type ShiftDraft = { department: string; name: string; weekdays: number[]; start_time: string; end_time: string; crosses_midnight: boolean; is_active: boolean; note: string }
+type BreakDraft = { department: string; schedule: string; name: string; start_time: string; end_time: string; requires_checkpoint: boolean; lock_type: string; is_active: boolean; note: string }
 type WorkOrder = {
   id: number
   number: string
@@ -127,6 +135,7 @@ type TabletSlot = {
   declared_good_quantity: string | number
   break_seconds?: number
   active_break_id?: number | null
+  active_break_started_at?: string | null
 }
 type TabletDailyTarget = { id?: number; date?: string; target_quantity: string | number; actual_quantity: string | number; remaining_quantity: string | number; note?: string }
 type TabletCountingWindow = {
@@ -139,10 +148,26 @@ type TabletCountingWindow = {
   participants?: { id: number; session_id: number; user_id: number; user_name: string; start_total: string | number; declared_total: string | number; credited_quantity: string | number; discrepancy_status: string }[]
 }
 type TabletWorkItem = ConsoleItem & { work_order_id: number; visibility?: string; is_pinned?: boolean; priority?: number; start_policy?: string; assigned_tablet_ids?: number[] }
+type TabletShiftState = {
+  state: 'active' | 'break_locked' | 'off_shift' | 'checkpoint_required'
+  label: string
+  message?: string
+  has_schedule?: boolean
+  requires_checkpoint?: boolean
+  locked?: boolean
+  checkpoint_names?: string[]
+  line_id?: number | null
+  active_shift?: { id: number; name: string; report_date: string; starts_at: string; ends_at: string } | null
+  active_break?: { id: number; name: string; starts_at: string; ends_at: string; requires_checkpoint: boolean; lock_type: string } | null
+  next_shift?: { id: number; name: string; starts_at: string; ends_at: string } | null
+  next_break?: { id: number; name: string; starts_at: string; ends_at: string; requires_checkpoint: boolean } | null
+  seconds_until_change?: number | null
+}
 type TabletContext = {
   tablet?: { id: number; name: string; token: string }
   station?: { id: number; code: string; name: string; department_name: string; max_workers: number }
   daily_target?: TabletDailyTarget
+  shift_state?: TabletShiftState
   operators?: TabletOperator[]
   work_items?: TabletWorkItem[]
   slots?: TabletSlot[]
@@ -170,6 +195,29 @@ const todayIso = () => {
   const day = String(d.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
+const weekdays = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz']
+const shortTime = (value?: string | null) => {
+  if (!value) return ''
+  const text = String(value)
+  if (text.includes('T')) {
+    return new Date(text).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
+  }
+  return text.slice(0, 5)
+}
+const formatSeconds = (seconds?: number | null) => {
+  const total = Math.max(0, Math.floor(Number(seconds || 0)))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`
+}
+
+const emptyDepartmentDraft = (): DepartmentDraft => ({ code: '', name: '', color: '#2563eb', is_active: true })
+const emptyStationDraft = (): StationDraft => ({ department: '', code: '', name: '', max_workers: '2', is_handover: false, is_final: false, is_active: true })
+const emptyDeviceDraft = (): DeviceDraft => ({ station: '', name: '', is_active: true })
+const emptyTabletDraft = (): TabletDraft => ({ station: '', name: '', is_active: true })
+const emptyShiftDraft = (department = ''): ShiftDraft => ({ department, name: '', weekdays: [0, 1, 2, 3, 4], start_time: '08:00', end_time: '18:00', crosses_midnight: false, is_active: true, note: '' })
+const emptyBreakDraft = (department = ''): BreakDraft => ({ department, schedule: 'none', name: '', start_time: '12:00', end_time: '13:00', requires_checkpoint: true, lock_type: 'break_locked', is_active: true, note: '' })
 
 function pct(done: unknown, target: unknown) {
   const total = n(target)
@@ -214,7 +262,7 @@ function assignmentRoleLabel(role: string) {
   return 'Operatör'
 }
 
-function StationCard({ station, assignments = [], onDelete }: { station: Station; assignments?: StationAssignment[]; onDelete?: () => void }) {
+function StationCard({ station, assignments = [], onEdit, onDelete }: { station: Station; assignments?: StationAssignment[]; onEdit?: () => void; onDelete?: () => void }) {
   return (
     <div className="rounded-lg border bg-card/70 p-3">
       <div className="flex items-start justify-between gap-3">
@@ -224,11 +272,6 @@ function StationCard({ station, assignments = [], onDelete }: { station: Station
         </div>
         <div className="flex items-center gap-2">
           <Badge variant={station.is_active ? 'secondary' : 'outline'}>{station.is_active ? 'Aktif' : 'Pasif'}</Badge>
-          {onDelete && (
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={onDelete} title="İstasyonu sil">
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          )}
         </div>
       </div>
       <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
@@ -240,6 +283,12 @@ function StationCard({ station, assignments = [], onDelete }: { station: Station
         {station.is_handover && <span>Devir istasyonu</span>}
         {station.is_final && <span>Ürün tamamlandı</span>}
       </div>
+      {(onEdit || onDelete) && (
+        <div className="mt-3 flex gap-2">
+          {onEdit && <Button variant="outline" size="sm" className="h-8 flex-1" onClick={onEdit}><Edit3 className="mr-2 h-3.5 w-3.5" /> Düzenle</Button>}
+          {onDelete && <Button variant="ghost" size="sm" className="h-8 text-destructive" onClick={onDelete}><Trash2 className="mr-2 h-3.5 w-3.5" /> Sil</Button>}
+        </div>
+      )}
     </div>
   )
 }
@@ -254,6 +303,8 @@ export function ProductionManagementPage() {
   const [devices, setDevices] = useState<Device[]>([])
   const [tablets, setTablets] = useState<Tablet[]>([])
   const [stationTargets, setStationTargets] = useState<StationTarget[]>([])
+  const [shiftSchedules, setShiftSchedules] = useState<ShiftSchedule[]>([])
+  const [shiftBreaks, setShiftBreaks] = useState<ShiftBreak[]>([])
   const [operatorProfiles, setOperatorProfiles] = useState<OperatorProfile[]>([])
   const [alerts, setAlerts] = useState<StationAlert[]>([])
   const [deviceMaps, setDeviceMaps] = useState<DeviceMap[]>([])
@@ -265,13 +316,25 @@ export function ProductionManagementPage() {
   const [settings, setSettings] = useState<ProductionSettings>({})
   const [summary, setSummary] = useState<any>({})
   const [busy, setBusy] = useState(false)
-  const [departmentDraft, setDepartmentDraft] = useState({ code: '', name: '', color: '#2563eb' })
-  const [stationDraft, setStationDraft] = useState({ department: '', code: '', name: '', max_workers: '2', is_handover: false, is_final: false })
+  const [editingDepartmentId, setEditingDepartmentId] = useState<number | null>(null)
+  const [editingStationId, setEditingStationId] = useState<number | null>(null)
+  const [editingDeviceId, setEditingDeviceId] = useState<number | null>(null)
+  const [editingTabletId, setEditingTabletId] = useState<number | null>(null)
+  const [editingShiftId, setEditingShiftId] = useState<number | null>(null)
+  const [editingBreakId, setEditingBreakId] = useState<number | null>(null)
+  const [editingMapId, setEditingMapId] = useState<number | null>(null)
+  const [editingFieldId, setEditingFieldId] = useState<number | null>(null)
+  const [editingRouteId, setEditingRouteId] = useState<number | null>(null)
+  const [editingRuleId, setEditingRuleId] = useState<number | null>(null)
+  const [departmentDraft, setDepartmentDraft] = useState<DepartmentDraft>(emptyDepartmentDraft)
+  const [stationDraft, setStationDraft] = useState<StationDraft>(emptyStationDraft)
   const [assignmentDraft, setAssignmentDraft] = useState({ station: '', user: '', role: 'operator' })
   const [routeDraft, setRouteDraft] = useState({ name: '', product_group_key: '', station_ids: [] as string[], parallel_station_ids: [] as string[] })
-  const [deviceDraft, setDeviceDraft] = useState({ station: '', name: '' })
-  const [tabletDraft, setTabletDraft] = useState({ station: '', name: '' })
+  const [deviceDraft, setDeviceDraft] = useState<DeviceDraft>(emptyDeviceDraft)
+  const [tabletDraft, setTabletDraft] = useState<TabletDraft>(emptyTabletDraft)
   const [targetDraft, setTargetDraft] = useState({ station: '', target_date: todayIso(), target_quantity: '', note: '' })
+  const [shiftDraft, setShiftDraft] = useState<ShiftDraft>(emptyShiftDraft)
+  const [breakDraft, setBreakDraft] = useState<BreakDraft>(emptyBreakDraft)
   const [pinDraft, setPinDraft] = useState({ user: '', pin: '' })
   const [alertDraft, setAlertDraft] = useState({ target_type: 'station', station: '', department: '', work_order: '', title: '', message: '', severity: 'warning' })
   const [mapDraft, setMapDraft] = useState({ device: '', source_path: '$.', target_key: '', target_type: 'text', is_required: false })
@@ -279,13 +342,15 @@ export function ProductionManagementPage() {
   const [ruleDraft, setRuleDraft] = useState({ name: '', scope: 'station', station: 'none', route: 'none', trigger_event: 'pi_event' })
 
   const load = async () => {
-    const [d, s, assignmentRows, userRows, dev, tabletRows, profileRows, alertRows, maps, fields, r, ruleRows, presetRows, l, cfg, dash] = await Promise.all([
+    const [d, s, assignmentRows, userRows, dev, tabletRows, shiftRows, breakRows, profileRows, alertRows, maps, fields, r, ruleRows, presetRows, l, cfg, dash] = await Promise.all([
       fetchAll<Department>('/production/departments/'),
       fetchAll<Station>('/production/stations/'),
       fetchAll<StationAssignment>('/production/station-users/'),
       api.get('/auth/users/').then((res) => (Array.isArray(res.data) ? res.data : res.data?.results || [])).catch(() => []),
       fetchAll<Device>('/production/devices/'),
       fetchAll<Tablet>('/production/tablets/').catch(() => []),
+      fetchAll<ShiftSchedule>('/production/shift-schedules/').catch(() => []),
+      fetchAll<ShiftBreak>('/production/shift-breaks/').catch(() => []),
       fetchAll<OperatorProfile>('/production/operator-profiles/').catch(() => []),
       fetchAll<StationAlert>('/production/station-alerts/').catch(() => []),
       fetchAll<DeviceMap>('/production/device-maps/'),
@@ -303,6 +368,8 @@ export function ProductionManagementPage() {
     setUsers(userRows)
     setDevices(dev)
     setTablets(tabletRows)
+    setShiftSchedules(shiftRows)
+    setShiftBreaks(breakRows)
     setOperatorProfiles(profileRows)
     setAlerts(alertRows)
     setDeviceMaps(maps)
@@ -338,22 +405,76 @@ export function ProductionManagementPage() {
     await load()
   }
 
-  const createDepartment = async () => {
-    await api.post('/production/departments/', { ...departmentDraft, order: departments.length })
-    setDepartmentDraft({ code: '', name: '', color: '#2563eb' })
-    toast({ title: 'Bölüm oluşturuldu' })
+  const resetDepartmentForm = () => {
+    setEditingDepartmentId(null)
+    setDepartmentDraft(emptyDepartmentDraft())
+  }
+
+  const resetStationForm = () => {
+    setEditingStationId(null)
+    setStationDraft(emptyStationDraft())
+  }
+
+  const resetDeviceForm = () => {
+    setEditingDeviceId(null)
+    setDeviceDraft(emptyDeviceDraft())
+  }
+
+  const resetTabletForm = () => {
+    setEditingTabletId(null)
+    setTabletDraft(emptyTabletDraft())
+  }
+
+  const resetShiftForm = (department = shiftDraft.department) => {
+    setEditingShiftId(null)
+    setShiftDraft(emptyShiftDraft(department))
+  }
+
+  const resetBreakForm = (department = breakDraft.department) => {
+    setEditingBreakId(null)
+    setBreakDraft(emptyBreakDraft(department))
+  }
+
+  const resetMapForm = () => {
+    setEditingMapId(null)
+    setMapDraft({ device: '', source_path: '$.', target_key: '', target_type: 'text', is_required: false })
+  }
+
+  const resetFieldForm = () => {
+    setEditingFieldId(null)
+    setFieldDraft({ station: 'global', key: '', label: '', field_type: 'text', source: 'manual' })
+  }
+
+  const resetRouteForm = () => {
+    setEditingRouteId(null)
+    setRouteDraft({ name: '', product_group_key: '', station_ids: [], parallel_station_ids: [] })
+  }
+
+  const resetRuleForm = () => {
+    setEditingRuleId(null)
+    setRuleDraft({ name: '', scope: 'station', station: 'none', route: 'none', trigger_event: 'pi_event' })
+  }
+
+  const saveDepartment = async () => {
+    const payload = { ...departmentDraft, order: editingDepartmentId ? departments.find((item) => item.id === editingDepartmentId)?.order ?? departments.length : departments.length }
+    if (editingDepartmentId) await api.patch(`/production/departments/${editingDepartmentId}/`, payload)
+    else await api.post('/production/departments/', payload)
+    resetDepartmentForm()
+    toast({ title: editingDepartmentId ? 'Bölüm güncellendi' : 'Bölüm oluşturuldu' })
     await load()
   }
 
-  const createStation = async () => {
-    await api.post('/production/stations/', {
+  const saveStation = async () => {
+    const payload = {
       ...stationDraft,
       department: Number(stationDraft.department),
       max_workers: Number(stationDraft.max_workers || 1),
-      order: stations.filter((item) => String(item.department) === stationDraft.department).length,
-    })
-    setStationDraft({ department: '', code: '', name: '', max_workers: '2', is_handover: false, is_final: false })
-    toast({ title: 'İstasyon oluşturuldu' })
+      order: editingStationId ? stations.find((item) => item.id === editingStationId)?.order ?? 0 : stations.filter((item) => String(item.department) === stationDraft.department).length,
+    }
+    if (editingStationId) await api.patch(`/production/stations/${editingStationId}/`, payload)
+    else await api.post('/production/stations/', payload)
+    resetStationForm()
+    toast({ title: editingStationId ? 'İstasyon güncellendi' : 'İstasyon oluşturuldu' })
     await load()
   }
 
@@ -370,7 +491,7 @@ export function ProductionManagementPage() {
   }
 
   const createRoute = async () => {
-    await api.post('/production/routes/', {
+    const payload = {
       name: routeDraft.name,
       product_group_key: routeDraft.product_group_key,
       step_inputs: routeDraft.station_ids.map((stationId, order) => ({
@@ -379,23 +500,29 @@ export function ProductionManagementPage() {
         is_required: true,
         start_policy: routeDraft.parallel_station_ids.includes(stationId) ? 'parallel' : 'after_previous',
       })),
-    })
-    setRouteDraft({ name: '', product_group_key: '', station_ids: [], parallel_station_ids: [] })
-    toast({ title: 'Rota oluşturuldu' })
+    }
+    if (editingRouteId) await api.patch(`/production/routes/${editingRouteId}/`, payload)
+    else await api.post('/production/routes/', payload)
+    resetRouteForm()
+    toast({ title: editingRouteId ? 'Rota güncellendi' : 'Rota oluşturuldu' })
     await load()
   }
 
-  const createDevice = async () => {
-    await api.post('/production/devices/', { station: Number(deviceDraft.station), name: deviceDraft.name })
-    setDeviceDraft({ station: '', name: '' })
-    toast({ title: 'Cihaz oluşturuldu' })
+  const saveDevice = async () => {
+    const payload = { station: Number(deviceDraft.station), name: deviceDraft.name, is_active: deviceDraft.is_active }
+    if (editingDeviceId) await api.patch(`/production/devices/${editingDeviceId}/`, payload)
+    else await api.post('/production/devices/', payload)
+    resetDeviceForm()
+    toast({ title: editingDeviceId ? 'Cihaz güncellendi' : 'Cihaz oluşturuldu' })
     await load()
   }
 
-  const createTablet = async () => {
-    await api.post('/production/tablets/', { station: Number(tabletDraft.station), name: tabletDraft.name })
-    setTabletDraft({ station: '', name: '' })
-    toast({ title: 'İstasyon tableti oluşturuldu' })
+  const saveTablet = async () => {
+    const payload = { station: Number(tabletDraft.station), name: tabletDraft.name, is_active: tabletDraft.is_active }
+    if (editingTabletId) await api.patch(`/production/tablets/${editingTabletId}/`, payload)
+    else await api.post('/production/tablets/', payload)
+    resetTabletForm()
+    toast({ title: editingTabletId ? 'İstasyon tableti güncellendi' : 'İstasyon tableti oluşturuldu' })
     await load()
   }
 
@@ -413,6 +540,147 @@ export function ProductionManagementPage() {
     await fetchTargets(targetDraft.target_date)
     setTargetDraft({ station: '', target_date: targetDraft.target_date, target_quantity: '', note: '' })
     await load()
+  }
+
+  const saveShiftSchedule = async () => {
+    const payload = {
+      ...shiftDraft,
+      department: Number(shiftDraft.department),
+      order: editingShiftId ? shiftSchedules.find((item) => item.id === editingShiftId)?.order ?? 0 : shiftSchedules.filter((item) => String(item.department) === shiftDraft.department).length,
+    }
+    if (editingShiftId) await api.patch(`/production/shift-schedules/${editingShiftId}/`, payload)
+    else await api.post('/production/shift-schedules/', payload)
+    resetShiftForm(shiftDraft.department)
+    toast({ title: editingShiftId ? 'Vardiya güncellendi' : 'Vardiya kaydedildi' })
+    await load()
+  }
+
+  const saveShiftBreak = async () => {
+    const payload = {
+      ...breakDraft,
+      department: Number(breakDraft.department),
+      schedule: breakDraft.schedule === 'none' ? null : Number(breakDraft.schedule),
+      order: editingBreakId ? shiftBreaks.find((item) => item.id === editingBreakId)?.order ?? 0 : shiftBreaks.filter((item) => String(item.department) === breakDraft.department).length,
+    }
+    if (editingBreakId) await api.patch(`/production/shift-breaks/${editingBreakId}/`, payload)
+    else await api.post('/production/shift-breaks/', payload)
+    resetBreakForm(breakDraft.department)
+    toast({ title: editingBreakId ? 'Özel mola güncellendi' : 'Özel mola kaydedildi' })
+    await load()
+  }
+
+  const editDepartment = (department: Department) => {
+    setEditingDepartmentId(department.id)
+    setDepartmentDraft({
+      code: department.code,
+      name: department.name,
+      color: department.color || '#2563eb',
+      is_active: department.is_active,
+    })
+  }
+
+  const editStation = (station: Station) => {
+    setEditingStationId(station.id)
+    setStationDraft({
+      department: String(station.department),
+      code: station.code,
+      name: station.name,
+      max_workers: String(station.max_workers || 1),
+      is_handover: station.is_handover,
+      is_final: station.is_final,
+      is_active: station.is_active,
+    })
+  }
+
+  const editDevice = (device: Device) => {
+    setEditingDeviceId(device.id)
+    setDeviceDraft({
+      station: String(device.station),
+      name: device.name,
+      is_active: device.is_active,
+    })
+  }
+
+  const editTablet = (tablet: Tablet) => {
+    setEditingTabletId(tablet.id)
+    setTabletDraft({
+      station: String(tablet.station),
+      name: tablet.name,
+      is_active: tablet.is_active,
+    })
+  }
+
+  const editShiftSchedule = (shift: ShiftSchedule) => {
+    setEditingShiftId(shift.id)
+    setShiftDraft({
+      department: String(shift.department),
+      name: shift.name,
+      weekdays: shift.weekdays || [],
+      start_time: shortTime(shift.start_time) || '08:00',
+      end_time: shortTime(shift.end_time) || '18:00',
+      crosses_midnight: shift.crosses_midnight,
+      is_active: shift.is_active,
+      note: shift.note || '',
+    })
+  }
+
+  const editShiftBreak = (item: ShiftBreak) => {
+    setEditingBreakId(item.id)
+    setBreakDraft({
+      department: String(item.department),
+      schedule: item.schedule ? String(item.schedule) : 'none',
+      name: item.name,
+      start_time: shortTime(item.start_time) || '12:00',
+      end_time: shortTime(item.end_time) || '13:00',
+      requires_checkpoint: item.requires_checkpoint,
+      lock_type: item.lock_type || 'break_locked',
+      is_active: item.is_active,
+      note: item.note || '',
+    })
+  }
+
+  const editDeviceMap = (item: DeviceMap) => {
+    setEditingMapId(item.id)
+    setMapDraft({
+      device: String(item.device),
+      source_path: item.source_path,
+      target_key: item.target_key,
+      target_type: item.target_type,
+      is_required: item.is_required,
+    })
+  }
+
+  const editDataField = (field: DataField) => {
+    setEditingFieldId(field.id)
+    setFieldDraft({
+      station: field.station ? String(field.station) : 'global',
+      key: field.key,
+      label: field.label,
+      field_type: field.field_type,
+      source: field.source,
+    })
+  }
+
+  const editRoute = (route: RouteTemplate) => {
+    const steps = route.steps || []
+    setEditingRouteId(route.id)
+    setRouteDraft({
+      name: route.name,
+      product_group_key: route.product_group_key || '',
+      station_ids: steps.map((step) => String(step.station)),
+      parallel_station_ids: steps.filter((step) => step.start_policy === 'parallel').map((step) => String(step.station)),
+    })
+  }
+
+  const editRule = (rule: RuleSet) => {
+    setEditingRuleId(rule.id)
+    setRuleDraft({
+      name: rule.name,
+      scope: rule.scope,
+      station: rule.station ? String(rule.station) : 'none',
+      route: rule.route ? String(rule.route) : 'none',
+      trigger_event: rule.trigger_event,
+    })
   }
 
   const saveOperatorPin = async () => {
@@ -442,39 +710,45 @@ export function ProductionManagementPage() {
 
   const createMap = async () => {
     const device = devices.find((item) => String(item.id) === mapDraft.device)
-    await api.post('/production/device-maps/', {
+    const payload = {
       ...mapDraft,
       device: Number(mapDraft.device),
       station: device?.station || null,
-      order: deviceMaps.length,
-    })
-    setMapDraft({ device: '', source_path: '$.', target_key: '', target_type: 'text', is_required: false })
-    toast({ title: 'Veri eşlemesi oluşturuldu' })
+      order: editingMapId ? deviceMaps.find((item) => item.id === editingMapId)?.order ?? 0 : deviceMaps.length,
+    }
+    if (editingMapId) await api.patch(`/production/device-maps/${editingMapId}/`, payload)
+    else await api.post('/production/device-maps/', payload)
+    resetMapForm()
+    toast({ title: editingMapId ? 'Veri eşlemesi güncellendi' : 'Veri eşlemesi oluşturuldu' })
     await load()
   }
 
   const createField = async () => {
-    await api.post('/production/data-fields/', {
+    const payload = {
       ...fieldDraft,
       station: fieldDraft.station === 'global' ? null : Number(fieldDraft.station),
-      order: dataFields.length,
-    })
-    setFieldDraft({ station: 'global', key: '', label: '', field_type: 'text', source: 'manual' })
-    toast({ title: 'Veri alanı oluşturuldu' })
+      order: editingFieldId ? dataFields.find((item) => item.id === editingFieldId)?.order ?? 0 : dataFields.length,
+    }
+    if (editingFieldId) await api.patch(`/production/data-fields/${editingFieldId}/`, payload)
+    else await api.post('/production/data-fields/', payload)
+    resetFieldForm()
+    toast({ title: editingFieldId ? 'Veri alanı güncellendi' : 'Veri alanı oluşturuldu' })
     await load()
   }
 
   const createRule = async () => {
-    await api.post('/production/rules/', {
+    const payload = {
       name: ruleDraft.name,
       scope: ruleDraft.scope,
       station: ruleDraft.station === 'none' ? null : Number(ruleDraft.station),
       route: ruleDraft.route === 'none' ? null : Number(ruleDraft.route),
       trigger_event: ruleDraft.trigger_event,
-      order: rules.length,
-    })
-    setRuleDraft({ name: '', scope: 'station', station: 'none', route: 'none', trigger_event: 'pi_event' })
-    toast({ title: 'Kural seti oluşturuldu' })
+      order: editingRuleId ? rules.find((item) => item.id === editingRuleId)?.order ?? 0 : rules.length,
+    }
+    if (editingRuleId) await api.patch(`/production/rules/${editingRuleId}/`, payload)
+    else await api.post('/production/rules/', payload)
+    resetRuleForm()
+    toast({ title: editingRuleId ? 'Kural seti güncellendi' : 'Kural seti oluşturuldu' })
     await load()
   }
 
@@ -627,6 +901,7 @@ export function ProductionManagementPage() {
           <TabsTrigger value="departments">Bölümler</TabsTrigger>
           <TabsTrigger value="stations">İstasyonlar</TabsTrigger>
           <TabsTrigger value="tablets">Tablet & PIN</TabsTrigger>
+          <TabsTrigger value="shifts">Vardiyalar</TabsTrigger>
           <TabsTrigger value="alerts">Bildirimler</TabsTrigger>
           <TabsTrigger value="devices">Cihaz & Veri</TabsTrigger>
           <TabsTrigger value="flow">Akış Tasarımcısı</TabsTrigger>
@@ -636,12 +911,19 @@ export function ProductionManagementPage() {
         <TabsContent value="departments">
           <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
             <Card>
-              <CardHeader><CardTitle>Bölüm oluştur</CardTitle></CardHeader>
+              <CardHeader><CardTitle>{editingDepartmentId ? 'Bölümü düzenle' : 'Bölüm oluştur'}</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 <Input placeholder="Kod" value={departmentDraft.code} onChange={(e) => setDepartmentDraft((v) => ({ ...v, code: e.target.value }))} />
                 <Input placeholder="Bölüm adı" value={departmentDraft.name} onChange={(e) => setDepartmentDraft((v) => ({ ...v, name: e.target.value }))} />
                 <Input type="color" value={departmentDraft.color} onChange={(e) => setDepartmentDraft((v) => ({ ...v, color: e.target.value }))} />
-                <Button onClick={createDepartment} disabled={!departmentDraft.code || !departmentDraft.name}><Plus className="mr-2 h-4 w-4" /> Ekle</Button>
+                <label className="flex items-center justify-between rounded-md border p-3 text-sm"><span>Aktif</span><Switch checked={departmentDraft.is_active} onCheckedChange={(checked) => setDepartmentDraft((v) => ({ ...v, is_active: checked }))} /></label>
+                <div className="flex gap-2">
+                  <Button onClick={saveDepartment} disabled={!departmentDraft.code || !departmentDraft.name}>
+                    {editingDepartmentId ? <Save className="mr-2 h-4 w-4" /> : <Plus className="mr-2 h-4 w-4" />}
+                    {editingDepartmentId ? 'Güncelle' : 'Ekle'}
+                  </Button>
+                  {editingDepartmentId && <Button variant="outline" onClick={resetDepartmentForm}><X className="mr-2 h-4 w-4" /> İptal</Button>}
+                </div>
               </CardContent>
             </Card>
             <Card>
@@ -654,14 +936,19 @@ export function ProductionManagementPage() {
                         <span className="h-3 w-3 rounded-full" style={{ background: dep.color || '#21406d' }} />
                         <h3 className="font-semibold">{dep.name}</h3>
                       </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-destructive"
-                        onClick={() => deleteItem(`/production/departments/${dep.id}/`, dep.name)}
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" /> Sil
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={() => editDepartment(dep)}>
+                          <Edit3 className="mr-2 h-4 w-4" /> Düzenle
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-destructive"
+                          onClick={() => deleteItem(`/production/departments/${dep.id}/`, dep.name)}
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" /> Sil
+                        </Button>
+                      </div>
                     </div>
                     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                       {stations.filter((station) => station.department === dep.id).map((station) => (
@@ -669,6 +956,7 @@ export function ProductionManagementPage() {
                           key={station.id}
                           station={station}
                           assignments={stationAssignments.filter((item) => item.station === station.id && item.is_active)}
+                          onEdit={() => editStation(station)}
                           onDelete={() => deleteItem(`/production/stations/${station.id}/`, station.code)}
                         />
                       ))}
@@ -684,7 +972,7 @@ export function ProductionManagementPage() {
           <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
             <div className="space-y-4">
               <Card>
-                <CardHeader><CardTitle>İstasyon oluştur</CardTitle></CardHeader>
+                <CardHeader><CardTitle>{editingStationId ? 'İstasyonu düzenle' : 'İstasyon oluştur'}</CardTitle></CardHeader>
                 <CardContent className="space-y-3">
                   <Select value={stationDraft.department} onValueChange={(value) => setStationDraft((v) => ({ ...v, department: value }))}>
                     <SelectTrigger><SelectValue placeholder="Bölüm seç" /></SelectTrigger>
@@ -695,7 +983,14 @@ export function ProductionManagementPage() {
                   <Input placeholder="Eşzamanlı çalışan sınırı" inputMode="numeric" value={stationDraft.max_workers} onChange={(e) => setStationDraft((v) => ({ ...v, max_workers: e.target.value }))} />
                   <label className="flex items-center justify-between rounded-md border p-3 text-sm"><span>Devir istasyonu</span><Switch checked={stationDraft.is_handover} onCheckedChange={(checked) => setStationDraft((v) => ({ ...v, is_handover: checked }))} /></label>
                   <label className="flex items-center justify-between rounded-md border p-3 text-sm"><span>Final istasyon</span><Switch checked={stationDraft.is_final} onCheckedChange={(checked) => setStationDraft((v) => ({ ...v, is_final: checked }))} /></label>
-                  <Button onClick={createStation} disabled={!stationDraft.department || !stationDraft.code || !stationDraft.name}><Plus className="mr-2 h-4 w-4" /> Ekle</Button>
+                  <label className="flex items-center justify-between rounded-md border p-3 text-sm"><span>Aktif</span><Switch checked={stationDraft.is_active} onCheckedChange={(checked) => setStationDraft((v) => ({ ...v, is_active: checked }))} /></label>
+                  <div className="flex gap-2">
+                    <Button onClick={saveStation} disabled={!stationDraft.department || !stationDraft.code || !stationDraft.name}>
+                      {editingStationId ? <Save className="mr-2 h-4 w-4" /> : <Plus className="mr-2 h-4 w-4" />}
+                      {editingStationId ? 'Güncelle' : 'Ekle'}
+                    </Button>
+                    {editingStationId && <Button variant="outline" onClick={resetStationForm}><X className="mr-2 h-4 w-4" /> İptal</Button>}
+                  </div>
                 </CardContent>
               </Card>
               <Card>
@@ -733,6 +1028,7 @@ export function ProductionManagementPage() {
                     key={station.id}
                     station={station}
                     assignments={stationAssignments.filter((item) => item.station === station.id && item.is_active)}
+                    onEdit={() => editStation(station)}
                     onDelete={() => deleteItem(`/production/stations/${station.id}/`, station.code)}
                   />
                 ))}
@@ -745,16 +1041,21 @@ export function ProductionManagementPage() {
           <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
             <div className="space-y-4">
               <Card>
-                <CardHeader><CardTitle>İstasyon tableti oluştur</CardTitle></CardHeader>
+                <CardHeader><CardTitle>{editingTabletId ? 'İstasyon tabletini düzenle' : 'İstasyon tableti oluştur'}</CardTitle></CardHeader>
                 <CardContent className="space-y-3">
                   <Select value={tabletDraft.station} onValueChange={(value) => setTabletDraft((v) => ({ ...v, station: value }))}>
                     <SelectTrigger><SelectValue placeholder="İstasyon seç" /></SelectTrigger>
                     <SelectContent>{stations.map((st) => <SelectItem key={st.id} value={String(st.id)}>{st.code} - {st.name}</SelectItem>)}</SelectContent>
                   </Select>
                   <Input placeholder="Tablet adı" value={tabletDraft.name} onChange={(e) => setTabletDraft((v) => ({ ...v, name: e.target.value }))} />
-                  <Button onClick={createTablet} disabled={!tabletDraft.station || !tabletDraft.name}>
-                    <Monitor className="mr-2 h-4 w-4" /> Tablet ekle
-                  </Button>
+                  <label className="flex items-center justify-between rounded-md border p-3 text-sm"><span>Aktif</span><Switch checked={tabletDraft.is_active} onCheckedChange={(checked) => setTabletDraft((v) => ({ ...v, is_active: checked }))} /></label>
+                  <div className="flex gap-2">
+                    <Button onClick={saveTablet} disabled={!tabletDraft.station || !tabletDraft.name}>
+                      {editingTabletId ? <Save className="mr-2 h-4 w-4" /> : <Monitor className="mr-2 h-4 w-4" />}
+                      {editingTabletId ? 'Güncelle' : 'Tablet ekle'}
+                    </Button>
+                    {editingTabletId && <Button variant="outline" onClick={resetTabletForm}><X className="mr-2 h-4 w-4" /> İptal</Button>}
+                  </div>
                 </CardContent>
               </Card>
               <Card>
@@ -780,9 +1081,15 @@ export function ProductionManagementPage() {
                           <p className="font-semibold">{tablet.name}</p>
                           <p className="text-xs text-muted-foreground">{tablet.station_code} · {tablet.station_name}</p>
                         </div>
-                        <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/tablets/${tablet.id}/`, tablet.name)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Badge variant={tablet.is_active ? 'secondary' : 'outline'}>{tablet.is_active ? 'Aktif' : 'Pasif'}</Badge>
+                          <Button variant="ghost" size="icon" onClick={() => editTablet(tablet)} title="Tableti düzenle">
+                            <Edit3 className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/tablets/${tablet.id}/`, tablet.name)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                       <div className="mt-3 flex items-center gap-2 rounded-md bg-muted/50 p-2 text-xs">
                         <code className="min-w-0 flex-1 truncate">{tablet.token}</code>
@@ -812,6 +1119,159 @@ export function ProductionManagementPage() {
                     )
                   })}
                 </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="shifts">
+          <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
+            <div className="space-y-4">
+              <Card>
+                <CardHeader><CardTitle>Vardiya oluştur</CardTitle></CardHeader>
+                <CardContent className="space-y-3">
+                  <Select value={shiftDraft.department} onValueChange={(value) => setShiftDraft((current) => ({ ...current, department: value }))}>
+                    <SelectTrigger><SelectValue placeholder="Bölüm seç" /></SelectTrigger>
+                    <SelectContent>{departments.map((dep) => <SelectItem key={dep.id} value={String(dep.id)}>{dep.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                  <Input placeholder="Vardiya adı" value={shiftDraft.name} onChange={(e) => setShiftDraft((current) => ({ ...current, name: e.target.value }))} />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="grid gap-1">
+                      <Label>Başlangıç</Label>
+                      <Input type="time" value={shiftDraft.start_time} onChange={(e) => setShiftDraft((current) => ({ ...current, start_time: e.target.value }))} />
+                    </div>
+                    <div className="grid gap-1">
+                      <Label>Bitiş</Label>
+                      <Input type="time" value={shiftDraft.end_time} onChange={(e) => setShiftDraft((current) => ({ ...current, end_time: e.target.value }))} />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {weekdays.map((label, day) => (
+                      <Button
+                        key={label}
+                        type="button"
+                        variant={shiftDraft.weekdays.includes(day) ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setShiftDraft((current) => ({
+                          ...current,
+                          weekdays: current.weekdays.includes(day) ? current.weekdays.filter((item) => item !== day) : [...current.weekdays, day].sort(),
+                        }))}
+                      >
+                        {label}
+                      </Button>
+                    ))}
+                  </div>
+                  <label className="flex items-center justify-between rounded-md border p-3 text-sm">
+                    <span>Geceye taşar</span>
+                    <Switch checked={shiftDraft.crosses_midnight} onCheckedChange={(checked) => setShiftDraft((current) => ({ ...current, crosses_midnight: checked }))} />
+                  </label>
+                  <label className="flex items-center justify-between rounded-md border p-3 text-sm">
+                    <span>Aktif</span>
+                    <Switch checked={shiftDraft.is_active} onCheckedChange={(checked) => setShiftDraft((current) => ({ ...current, is_active: checked }))} />
+                  </label>
+                  <Textarea placeholder="Not" value={shiftDraft.note} onChange={(e) => setShiftDraft((current) => ({ ...current, note: e.target.value }))} />
+                  <div className="flex gap-2">
+                    <Button onClick={saveShiftSchedule} disabled={!shiftDraft.department || !shiftDraft.name || !shiftDraft.weekdays.length}>
+                      <Save className="mr-2 h-4 w-4" /> {editingShiftId ? 'Vardiyayı güncelle' : 'Vardiyayı kaydet'}
+                    </Button>
+                    {editingShiftId && <Button variant="outline" onClick={() => resetShiftForm()}><X className="mr-2 h-4 w-4" /> İptal</Button>}
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle>Özel mola oluştur</CardTitle></CardHeader>
+                <CardContent className="space-y-3">
+                  <Select value={breakDraft.department} onValueChange={(value) => setBreakDraft((current) => ({ ...current, department: value, schedule: 'none' }))}>
+                    <SelectTrigger><SelectValue placeholder="Bölüm seç" /></SelectTrigger>
+                    <SelectContent>{departments.map((dep) => <SelectItem key={dep.id} value={String(dep.id)}>{dep.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                  <Select value={breakDraft.schedule} onValueChange={(value) => setBreakDraft((current) => ({ ...current, schedule: value }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Bölümdeki tüm vardiyalar</SelectItem>
+                      {shiftSchedules.filter((item) => String(item.department) === breakDraft.department).map((item) => (
+                        <SelectItem key={item.id} value={String(item.id)}>{item.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input placeholder="Mola adı" value={breakDraft.name} onChange={(e) => setBreakDraft((current) => ({ ...current, name: e.target.value }))} />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="grid gap-1">
+                      <Label>Başlangıç</Label>
+                      <Input type="time" value={breakDraft.start_time} onChange={(e) => setBreakDraft((current) => ({ ...current, start_time: e.target.value }))} />
+                    </div>
+                    <div className="grid gap-1">
+                      <Label>Bitiş</Label>
+                      <Input type="time" value={breakDraft.end_time} onChange={(e) => setBreakDraft((current) => ({ ...current, end_time: e.target.value }))} />
+                    </div>
+                  </div>
+                  <label className="flex items-center justify-between rounded-md border p-3 text-sm">
+                    <span>Mola başında üretim miktarı sor</span>
+                    <Switch checked={breakDraft.requires_checkpoint} onCheckedChange={(checked) => setBreakDraft((current) => ({ ...current, requires_checkpoint: checked }))} />
+                  </label>
+                  <label className="flex items-center justify-between rounded-md border p-3 text-sm">
+                    <span>Aktif</span>
+                    <Switch checked={breakDraft.is_active} onCheckedChange={(checked) => setBreakDraft((current) => ({ ...current, is_active: checked }))} />
+                  </label>
+                  <Textarea placeholder="Not" value={breakDraft.note} onChange={(e) => setBreakDraft((current) => ({ ...current, note: e.target.value }))} />
+                  <div className="flex gap-2">
+                    <Button onClick={saveShiftBreak} disabled={!breakDraft.department || !breakDraft.name}>
+                      <TimerReset className="mr-2 h-4 w-4" /> {editingBreakId ? 'Molayı güncelle' : 'Molayı kaydet'}
+                    </Button>
+                    {editingBreakId && <Button variant="outline" onClick={() => resetBreakForm()}><X className="mr-2 h-4 w-4" /> İptal</Button>}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+            <Card>
+              <CardHeader><CardTitle>Departman vardiya planı</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                {departments.map((department) => (
+                  <div key={department.id} className="rounded-lg border p-3">
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className="h-3 w-3 rounded-full" style={{ background: department.color || '#21406d' }} />
+                      <h3 className="font-semibold">{department.name}</h3>
+                    </div>
+                    <div className="grid gap-3 lg:grid-cols-2">
+                      {shiftSchedules.filter((item) => item.department === department.id).map((shift) => (
+                        <div key={shift.id} className="rounded-md border bg-muted/10 p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="font-semibold">{shift.name}</p>
+                              <p className="text-sm text-muted-foreground">{shortTime(shift.start_time)} - {shortTime(shift.end_time)}{shift.crosses_midnight ? ' · gece vardiyası' : ''}</p>
+                              <p className="mt-1 text-xs text-muted-foreground">{(shift.weekdays || []).map((day) => weekdays[day]).join(', ') || 'Her gün'}</p>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Badge variant={shift.is_active ? 'secondary' : 'outline'}>{shift.is_active ? 'Aktif' : 'Pasif'}</Badge>
+                              <Button variant="ghost" size="icon" onClick={() => editShiftSchedule(shift)} title="Vardiyayı düzenle">
+                                <Edit3 className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/shift-schedules/${shift.id}/`, shift.name)}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="mt-3 space-y-2">
+                            {shiftBreaks.filter((item) => item.department === department.id && (!item.schedule || item.schedule === shift.id)).map((item) => (
+                              <div key={item.id} className="flex items-center justify-between gap-2 rounded bg-muted/40 px-2 py-1 text-xs">
+                                <span>{item.name} · {shortTime(item.start_time)}-{shortTime(item.end_time)}{!item.is_active ? ' · pasif' : ''}</span>
+                                <div className="flex items-center gap-1">
+                                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => editShiftBreak(item)} title="Molayı düzenle">
+                                    <Edit3 className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deleteItem(`/production/shift-breaks/${item.id}/`, item.name)}>
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                      {!shiftSchedules.some((item) => item.department === department.id) && <p className="text-sm text-muted-foreground">Bu bölümde vardiya tanımı yok; tabletler kilitlenmez.</p>}
+                    </div>
+                  </div>
+                ))}
               </CardContent>
             </Card>
           </div>
@@ -885,18 +1345,25 @@ export function ProductionManagementPage() {
         <TabsContent value="devices">
           <div className="grid gap-4 xl:grid-cols-3">
             <Card>
-              <CardHeader><CardTitle>Cihaz oluştur</CardTitle></CardHeader>
+              <CardHeader><CardTitle>{editingDeviceId ? 'Cihazı düzenle' : 'Cihaz oluştur'}</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 <Select value={deviceDraft.station} onValueChange={(value) => setDeviceDraft((v) => ({ ...v, station: value }))}>
                   <SelectTrigger><SelectValue placeholder="İstasyon seç" /></SelectTrigger>
                   <SelectContent>{stations.map((st) => <SelectItem key={st.id} value={String(st.id)}>{st.code} - {st.name}</SelectItem>)}</SelectContent>
                 </Select>
                 <Input placeholder="Cihaz adı" value={deviceDraft.name} onChange={(e) => setDeviceDraft((v) => ({ ...v, name: e.target.value }))} />
-                <Button onClick={createDevice} disabled={!deviceDraft.station || !deviceDraft.name}><Plus className="mr-2 h-4 w-4" /> Cihaz ekle</Button>
+                <label className="flex items-center justify-between rounded-md border p-3 text-sm"><span>Aktif</span><Switch checked={deviceDraft.is_active} onCheckedChange={(checked) => setDeviceDraft((v) => ({ ...v, is_active: checked }))} /></label>
+                <div className="flex gap-2">
+                  <Button onClick={saveDevice} disabled={!deviceDraft.station || !deviceDraft.name}>
+                    {editingDeviceId ? <Save className="mr-2 h-4 w-4" /> : <Plus className="mr-2 h-4 w-4" />}
+                    {editingDeviceId ? 'Güncelle' : 'Cihaz ekle'}
+                  </Button>
+                  {editingDeviceId && <Button variant="outline" onClick={resetDeviceForm}><X className="mr-2 h-4 w-4" /> İptal</Button>}
+                </div>
               </CardContent>
             </Card>
             <Card>
-              <CardHeader><CardTitle>Veri alanı</CardTitle></CardHeader>
+              <CardHeader><CardTitle>{editingFieldId ? 'Veri alanını düzenle' : 'Veri alanı'}</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 <Input placeholder="Anahtar" value={fieldDraft.key} onChange={(e) => setFieldDraft((v) => ({ ...v, key: e.target.value }))} />
                 <Input placeholder="Etiket" value={fieldDraft.label} onChange={(e) => setFieldDraft((v) => ({ ...v, label: e.target.value }))} />
@@ -904,11 +1371,14 @@ export function ProductionManagementPage() {
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent><SelectItem value="global">Genel</SelectItem>{stations.map((st) => <SelectItem key={st.id} value={String(st.id)}>{st.code}</SelectItem>)}</SelectContent>
                 </Select>
-                <Button onClick={createField} disabled={!fieldDraft.key || !fieldDraft.label}><Save className="mr-2 h-4 w-4" /> Alan ekle</Button>
+                <div className="flex gap-2">
+                  <Button onClick={createField} disabled={!fieldDraft.key || !fieldDraft.label}><Save className="mr-2 h-4 w-4" /> {editingFieldId ? 'Alanı güncelle' : 'Alan ekle'}</Button>
+                  {editingFieldId && <Button variant="outline" onClick={resetFieldForm}><X className="mr-2 h-4 w-4" /> İptal</Button>}
+                </div>
               </CardContent>
             </Card>
             <Card>
-              <CardHeader><CardTitle>JSON path eşleme</CardTitle></CardHeader>
+              <CardHeader><CardTitle>{editingMapId ? 'JSON path eşlemeyi düzenle' : 'JSON path eşleme'}</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 <Select value={mapDraft.device} onValueChange={(value) => setMapDraft((v) => ({ ...v, device: value }))}>
                   <SelectTrigger><SelectValue placeholder="Cihaz seç" /></SelectTrigger>
@@ -921,7 +1391,10 @@ export function ProductionManagementPage() {
                   <SelectContent>{['text', 'number', 'boolean', 'datetime', 'json'].map((type) => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent>
                 </Select>
                 <label className="flex items-center justify-between rounded-md border p-3 text-sm"><span>Zorunlu path</span><Switch checked={mapDraft.is_required} onCheckedChange={(checked) => setMapDraft((v) => ({ ...v, is_required: checked }))} /></label>
-                <Button onClick={createMap} disabled={!mapDraft.device || !mapDraft.source_path || !mapDraft.target_key}><Plus className="mr-2 h-4 w-4" /> Eşle</Button>
+                <div className="flex gap-2">
+                  <Button onClick={createMap} disabled={!mapDraft.device || !mapDraft.source_path || !mapDraft.target_key}><Plus className="mr-2 h-4 w-4" /> {editingMapId ? 'Eşlemeyi güncelle' : 'Eşle'}</Button>
+                  {editingMapId && <Button variant="outline" onClick={resetMapForm}><X className="mr-2 h-4 w-4" /> İptal</Button>}
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -929,10 +1402,18 @@ export function ProductionManagementPage() {
             {devices.map((device) => (
               <Card key={`device-${device.id}`}>
                 <CardContent className="flex items-center justify-between gap-3 pt-6 text-sm">
-                  <span>{device.name} · {device.station_code}</span>
-                  <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/devices/${device.id}/`, device.name)} title="Cihazı sil">
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <div className="min-w-0">
+                    <span>{device.name} · {device.station_code}</span>
+                    <Badge className="ml-2" variant={device.is_active ? 'secondary' : 'outline'}>{device.is_active ? 'Aktif' : 'Pasif'}</Badge>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button variant="ghost" size="icon" onClick={() => editDevice(device)} title="Cihazı düzenle">
+                      <Edit3 className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/devices/${device.id}/`, device.name)} title="Cihazı sil">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             ))}
@@ -940,9 +1421,14 @@ export function ProductionManagementPage() {
               <Card key={`field-${field.id}`}>
                 <CardContent className="flex items-center justify-between gap-3 pt-6 text-sm">
                   <span>{field.label} · {field.station_code || 'Genel'}</span>
-                  <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/data-fields/${field.id}/`, field.label)} title="Veri alanını sil">
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button variant="ghost" size="icon" onClick={() => editDataField(field)} title="Veri alanını düzenle">
+                      <Edit3 className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/data-fields/${field.id}/`, field.label)} title="Veri alanını sil">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             ))}
@@ -952,6 +1438,9 @@ export function ProductionManagementPage() {
                   <span>{map.device_name} · {map.source_path}</span>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline">{map.target_key}</Badge>
+                    <Button variant="ghost" size="icon" onClick={() => editDeviceMap(map)} title="Eşlemeyi düzenle">
+                      <Edit3 className="h-4 w-4" />
+                    </Button>
                     <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/device-maps/${map.id}/`, map.target_key)} title="Eşlemeyi sil">
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -965,7 +1454,7 @@ export function ProductionManagementPage() {
         <TabsContent value="flow">
           <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
             <Card>
-              <CardHeader><CardTitle>Rota oluştur</CardTitle></CardHeader>
+              <CardHeader><CardTitle>{editingRouteId ? 'Rotayı düzenle' : 'Rota oluştur'}</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 <Input placeholder="Rota adı" value={routeDraft.name} onChange={(e) => setRouteDraft((v) => ({ ...v, name: e.target.value }))} />
                 <Input placeholder="Ürün grubu anahtarı" value={routeDraft.product_group_key} onChange={(e) => setRouteDraft((v) => ({ ...v, product_group_key: e.target.value }))} />
@@ -998,18 +1487,24 @@ export function ProductionManagementPage() {
                     </div>
                   ))}
                 </div>
-                <Button onClick={createRoute} disabled={!routeDraft.name || !routeDraft.product_group_key || routeDraft.station_ids.length === 0}><Route className="mr-2 h-4 w-4" /> Rota kaydet</Button>
+                <div className="flex gap-2">
+                  <Button onClick={createRoute} disabled={!routeDraft.name || !routeDraft.product_group_key || routeDraft.station_ids.length === 0}><Route className="mr-2 h-4 w-4" /> {editingRouteId ? 'Rotayı güncelle' : 'Rota kaydet'}</Button>
+                  {editingRouteId && <Button variant="outline" onClick={resetRouteForm}><X className="mr-2 h-4 w-4" /> İptal</Button>}
+                </div>
               </CardContent>
             </Card>
             <div className="space-y-4">
               <Card>
-                <CardHeader><CardTitle>Kural seti oluştur</CardTitle></CardHeader>
+                <CardHeader><CardTitle>{editingRuleId ? 'Kural setini düzenle' : 'Kural seti oluştur'}</CardTitle></CardHeader>
                 <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                   <Input placeholder="Kural adı" value={ruleDraft.name} onChange={(e) => setRuleDraft((v) => ({ ...v, name: e.target.value }))} />
                   <Select value={ruleDraft.scope} onValueChange={(value) => setRuleDraft((v) => ({ ...v, scope: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{['global', 'station', 'route'].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent></Select>
                   <Select value={ruleDraft.station} onValueChange={(value) => setRuleDraft((v) => ({ ...v, station: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">İstasyon yok</SelectItem>{stations.map((st) => <SelectItem key={st.id} value={String(st.id)}>{st.code}</SelectItem>)}</SelectContent></Select>
                   <Select value={ruleDraft.route} onValueChange={(value) => setRuleDraft((v) => ({ ...v, route: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Rota yok</SelectItem>{routes.map((route) => <SelectItem key={route.id} value={String(route.id)}>{route.name}</SelectItem>)}</SelectContent></Select>
-                  <Button onClick={createRule} disabled={!ruleDraft.name}><Plus className="mr-2 h-4 w-4" /> Kural ekle</Button>
+                  <div className="flex gap-2 xl:col-span-1">
+                    <Button onClick={createRule} disabled={!ruleDraft.name}><Plus className="mr-2 h-4 w-4" /> {editingRuleId ? 'Güncelle' : 'Kural ekle'}</Button>
+                    {editingRuleId && <Button variant="outline" onClick={resetRuleForm}><X className="mr-2 h-4 w-4" /> İptal</Button>}
+                  </div>
                 </CardContent>
               </Card>
               <div className="grid gap-3 xl:grid-cols-2">
@@ -1024,9 +1519,14 @@ export function ProductionManagementPage() {
                           </div>
                           <p className="mt-1 text-xs text-muted-foreground">{route.product_group_key || 'ürün grubu yok'} · {route.steps?.length || 0} istasyon</p>
                         </div>
-                        <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/routes/${route.id}/`, route.name)} title="Rotayı sil">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button variant="ghost" size="icon" onClick={() => editRoute(route)} title="Rotayı düzenle">
+                            <Edit3 className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/routes/${route.id}/`, route.name)} title="Rotayı sil">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                       <div className="mt-4 space-y-2">
                         {(route.steps || []).map((step, idx) => (
@@ -1049,9 +1549,14 @@ export function ProductionManagementPage() {
                         <p className="font-medium">{rule.name}</p>
                         <p className="mt-1 text-xs text-muted-foreground">{rule.scope} · {rule.trigger_event} · {rule.blocks?.length || 0} blok</p>
                       </div>
-                      <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/rules/${rule.id}/`, rule.name)} title="Kural setini sil">
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button variant="ghost" size="icon" onClick={() => editRule(rule)} title="Kural setini düzenle">
+                          <Edit3 className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/production/rules/${rule.id}/`, rule.name)} title="Kural setini sil">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </CardContent>
                   </Card>
                 ))}
@@ -1471,6 +1976,8 @@ export function ProductionTabletPage() {
   const [checkpointTotal, setCheckpointTotal] = useState('')
   const [checkpointNote, setCheckpointNote] = useState('')
   const [activeAlert, setActiveAlert] = useState<any | null>(null)
+  const [tick, setTick] = useState(Date.now())
+  const [lastLoadedAt, setLastLoadedAt] = useState(Date.now())
   const seenAlerts = useRef<Set<number>>(new Set())
   const checkpointActionRef = useRef<((total: string, note: string) => Promise<void>) | null>(null)
 
@@ -1480,6 +1987,7 @@ export function ProductionTabletPage() {
     const response = await api.get('/production/tablet/context/', { params: { token } })
     const data = response.data || {}
     setCtx(data)
+    setLastLoadedAt(Date.now())
     if (!selectedLineId && data.work_items?.[0]) setSelectedLineId(String(data.work_items[0].line_id))
     const alert = (data.alerts || []).find((item: any) => !seenAlerts.current.has(item.id))
     if (alert) {
@@ -1495,10 +2003,27 @@ export function ProductionTabletPage() {
     return () => window.clearInterval(timer)
   }, [token])
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setTick(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+
   const slots = Array.from({ length: ctx.station?.max_workers || 1 }, (_, index) => ctx.slots?.find((slot) => Number(slot.slot_index) === index) || null)
   const selectedWork = ctx.work_items?.find((item) => String(item.line_id) === selectedLineId) || ctx.work_items?.[0]
   const activeSlots = slots.filter(Boolean) as TabletSlot[]
   const startedSlots = activeSlots.filter((slot) => slot.status === 'started')
+  const shiftLocked = Boolean(ctx.shift_state?.locked)
+  const shiftNeedsCheckpoint = ctx.shift_state?.state === 'checkpoint_required'
+  const checkpointNames = (ctx.shift_state?.checkpoint_names || activeSlots.map((slot) => slot.user_name)).filter(Boolean)
+  const checkpointPeople = checkpointNames.length ? checkpointNames.join(' ve ') : 'çalışanların'
+
+  const liveBreakSeconds = (slot: TabletSlot) => {
+    const base = Number(slot.break_seconds || 0)
+    if (slot.active_break_id && slot.status === 'paused') {
+      return base + Math.max(0, Math.floor((tick - lastLoadedAt) / 1000))
+    }
+    return base
+  }
 
   const requestCheckpoint = (title: string, action: (total: string, note: string) => Promise<void>) => {
     setCheckpointTitle(title)
@@ -1529,6 +2054,20 @@ export function ProductionTabletPage() {
     }
   }
 
+  const shiftCheckpoint = async () => {
+    const perform = async (total: string, checkpointNoteValue: string) => {
+      await api.post('/production/tablet/shift-checkpoint/', {
+        token,
+        line_id: ctx.shift_state?.line_id || selectedWork?.line_id || null,
+        checkpoint_total: total,
+        note: checkpointNoteValue || ctx.shift_state?.label || 'Vardiya checkpoint',
+      })
+      toast({ title: 'Vardiya checkpoint kaydedildi' })
+      await load()
+    }
+    requestCheckpoint(`${checkpointPeople} üretim miktarını yazın`, perform)
+  }
+
   const login = async () => {
     if (loginSlot === null) return
     const perform = async (total?: string, checkpointNoteValue?: string) => {
@@ -1550,7 +2089,7 @@ export function ProductionTabletPage() {
     try {
       if (activeSlots.length) {
         const names = activeSlots.map((s) => s.user_name).join(' ve ')
-        requestCheckpoint(`${names} Üretim Miktarını Yazın`, perform)
+        requestCheckpoint(`Yeni çalışan girmeden önce ${names} üretim miktarını yazın`, perform)
         return
       }
       await perform()
@@ -1583,7 +2122,7 @@ export function ProductionTabletPage() {
       if (needsCheckpoint) {
         const targetSlots = endpoint.includes('break/start') ? activeSlots : startedSlots
         const names = targetSlots.map((s) => s.user_name).join(' ve ')
-        requestCheckpoint(`${names} Üretim Miktarını Yazın`, perform)
+        requestCheckpoint(`${names} üretim miktarını yazın`, perform)
         return
       }
       await perform()
@@ -1643,7 +2182,7 @@ export function ProductionTabletPage() {
     try {
       if (activeSlots.length) {
         const names = activeSlots.map((s) => s.user_name).join(' ve ')
-        requestCheckpoint(`${names} Üretim Miktarını Yazın`, perform)
+        requestCheckpoint(`${names} üretim miktarını yazın`, perform)
         return
       }
       await perform()
@@ -1691,11 +2230,44 @@ export function ProductionTabletPage() {
         </div>
       </div>
 
+      <Card className={shiftLocked ? 'border-amber-500/70 bg-amber-500/10' : ''}>
+        <CardContent className="grid gap-3 pt-6 lg:grid-cols-[1fr_auto] lg:items-center">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={shiftLocked ? 'destructive' : 'secondary'}>{ctx.shift_state?.label || 'Vardiya'}</Badge>
+              {ctx.shift_state?.active_shift && <span className="text-sm font-medium">{ctx.shift_state.active_shift.name}</span>}
+              {ctx.shift_state?.active_break && <span className="text-sm font-medium">{ctx.shift_state.active_break.name}</span>}
+            </div>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {ctx.shift_state?.message || (
+                ctx.shift_state?.next_break
+                  ? `Sonraki mola: ${ctx.shift_state.next_break.name} ${shortTime(ctx.shift_state.next_break.starts_at)}`
+                  : ctx.shift_state?.next_shift
+                    ? `Sonraki vardiya: ${ctx.shift_state.next_shift.name} ${shortTime(ctx.shift_state.next_shift.starts_at)}`
+                    : 'Vardiya aktif.'
+              )}
+            </p>
+          </div>
+          <div className="flex flex-wrap justify-end gap-2">
+            {ctx.shift_state?.seconds_until_change !== null && ctx.shift_state?.seconds_until_change !== undefined && (
+              <Badge variant="outline" className="px-3 py-2 text-sm">
+                {formatSeconds(Math.max(0, Number(ctx.shift_state.seconds_until_change || 0) - Math.floor((tick - lastLoadedAt) / 1000)))}
+              </Badge>
+            )}
+            {shiftNeedsCheckpoint && (
+              <Button onClick={shiftCheckpoint} disabled={submitting}>
+                <Save className="mr-2 h-4 w-4" /> Üretim miktarını yaz
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardContent className="grid gap-3 pt-6 lg:grid-cols-[1fr_280px] lg:items-end">
           <div className="space-y-2">
             <Label>Aktif iş emri</Label>
-            <Select value={selectedLineId} onValueChange={setSelectedLineId}>
+            <Select value={selectedLineId} onValueChange={setSelectedLineId} disabled={shiftLocked}>
               <SelectTrigger className="h-14 text-lg"><SelectValue placeholder="İş emri seç" /></SelectTrigger>
               <SelectContent>
                 {(ctx.work_items || []).map((item) => (
@@ -1708,7 +2280,7 @@ export function ProductionTabletPage() {
           </div>
           <div className="grid gap-2">
             <Button variant="outline" onClick={load} className="h-14" disabled={submitting}><RefreshCw className="mr-2 h-4 w-4" /> Yenile</Button>
-            <Button onClick={completeWorkItem} disabled={!selectedWork || submitting} className="h-14"><CheckCircle2 className="mr-2 h-4 w-4" /> İşi tamamla</Button>
+            <Button onClick={completeWorkItem} disabled={!selectedWork || submitting || shiftLocked} className="h-14"><CheckCircle2 className="mr-2 h-4 w-4" /> İşi tamamla</Button>
           </div>
         </CardContent>
       </Card>
@@ -1748,18 +2320,18 @@ export function ProductionTabletPage() {
                     <MetricBlock label="Oturum makine" value={formatNumber(n(slot.machine_quantity))} />
                     <MetricBlock label="Bugün kişi" value={formatNumber(n(ctx.operators?.find((item) => item.id === slot.user_id)?.today_total))} />
                   </div>
-                  <MetricBlock label="Mola sn" value={formatNumber(slot.break_seconds || 0)} />
+                  <MetricBlock label="Mola süresi" value={formatSeconds(liveBreakSeconds(slot))} />
                   <div className="grid gap-2">
                     {slot.status === 'paused' ? (
-                      <Button variant="outline" onClick={() => tabletAction('break/end', slot)} disabled={submitting}>Molayı bitir</Button>
+                      <Button variant="outline" onClick={() => tabletAction('break/end', slot)} disabled={submitting || shiftLocked}>Molayı bitir</Button>
                     ) : (
-                      <Button variant="outline" onClick={() => window.confirm('Molaya çıkılsın mı?') && tabletAction('break/start', slot)} disabled={submitting}>
+                      <Button variant="outline" onClick={() => window.confirm('Molaya çıkılsın mı?') && tabletAction('break/start', slot)} disabled={submitting || shiftLocked}>
                         <Pause className="mr-2 h-4 w-4" /> Mola
                       </Button>
                     )}
                     <Button
                       variant="destructive"
-                      disabled={submitting}
+                      disabled={submitting || shiftLocked}
                       onClick={() => {
                         setClosingSlot(slot)
                         setClosingQty('')
@@ -1775,7 +2347,7 @@ export function ProductionTabletPage() {
                 <button
                   className="flex h-48 w-full flex-col items-center justify-center rounded-lg border border-dashed text-muted-foreground hover:bg-muted/40"
                   onClick={() => setLoginSlot(index)}
-                  disabled={submitting}
+                  disabled={submitting || shiftLocked}
                 >
                   <Plus className="h-12 w-12" />
                   <span className="mt-2 text-lg font-semibold">Çalışan ekle</span>
