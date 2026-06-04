@@ -2272,8 +2272,9 @@ def tablet_batch_logout_slots(*, token, user_id, pin, session_ids, declared_good
         raise ProductionError('Kapatılacak tablet oturumu bulunamadı.')
         
     step = sessions[0].step
+    step_id = step.id if step else None
     for s in sessions:
-        if s.step_id != step.id:
+        if s.step_id != step_id:
             raise ProductionError('Farklı iş adımlarındaki oturumlar aynı anda kapatılamaz.')
         if s.status not in ACTIVE_SESSION_STATUSES:
             raise ProductionError(f'{s.user.get_full_name()} oturumu zaten kapalı.')
