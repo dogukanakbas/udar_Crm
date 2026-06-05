@@ -1642,22 +1642,23 @@ export function QuotesPage() {
       </Dialog>
 
       <Dialog open={Boolean(productionConfirmQuote)} onOpenChange={(open) => { if (!open) setProductionConfirmQuote(null) }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-3xl overflow-hidden">
           <DialogHeader>
             <DialogTitle>İş Emri Üretime Gönderilsin mi?</DialogTitle>
           </DialogHeader>
-          <div className="py-2 text-sm text-muted-foreground space-y-2">
+          <div className="space-y-3 py-2 text-sm leading-6 text-muted-foreground">
             <p>
               <strong>{productionConfirmQuote?.number}</strong> nolu sözleşme onaylanıyor. Bu sözleşme için üretim iş emri oluşturulup üretime gönderilsin mi?
             </p>
-            <p className="text-xs">
+            <p>
               Eğer depodaki hazır ürünlerden teslimat yapacaksanız <strong>"Hayır, Sadece Onayla"</strong> seçeneğini kullanabilirsiniz.
             </p>
           </div>
-          <DialogFooter className="flex flex-col sm:flex-row gap-2">
+          <div className="grid gap-2 pt-2 md:grid-cols-3">
             <Button
               type="button"
               variant="outline"
+              className="min-h-11 w-full"
               onClick={() => setProductionConfirmQuote(null)}
               disabled={statusUpdatingId !== null}
             >
@@ -1666,6 +1667,7 @@ export function QuotesPage() {
             <Button
               type="button"
               variant="secondary"
+              className="min-h-11 w-full whitespace-normal"
               onClick={() => {
                 if (productionConfirmQuote) {
                   proceedStatusChange(productionConfirmQuote, 'Approved', false)
@@ -1678,6 +1680,7 @@ export function QuotesPage() {
             </Button>
             <Button
               type="button"
+              className="min-h-11 w-full whitespace-normal"
               onClick={() => {
                 if (productionConfirmQuote) {
                   proceedStatusChange(productionConfirmQuote, 'Approved', true)
@@ -1688,7 +1691,7 @@ export function QuotesPage() {
             >
               Evet, Üretime Gönder
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -2673,22 +2676,23 @@ export function QuoteDetailPage() {
       </Tabs>
 
       <Dialog open={Boolean(productionConfirmQuote)} onOpenChange={(open) => { if (!open) setProductionConfirmQuote(null) }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-3xl overflow-hidden">
           <DialogHeader>
             <DialogTitle>İş Emri Üretime Gönderilsin mi?</DialogTitle>
           </DialogHeader>
-          <div className="py-2 text-sm text-muted-foreground space-y-2">
+          <div className="space-y-3 py-2 text-sm leading-6 text-muted-foreground">
             <p>
               <strong>{productionConfirmQuote?.number}</strong> nolu sözleşme onaylanıyor. Bu sözleşme için üretim iş emri oluşturulup üretime gönderilsin mi?
             </p>
-            <p className="text-xs">
+            <p>
               Eğer depodaki hazır ürünlerden teslimat yapacaksanız <strong>"Hayır, Sadece Onayla"</strong> seçeneğini kullanabilirsiniz.
             </p>
           </div>
-          <DialogFooter className="flex flex-col sm:flex-row gap-2">
+          <div className="grid gap-2 pt-2 md:grid-cols-3">
             <Button
               type="button"
               variant="outline"
+              className="min-h-11 w-full"
               onClick={() => setProductionConfirmQuote(null)}
               disabled={statusUpdating}
             >
@@ -2697,6 +2701,7 @@ export function QuoteDetailPage() {
             <Button
               type="button"
               variant="secondary"
+              className="min-h-11 w-full whitespace-normal"
               onClick={() => {
                 if (productionConfirmQuote) {
                   proceedDetailStatusChange('Approved', false)
@@ -2709,6 +2714,7 @@ export function QuoteDetailPage() {
             </Button>
             <Button
               type="button"
+              className="min-h-11 w-full whitespace-normal"
               onClick={() => {
                 if (productionConfirmQuote) {
                   proceedDetailStatusChange('Approved', true)
@@ -2719,7 +2725,7 @@ export function QuoteDetailPage() {
             >
               Evet, Üretime Gönder
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
