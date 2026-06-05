@@ -39,6 +39,8 @@ def list_production_report_placeholders():
             'title': 'Kalem Satırı',
             'items': [
                 {'token': '{kalem1.sn}', 'label': 'Sıra no'},
+                {'token': '{kalem1.urunKodu}', 'label': 'Ürün kodu'},
+                {'token': '{kalem1.urunAdi}', 'label': 'Ürün adı'},
                 {'token': '{kalem1.urunTipi}', 'label': 'Ürün tipi / satış birimi'},
                 {'token': '{kalem1.adet}', 'label': 'Adet'},
                 {'token': '{kalem1.detay1}', 'label': 'Detay-1 / ölçü'},
@@ -110,13 +112,13 @@ def _render_template_export(template, general_context, line_contexts, output_for
         pdf = _convert_xlsx_stream_to_pdf(output, f'{safe_base}.xlsx')
         return {
             'content': pdf,
-            'filename': f'{safe_base}-ustabasi-raporu.pdf',
+            'filename': f'{safe_base}-is-emri-raporu.pdf',
             'content_type': PDF_CONTENT_TYPE,
         }
 
     return {
         'content': output,
-        'filename': f'{safe_base}-ustabasi-raporu.xlsx',
+        'filename': f'{safe_base}-is-emri-raporu.xlsx',
         'content_type': XLSX_CONTENT_TYPE,
     }
 
@@ -171,9 +173,32 @@ def _line_context_from_work_order(line, index):
     details = line.details or {}
     technical_items = _line_technical_items(line)
     line_note = line.technical_notes or _details_pick(details, 'aciklama', 'açıklama', 'note', 'notes', 'technical_notes')
+    product_code = (
+        line.product_sku
+        or getattr(line.product, 'sku', '')
+        or _details_pick(details, 'product_sku', 'productSku', 'productCode', 'product_code', 'urunKodu', 'urun_kodu', 'kod', 'code', 'sku')
+        or ''
+    )
+    product_name = (
+        line.product_name
+        or getattr(line.product, 'name', '')
+        or _details_pick(details, 'product_name', 'productName', 'urunAdi', 'urun_adi', 'urunTipi', 'name')
+        or product_code
+    )
     return {
         'sn': index,
-        'urunTipi': line.product_name,
+        'kod': product_code,
+        'urunKodu': product_code,
+        'urun_kodu': product_code,
+        'sku': product_code,
+        'productCode': product_code,
+        'product_code': product_code,
+        'urunAdi': product_name,
+        'urun_adi': product_name,
+        'productName': product_name,
+        'product_name': product_name,
+        'name': product_name,
+        'urunTipi': product_name,
         'adet': line.quantity,
         'detay1': line.detail_1,
         'detay2': line.detail_2,
@@ -191,9 +216,31 @@ def _line_context_from_quote(line, index):
     detail_2 = details.get('secondary') or details.get('detail_2') or details.get('detail2') or details.get('renk') or ''
     technical_items = _line_technical_items(line)
     line_note = _details_pick(details, 'aciklama', 'açıklama', 'note', 'notes', 'technical_notes')
+    product_code = (
+        getattr(line.product, 'sku', '')
+        or _details_pick(details, 'product_sku', 'productSku', 'productCode', 'product_code', 'urunKodu', 'urun_kodu', 'kod', 'code', 'sku')
+        or ''
+    )
+    product_name = (
+        line.name
+        or getattr(line.product, 'name', '')
+        or _details_pick(details, 'product_name', 'productName', 'urunAdi', 'urun_adi', 'urunTipi', 'name')
+        or product_code
+    )
     return {
         'sn': index,
-        'urunTipi': line.name,
+        'kod': product_code,
+        'urunKodu': product_code,
+        'urun_kodu': product_code,
+        'sku': product_code,
+        'productCode': product_code,
+        'product_code': product_code,
+        'urunAdi': product_name,
+        'urun_adi': product_name,
+        'productName': product_name,
+        'product_name': product_name,
+        'name': product_name,
+        'urunTipi': product_name,
         'adet': line.qty,
         'detay1': detail_1,
         'detay2': detail_2,

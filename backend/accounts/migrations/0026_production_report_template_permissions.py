@@ -2,9 +2,9 @@ from django.db import migrations
 
 
 PERMISSIONS = [
-    ('production.report_templates.view', 'Ustabaşı rapor şablonlarını görüntüle'),
-    ('production.report_templates.manage', 'Ustabaşı rapor şablonlarını yönet'),
-    ('production.reports.export', 'Ustabaşı iş emri raporu dışa aktar'),
+    ('production.report_templates.view', 'İş emri rapor şablonlarını görüntüle'),
+    ('production.report_templates.manage', 'İş emri rapor şablonlarını yönet'),
+    ('production.reports.export', 'İş emri raporu dışa aktar'),
 ]
 
 ROLE_DEFAULTS = {

@@ -191,8 +191,8 @@ class ProductionAutomationTests(TestCase):
         workbook.save(stream)
         template = ProductionReportTemplate.objects.create(
             organization=self.org,
-            name='Test Ustabaşı',
-            key='test-ustabasi',
+            name='Test İş Emri',
+            key='test-is-emri',
             default_format='xlsx',
             created_by=self.user,
         )

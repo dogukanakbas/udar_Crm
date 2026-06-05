@@ -1074,8 +1074,8 @@ function ProductionReportExportDialog({ quote, open, onOpenChange }: { quote: Qu
         { template_id: templateId, format, extra_notes: notes },
         { responseType: 'blob' },
       )
-      downloadBlobResponse(response, `${quote.number}-ustabasi-raporu.${format}`)
-      toast({ title: 'Ustabaşı raporu indirildi' })
+      downloadBlobResponse(response, `${quote.number}-is-emri-raporu.${format}`)
+      toast({ title: 'İş emri raporu indirildi' })
       onOpenChange(false)
     } catch (error: any) {
       toast({ title: error?.response?.data?.detail || 'Rapor oluşturulamadı', variant: 'destructive' })
@@ -1087,7 +1087,7 @@ function ProductionReportExportDialog({ quote, open, onOpenChange }: { quote: Qu
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader><DialogTitle>Ustabaşı raporu oluştur</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>İş emri raporu oluştur</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">{quote?.number} · {quote?.customerName || 'Cari yok'}</p>
           <Select value={templateId} onValueChange={(value) => {
@@ -1504,7 +1504,7 @@ export function QuotesPage() {
               <Download className="h-4 w-4" />
             </Button>
             <RbacGuard perm="production.reports.export">
-              <Button variant="ghost" size="icon" onClick={() => setReportQuote(row.original)} title="Ustabaşı raporu">
+              <Button variant="ghost" size="icon" onClick={() => setReportQuote(row.original)} title="İş emri raporu">
                 <FileCheck2 className="h-4 w-4" />
               </Button>
             </RbacGuard>
@@ -2646,7 +2646,7 @@ export function QuoteDetailPage() {
             </RbacGuard>
             <Button onClick={handleDownload}><Download className="mr-2 h-4 w-4" />İndir</Button>
             <RbacGuard perm="production.reports.export">
-              <Button size="sm" variant="outline" onClick={() => setReportOpen(true)}><FileCheck2 className="mr-2 h-4 w-4" />Ustabaşı Raporu</Button>
+              <Button size="sm" variant="outline" onClick={() => setReportOpen(true)}><FileCheck2 className="mr-2 h-4 w-4" />İş Emri Raporu</Button>
             </RbacGuard>
             {quote.documentType === 'Quote' ? <RbacGuard perm="quotes.edit"><Button size="sm" onClick={handleConvert}><Check className="mr-2 h-4 w-4" />Sözleşmeye dönüştür</Button></RbacGuard> : null}
             <RbacGuard perm="quotes.edit"><Button size="sm" variant="destructive" disabled={deleting} onClick={handleDelete}><Trash2 className="mr-2 h-4 w-4" />Sil</Button></RbacGuard>

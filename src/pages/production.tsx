@@ -1737,7 +1737,7 @@ export function ProductionManagementPage() {
               <CardHeader><CardTitle>{editingReportTemplateId ? 'Rapor şablonunu düzenle' : 'Rapor şablonu yükle'}</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 <Input placeholder="Şablon adı" value={reportTemplateDraft.name} onChange={(event) => setReportTemplateDraft((current) => ({ ...current, name: event.target.value }))} />
-                <Input placeholder="Anahtar: pres-ustabaşı" value={reportTemplateDraft.key} onChange={(event) => setReportTemplateDraft((current) => ({ ...current, key: event.target.value }))} />
+                <Input placeholder="Anahtar: pres-is-emri" value={reportTemplateDraft.key} onChange={(event) => setReportTemplateDraft((current) => ({ ...current, key: event.target.value }))} />
                 <Select value={reportTemplateDraft.default_format} onValueChange={(value) => setReportTemplateDraft((current) => ({ ...current, default_format: value }))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -1761,7 +1761,7 @@ export function ProductionManagementPage() {
               </CardContent>
             </Card>
             <Card>
-              <CardHeader><CardTitle>Ustabaşı rapor şablonları</CardTitle></CardHeader>
+              <CardHeader><CardTitle>İş emri rapor şablonları</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 {reportTemplates.map((template) => (
                   <div key={template.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/10 p-3">
@@ -2166,8 +2166,8 @@ export function ProductionWorkOrdersPage() {
         { template_id: reportTemplateId, format: reportFormat, extra_notes: reportNotes },
         { responseType: 'blob' },
       )
-      downloadBlobResponse(response, `${reportOrder.number}-ustabasi-raporu.${reportFormat}`)
-      toast({ title: 'Ustabaşı raporu indirildi' })
+      downloadBlobResponse(response, `${reportOrder.number}-is-emri-raporu.${reportFormat}`)
+      toast({ title: 'İş emri raporu indirildi' })
       setReportOrder(null)
     } catch (error: any) {
       toast({ title: error?.response?.data?.detail || 'Rapor oluşturulamadı', variant: 'destructive' })
@@ -2252,7 +2252,7 @@ export function ProductionWorkOrdersPage() {
               </div>
               <div className="flex items-center gap-2">
                 <Button size="sm" variant="outline" onClick={() => openWorkOrderReport(order)} disabled={!reportTemplates.length}>
-                  <Download className="mr-2 h-4 w-4" /> Ustabaşı Raporu
+                  <Download className="mr-2 h-4 w-4" /> İş Emri Raporu
                 </Button>
                 {order.status === 'draft' && (
                   <Button
@@ -2369,7 +2369,7 @@ export function ProductionWorkOrdersPage() {
       </div>
       <Dialog open={Boolean(reportOrder)} onOpenChange={(open) => { if (!open) setReportOrder(null) }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Ustabaşı raporu oluştur</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>İş emri raporu oluştur</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">{reportOrder?.number} · {reportOrder?.customer_name || 'Cari yok'}</p>
             <Select value={reportTemplateId} onValueChange={(value) => {
