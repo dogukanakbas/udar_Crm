@@ -6,6 +6,7 @@ from io import BytesIO
 
 from django.http import FileResponse
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.page import PageMargins
 
 from crm.contracts import PDF_CONTENT_TYPE, _convert_xlsx_stream_to_pdf, resolve_product_document_defaults
@@ -261,15 +262,85 @@ def _expand_line_rows(worksheet, line_count):
     if not template_row or line_count <= 1:
         return
 
-    worksheet.insert_rows(template_row + 1, amount=line_count - 1)
+    amount = line_count - 1
+    max_row_before = worksheet.max_row
+    merged_ranges = list(worksheet.merged_cells.ranges)
+    row_dimensions = {
+        row_index: _row_dimension_snapshot(worksheet.row_dimensions[row_index])
+        for row_index in range(template_row + 1, max_row_before + 1)
+    }
+    template_row_dimension = _row_dimension_snapshot(worksheet.row_dimensions[template_row])
+
+    for merged in merged_ranges:
+        worksheet.unmerge_cells(str(merged))
+
+    worksheet.insert_rows(template_row + 1, amount=amount)
+    for source_row, snapshot in sorted(row_dimensions.items(), reverse=True):
+        _apply_row_dimension_snapshot(worksheet.row_dimensions[source_row + amount], snapshot)
+    for row_index in range(template_row + 1, template_row + line_count):
+        _apply_row_dimension_snapshot(worksheet.row_dimensions[row_index], template_row_dimension)
+
     for row_index in range(template_row + 1, template_row + line_count):
         _copy_row(worksheet, template_row, row_index)
+
+    _restore_shifted_merges(worksheet, merged_ranges, template_row, amount)
 
     for row_index in range(template_row, template_row + line_count):
         line_number = row_index - template_row + 1
         for cell in worksheet[row_index]:
             if isinstance(cell.value, str):
                 cell.value = cell.value.replace('{kalem1.', f'{{kalem{line_number}.')
+
+
+def _row_dimension_snapshot(row_dimension):
+    return {
+        'height': row_dimension.height,
+        'hidden': row_dimension.hidden,
+        'outlineLevel': row_dimension.outlineLevel,
+        'collapsed': row_dimension.collapsed,
+    }
+
+
+def _apply_row_dimension_snapshot(row_dimension, snapshot):
+    row_dimension.height = snapshot.get('height')
+    row_dimension.hidden = snapshot.get('hidden')
+    row_dimension.outlineLevel = snapshot.get('outlineLevel') or 0
+    row_dimension.collapsed = snapshot.get('collapsed') or False
+
+
+def _restore_shifted_merges(worksheet, merged_ranges, template_row, inserted_count):
+    restored = set()
+    for merged in merged_ranges:
+        if merged.min_row > template_row:
+            ref = _merge_ref(
+                merged.min_row + inserted_count,
+                merged.min_col,
+                merged.max_row + inserted_count,
+                merged.max_col,
+            )
+        elif merged.min_row <= template_row < merged.max_row:
+            ref = _merge_ref(merged.min_row, merged.min_col, merged.max_row + inserted_count, merged.max_col)
+        else:
+            ref = _merge_ref(merged.min_row, merged.min_col, merged.max_row, merged.max_col)
+        if ref not in restored:
+            worksheet.merge_cells(ref)
+            restored.add(ref)
+
+        if merged.min_row == template_row and merged.max_row == template_row:
+            for offset in range(1, inserted_count + 1):
+                copied_ref = _merge_ref(
+                    merged.min_row + offset,
+                    merged.min_col,
+                    merged.max_row + offset,
+                    merged.max_col,
+                )
+                if copied_ref not in restored:
+                    worksheet.merge_cells(copied_ref)
+                    restored.add(copied_ref)
+
+
+def _merge_ref(min_row, min_col, max_row, max_col):
+    return f'{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row}'
 
 
 def _copy_row(worksheet, source_row, target_row):
@@ -293,18 +364,6 @@ def _copy_row(worksheet, source_row, target_row):
             target.alignment = copy.copy(source.alignment)
         if source.protection:
             target.protection = copy.copy(source.protection)
-
-    merged_ranges = list(worksheet.merged_cells.ranges)
-    for merged in merged_ranges:
-        if merged.min_row == source_row and merged.max_row == source_row:
-            offset = target_row - source_row
-            worksheet.merge_cells(
-                start_row=merged.min_row + offset,
-                start_column=merged.min_col,
-                end_row=merged.max_row + offset,
-                end_column=merged.max_col,
-            )
-
 
 def _apply_placeholders(worksheet, context):
     for row in worksheet.iter_rows():
