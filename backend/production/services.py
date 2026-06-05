@@ -1159,12 +1159,12 @@ def _participant_today_total(organization, user, day, department=None):
 
 
 def _station_target_payload(organization, station, day):
-    target, _ = ProductionStationTarget.objects.get_or_create(
+    target = ProductionStationTarget.objects.filter(
         organization=organization,
         station=station,
         target_date=day,
-        defaults={'target_quantity': Decimal('0')},
-    )
+    ).first()
+    target_quantity = target.target_quantity if target else (station.default_daily_target or Decimal('0'))
     
     # Fetch all shift occurrences of the department on this report date
     occurrences = ProductionShiftOccurrence.objects.filter(
@@ -1200,13 +1200,14 @@ def _station_target_payload(organization, station, day):
             actual += win.official_delta
 
     return {
-        'id': target.id,
-        'date': target.target_date,
-        'target_quantity': target.target_quantity,
+        'id': target.id if target else None,
+        'date': target.target_date if target else day,
+        'target_quantity': target_quantity,
         'actual_quantity': actual,
-        'remaining_quantity': max(target.target_quantity - actual, Decimal('0')),
-        'completion_percent': (actual / target.target_quantity * Decimal('100')) if target.target_quantity else Decimal('0'),
-        'note': target.note,
+        'remaining_quantity': max(target_quantity - actual, Decimal('0')),
+        'completion_percent': (actual / target_quantity * Decimal('100')) if target_quantity else Decimal('0'),
+        'note': target.note if target else '',
+        'is_override': bool(target),
     }
 
 
@@ -1726,20 +1727,23 @@ def tablet_context(token):
         .select_related('user')
         .order_by('role', 'user__first_name', 'user__username')
     )
+    if shift_payload.get('locked') and shift_payload.get('state') != 'checkpoint_required':
+        visible_steps = []
+        active_sessions = []
+
     today = timezone.localdate()
     active_occurrence, _ = _active_shift_occurrence(station.department)
     if active_occurrence:
         today = active_occurrence.report_date
-    else:
-        # Check if there is a recently ended occurrence (within 12 hours) to show its totals until next shift
-        recent_occurrence = ProductionShiftOccurrence.objects.filter(
-            department=station.department,
-            ends_at__lte=timezone.now()
-        ).order_by('-ends_at').first()
-        if recent_occurrence and (timezone.now() - recent_occurrence.ends_at).total_seconds() < 12 * 3600:
-            today = recent_occurrence.report_date
 
     target_payload = _station_target_payload(tablet.organization, station, today)
+    if shift_payload.get('locked') and shift_payload.get('state') != 'checkpoint_required':
+        target_payload = {
+            **target_payload,
+            'actual_quantity': Decimal('0'),
+            'remaining_quantity': target_payload.get('target_quantity') or Decimal('0'),
+            'completion_percent': Decimal('0'),
+        }
     operators = []
     for row in assigned:
         profile = ProductionOperatorProfile.objects.filter(organization=tablet.organization, user=row.user, is_active=True).first()
@@ -1764,6 +1768,15 @@ def tablet_context(token):
         .distinct()
         .order_by('-created_at')[:20]
     )
+    active_window_payload = None
+    if not (shift_payload.get('locked') and shift_payload.get('state') != 'checkpoint_required'):
+        active_window_payload = _serialize_window_for_tablet(
+            ProductionCountingWindow.objects.filter(
+                organization=tablet.organization,
+                tablet=tablet,
+                status='open',
+            ).select_related('line', 'step').prefetch_related('participants__user', 'participants__session').first()
+        )
     return {
         'tablet': {'id': tablet.id, 'name': tablet.name, 'token': tablet.token},
         'station': {
@@ -1781,13 +1794,7 @@ def tablet_context(token):
             key=lambda item: (0 if item.get('is_pinned') else 1, item.get('priority') or 0, item.get('work_order_number') or ''),
         ),
         'slots': [_serialize_session_for_tablet(session) for session in active_sessions],
-        'active_window': _serialize_window_for_tablet(
-            ProductionCountingWindow.objects.filter(
-                organization=tablet.organization,
-                tablet=tablet,
-                status='open',
-            ).select_related('line', 'step').prefetch_related('participants__user', 'participants__session').first()
-        ),
+        'active_window': active_window_payload,
         'alerts': [
             {
                 'id': alert.id,

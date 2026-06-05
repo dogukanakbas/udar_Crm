@@ -19,12 +19,12 @@ import { formatNumber } from '@/lib/utils'
 
 type Department = { id: number; code: string; name: string; color?: string; notification_group?: number | null; order: number; is_active: boolean }
 type UserGroup = { id: number; group_id: string; title: string; description?: string }
-type Station = { id: number; department: number; department_name?: string; code: string; name: string; order: number; max_workers: number; is_handover: boolean; is_final: boolean; is_active: boolean }
+type Station = { id: number; department: number; department_name?: string; code: string; name: string; order: number; max_workers: number; default_daily_target?: string | number; is_handover: boolean; is_final: boolean; is_active: boolean }
 type UserLite = { id: number; username?: string; email?: string; first_name?: string; last_name?: string; full_name?: string; role?: string; permissions?: string[] }
 type StationAssignment = { id: number; station: number; station_code?: string; user: number; user_name?: string; role: string; is_active: boolean }
 type Device = { id: number; station: number; station_code?: string; name: string; token?: string; is_active: boolean; last_seen_at?: string }
 type Tablet = { id: number; station: number; station_code?: string; station_name?: string; name: string; token?: string; is_active: boolean; last_seen_at?: string }
-type StationTarget = { id: number; station: number; station_code?: string; station_name?: string; target_date: string; target_quantity: string | number; note?: string }
+type StationTarget = { id?: number; station: number; station_code?: string; station_name?: string; target_date: string; target_quantity: string | number; note?: string; is_override?: boolean }
 type ShiftSchedule = { id: number; department: number; department_name?: string; name: string; weekdays: number[]; start_time: string; end_time: string; crosses_midnight: boolean; order: number; is_active: boolean; note?: string }
 type ShiftBreak = { id: number; department: number; department_name?: string; schedule?: number | null; schedule_name?: string; name: string; start_time: string; end_time: string; requires_checkpoint: boolean; lock_type: string; order: number; is_active: boolean; note?: string }
 type OperatorProfile = { id: number; user: number; user_name?: string; has_pin?: boolean; is_active: boolean; last_pin_change_at?: string }
@@ -40,7 +40,7 @@ type RouteTemplate = { id: number; name: string; product_group_key?: string; is_
 type WarehouseLocation = { id: number; code: string; name?: string; warehouse: number; warehouse_name?: string }
 type ProductionSettings = { default_completion_location?: number | null; default_completion_warehouse?: number | null; auto_stock_in_enabled?: boolean }
 type DepartmentDraft = { code: string; name: string; color: string; notification_group: string; is_active: boolean }
-type StationDraft = { department: string; code: string; name: string; max_workers: string; is_handover: boolean; is_final: boolean; is_active: boolean }
+type StationDraft = { department: string; code: string; name: string; max_workers: string; default_daily_target: string; is_handover: boolean; is_final: boolean; is_active: boolean }
 type DeviceDraft = { station: string; name: string; is_active: boolean }
 type TabletDraft = { station: string; name: string; is_active: boolean }
 type ShiftDraft = { department: string; name: string; weekdays: number[]; start_time: string; end_time: string; crosses_midnight: boolean; is_active: boolean; note: string }
@@ -184,6 +184,7 @@ type TabletShiftState = {
   requires_checkpoint?: boolean
   locked?: boolean
   checkpoint_names?: string[]
+  active_window_id?: number | null
   line_id?: number | null
   active_shift?: { id: number; name: string; report_date: string; starts_at: string; ends_at: string } | null
   active_break?: { id: number; name: string; starts_at: string; ends_at: string; requires_checkpoint: boolean; lock_type: string } | null
@@ -251,7 +252,7 @@ const formatSeconds = (seconds?: number | null) => {
 }
 
 const emptyDepartmentDraft = (): DepartmentDraft => ({ code: '', name: '', color: '#2563eb', notification_group: '', is_active: true })
-const emptyStationDraft = (): StationDraft => ({ department: '', code: '', name: '', max_workers: '2', is_handover: false, is_final: false, is_active: true })
+const emptyStationDraft = (): StationDraft => ({ department: '', code: '', name: '', max_workers: '2', default_daily_target: '', is_handover: false, is_final: false, is_active: true })
 const emptyDeviceDraft = (): DeviceDraft => ({ station: '', name: '', is_active: true })
 const emptyTabletDraft = (): TabletDraft => ({ station: '', name: '', is_active: true })
 const emptyShiftDraft = (department = ''): ShiftDraft => ({ department, name: '', weekdays: [0, 1, 2, 3, 4], start_time: '08:00', end_time: '18:00', crosses_midnight: false, is_active: true, note: '' })
@@ -704,6 +705,7 @@ export function ProductionManagementPage() {
       ...stationDraft,
       department: Number(stationDraft.department),
       max_workers: Number(stationDraft.max_workers || 1),
+      default_daily_target: stationDraft.default_daily_target || 0,
       order: editingStationId ? stations.find((item) => item.id === editingStationId)?.order ?? 0 : stations.filter((item) => String(item.department) === stationDraft.department).length,
     }
     if (editingStationId) await api.patch(`/production/stations/${editingStationId}/`, payload)
@@ -822,6 +824,7 @@ export function ProductionManagementPage() {
       code: station.code,
       name: station.name,
       max_workers: String(station.max_workers || 1),
+      default_daily_target: station.default_daily_target ? String(station.default_daily_target) : '',
       is_handover: station.is_handover,
       is_final: station.is_final,
       is_active: station.is_active,
@@ -1105,18 +1108,24 @@ export function ProductionManagementPage() {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>Günlük istasyon hedefleri</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>İstasyon hedefleri</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Varsayılan hedef istasyon kartından belirlenir. Buradan seçilen güne özel hedef girerseniz yalnız o gün varsayılanın yerine geçer.
+          </p>
+        </CardHeader>
         <CardContent className="grid gap-4 xl:grid-cols-[420px_1fr]">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-1">
             <Select value={targetDraft.station} onValueChange={(value) => setTargetDraft((current) => {
               const existing = stationTargets.find((item) => String(item.station) === value && item.target_date === current.target_date)
-              return { ...current, station: value, target_quantity: existing ? String(existing.target_quantity) : '', note: existing?.note || '' }
+              const station = stations.find((item) => String(item.id) === value)
+              return { ...current, station: value, target_quantity: existing ? String(existing.target_quantity) : station?.default_daily_target ? String(station.default_daily_target) : '', note: existing?.note || '' }
             })}>
               <SelectTrigger><SelectValue placeholder="İstasyon seç" /></SelectTrigger>
               <SelectContent>{stations.map((st) => <SelectItem key={st.id} value={String(st.id)}>{st.code} - {st.name}</SelectItem>)}</SelectContent>
             </Select>
             <Input type="date" value={targetDraft.target_date} onChange={(e) => setTargetDraft((current) => ({ ...current, target_date: e.target.value }))} />
-            <Input placeholder="Günlük hedef adet" inputMode="decimal" value={targetDraft.target_quantity} onChange={(e) => setTargetDraft((current) => ({ ...current, target_quantity: e.target.value }))} />
+            <Input placeholder="O güne özel hedef adet" inputMode="decimal" value={targetDraft.target_quantity} onChange={(e) => setTargetDraft((current) => ({ ...current, target_quantity: e.target.value }))} />
             <Input placeholder="Not" value={targetDraft.note} onChange={(e) => setTargetDraft((current) => ({ ...current, note: e.target.value }))} />
             <Button onClick={saveStationTarget} disabled={!targetDraft.station || !targetDraft.target_date}>
               <Save className="mr-2 h-4 w-4" /> Hedefi kaydet
@@ -1125,6 +1134,7 @@ export function ProductionManagementPage() {
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
             {stations.map((station) => {
               const target = stationTargets.find((item) => item.station === station.id)
+              const effectiveTarget = target?.target_quantity ?? station.default_daily_target ?? 0
               return (
                 <button
                   key={station.id}
@@ -1132,13 +1142,14 @@ export function ProductionManagementPage() {
                   onClick={() => setTargetDraft({
                     station: String(station.id),
                     target_date: target?.target_date || targetDraft.target_date,
-                    target_quantity: target ? String(target.target_quantity) : '',
+                    target_quantity: target ? String(target.target_quantity) : station.default_daily_target ? String(station.default_daily_target) : '',
                     note: target?.note || '',
                   })}
                 >
                   <p className="font-semibold">{station.code}</p>
                   <p className="text-xs text-muted-foreground">{station.name}</p>
-                  <p className="mt-2 text-2xl font-bold">{formatNumber(n(target?.target_quantity))}</p>
+                  <p className="mt-2 text-2xl font-bold">{formatNumber(n(effectiveTarget))}</p>
+                  <p className="text-xs text-muted-foreground">{target ? 'Bu güne özel hedef' : 'Varsayılan hedef'}</p>
                 </button>
               )
             })}
@@ -1252,6 +1263,7 @@ export function ProductionManagementPage() {
                   <Input placeholder="Kod" value={stationDraft.code} onChange={(e) => setStationDraft((v) => ({ ...v, code: e.target.value }))} />
                   <Input placeholder="İstasyon adı" value={stationDraft.name} onChange={(e) => setStationDraft((v) => ({ ...v, name: e.target.value }))} />
                   <Input placeholder="Eşzamanlı çalışan sınırı" inputMode="numeric" value={stationDraft.max_workers} onChange={(e) => setStationDraft((v) => ({ ...v, max_workers: e.target.value }))} />
+                  <Input placeholder="Varsayılan günlük hedef adet" inputMode="decimal" value={stationDraft.default_daily_target} onChange={(e) => setStationDraft((v) => ({ ...v, default_daily_target: e.target.value }))} />
                   <label className="flex items-center justify-between rounded-md border p-3 text-sm"><span>Devir istasyonu</span><Switch checked={stationDraft.is_handover} onCheckedChange={(checked) => setStationDraft((v) => ({ ...v, is_handover: checked }))} /></label>
                   <label className="flex items-center justify-between rounded-md border p-3 text-sm"><span>Final istasyon</span><Switch checked={stationDraft.is_final} onCheckedChange={(checked) => setStationDraft((v) => ({ ...v, is_final: checked }))} /></label>
                   <label className="flex items-center justify-between rounded-md border p-3 text-sm"><span>Aktif</span><Switch checked={stationDraft.is_active} onCheckedChange={(checked) => setStationDraft((v) => ({ ...v, is_active: checked }))} /></label>
@@ -2612,6 +2624,7 @@ export function ProductionTabletPage() {
   const [lastLoadedAt, setLastLoadedAt] = useState(Date.now())
   const seenAlerts = useRef<Set<number>>(new Set())
   const checkpointActionRef = useRef<((total: string, note: string) => Promise<void>) | null>(null)
+  const autoCheckpointKeyRef = useRef('')
 
   const callManager = async () => {
     setSubmitting(true)
@@ -2720,8 +2733,19 @@ export function ProductionTabletPage() {
       toast({ title: 'Vardiya checkpoint kaydedildi' })
       await load()
     }
-    requestCheckpoint(`${checkpointPeople} üretim miktarını yazın`, perform)
+    const title = ctx.shift_state?.active_break
+      ? `Planlı mola başladı. ${checkpointPeople} mola öncesi üretim miktarını yazın`
+      : `Vardiya bitti. ${checkpointPeople} çıkış yapmadan önce üretim miktarını yazın`
+    requestCheckpoint(title, perform)
   }
+
+  useEffect(() => {
+    if (!shiftNeedsCheckpoint || checkpointOpen || submitting) return
+    const key = `${ctx.shift_state?.state || ''}:${ctx.shift_state?.active_window_id || ''}:${ctx.shift_state?.active_break?.id || ''}:${ctx.shift_state?.active_shift?.id || ''}`
+    if (!key || autoCheckpointKeyRef.current === key) return
+    autoCheckpointKeyRef.current = key
+    void shiftCheckpoint()
+  }, [shiftNeedsCheckpoint, checkpointOpen, submitting, ctx.shift_state?.active_window_id, ctx.shift_state?.active_break?.id, ctx.shift_state?.active_shift?.id])
 
   const login = async () => {
     if (loginSlot === null) return
@@ -3167,6 +3191,7 @@ export function ProductionTabletPage() {
       </Dialog>
 
       <Dialog open={checkpointOpen} onOpenChange={(open) => {
+        if (!open && shiftNeedsCheckpoint) return
         if (!open) {
           checkpointActionRef.current = null
           setCheckpointOpen(false)
@@ -3182,7 +3207,7 @@ export function ProductionTabletPage() {
             <Textarea placeholder="Varsa notunuz" value={checkpointNote} onChange={(e) => setCheckpointNote(e.target.value)} disabled={submitting} />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCheckpointOpen(false)} disabled={submitting}>Vazgeç</Button>
+            {!shiftNeedsCheckpoint && <Button variant="outline" onClick={() => setCheckpointOpen(false)} disabled={submitting}>Vazgeç</Button>}
             <Button onClick={submitCheckpoint} disabled={checkpointTotal === '' || submitting}>Üretim Miktarını Kaydet</Button>
           </DialogFooter>
         </DialogContent>

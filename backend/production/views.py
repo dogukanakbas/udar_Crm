@@ -1,4 +1,5 @@
 import tempfile
+from datetime import datetime, timedelta
 
 from django.core.management import call_command
 from django.db import IntegrityError, models
@@ -1226,22 +1227,51 @@ class ProductionReportSummaryView(APIView):
             (row['station_id'], row['closed_at__date']): row['total'] or 0
             for row in windows.values('station_id', 'closed_at__date').annotate(total=Sum('official_delta'))
         }
+        override_by_station_date = {
+            (target.station_id, target.target_date): target
+            for target in targets
+        }
+        if start:
+            start_day = datetime.fromisoformat(start).date()
+        elif actual_by_station_date:
+            start_day = min(day for _, day in actual_by_station_date.keys())
+        else:
+            start_day = timezone.localdate()
+        if end:
+            end_day = datetime.fromisoformat(end).date()
+        elif actual_by_station_date:
+            end_day = max(day for _, day in actual_by_station_date.keys())
+        else:
+            end_day = start_day
+        if end_day < start_day:
+            end_day = start_day
+        date_rows = [start_day + timedelta(days=offset) for offset in range((end_day - start_day).days + 1)]
+        target_stations = ProductionStation.objects.filter(organization=org, is_active=True).select_related('department')
+        if dept_id and dept_id != 'all':
+            target_stations = target_stations.filter(department_id=dept_id)
+        if station_id and station_id != 'all':
+            target_stations = target_stations.filter(id=station_id)
         station_target_performance = []
-        for target in targets.order_by('station__department__order', 'station__order', 'target_date', 'id'):
-            actual = actual_by_station_date.get((target.station_id, target.target_date), 0)
-            target_quantity = target.target_quantity or 0
-            percent = float((actual / target_quantity) * 100) if target_quantity else 0
-            station_target_performance.append({
-                'station_id': target.station_id,
-                'station_code': target.station.code,
-                'station_name': target.station.name,
-                'department_name': target.station.department.name,
-                'target_date': target.target_date.isoformat(),
-                'target_quantity': target_quantity,
-                'actual_quantity': actual,
-                'remaining_quantity': max(target_quantity - actual, 0),
-                'completion_percent': min(999, round(percent, 1)),
-            })
+        for station in target_stations.order_by('department__order', 'order', 'id'):
+            for target_date in date_rows:
+                override = override_by_station_date.get((station.id, target_date))
+                target_quantity = (override.target_quantity if override else station.default_daily_target) or 0
+                actual = actual_by_station_date.get((station.id, target_date), 0)
+                if not target_quantity and not actual and not override:
+                    continue
+                percent = float((actual / target_quantity) * 100) if target_quantity else 0
+                station_target_performance.append({
+                    'station_id': station.id,
+                    'station_code': station.code,
+                    'station_name': station.name,
+                    'department_name': station.department.name,
+                    'target_date': target_date.isoformat(),
+                    'target_quantity': target_quantity,
+                    'actual_quantity': actual,
+                    'remaining_quantity': max(target_quantity - actual, 0),
+                    'completion_percent': min(999, round(percent, 1)),
+                    'is_override': bool(override),
+                })
 
         detailed_sessions = []
         for s in sessions.select_related('user', 'station', 'line__work_order', 'line').order_by('-started_at')[:200]:

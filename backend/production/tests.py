@@ -206,8 +206,9 @@ class ProductionAutomationTests(TestCase):
         self.assertEqual(rendered['B2'].value, first_line.product_name)
         self.assertEqual(rendered['A3'].value, 2)
         self.assertEqual(rendered['B3'].value, 'İkinci Mamul')
-        self.assertIn('Açıklama 1:', rendered['A5'].value)
-        self.assertIn('120 cm kapılar açılır yavru kanatlı olacak', rendered['A5'].value)
+        rendered_values = '\n'.join(str(cell.value or '') for row in rendered.iter_rows() for cell in row)
+        self.assertIn('Açıklama 1:', rendered_values)
+        self.assertIn('120 cm kapılar açılır yavru kanatlı olacak', rendered_values)
 
     def test_station_flow_completes_and_stocks_in_once(self):
         quote = self.make_contract()

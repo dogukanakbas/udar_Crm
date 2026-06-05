@@ -443,6 +443,8 @@ def _customer_person(quote):
     if not quote:
         return ''
     snapshot = quote.contract_config.get('customer_snapshot') if isinstance(quote.contract_config, dict) else {}
+    if not isinstance(snapshot, dict):
+        snapshot = {}
     return (
         snapshot.get('authorized_person')
         or snapshot.get('authorizedPerson')

@@ -84,6 +84,7 @@ class ProductionStation(models.Model):
     name = models.CharField(max_length=120)
     order = models.PositiveIntegerField(default=0, db_index=True)
     max_workers = models.PositiveIntegerField(default=2)
+    default_daily_target = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     is_handover = models.BooleanField(default=False)
     is_final = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
