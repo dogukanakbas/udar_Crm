@@ -139,14 +139,19 @@ def _general_context_from_work_order(work_order, quote, lines, extra_notes):
     customer = getattr(quote, 'customer', None)
     technical_details = _technical_details_text(lines)
     notes = _join_notes(technical_details, work_order.notes, getattr(quote, 'notes', ''), extra_notes)
+    
+    temsilci = _resolve_prepared_by_name(quote) if quote else ''
+    if not temsilci:
+        temsilci = _user_label(work_order.created_by)
+
     return {
         'isEmriNo': work_order.number,
         'sozlesmeNo': work_order.source_number or getattr(quote, 'number', '') or '',
         'cariUnvani': getattr(customer, 'name', '') or work_order.customer_name,
         'musteriIsmi': _customer_person(quote) or getattr(customer, 'name', '') or work_order.customer_name,
-        'temsilci': _user_label(getattr(quote, 'prepared_by', None) or getattr(quote, 'owner', None) or work_order.created_by),
-        'siparisTarihi': getattr(quote, 'created_at', None) or work_order.created_at,
-        'teslimTarihi': work_order.due_date or getattr(quote, 'valid_until', None),
+        'temsilci': temsilci,
+        'siparisTarihi': _format_date(getattr(quote, 'created_at', None) or work_order.created_at),
+        'teslimTarihi': _format_date(work_order.due_date or getattr(quote, 'valid_until', None)),
         'toplamAdet': sum((_decimal(line.get('adet')) for line in lines), Decimal('0')),
         'notlar': notes,
         'teknikDetaylar': technical_details,
@@ -161,9 +166,9 @@ def _general_context_from_quote(quote, lines, extra_notes):
         'sozlesmeNo': quote.number,
         'cariUnvani': getattr(customer, 'name', '') or '',
         'musteriIsmi': _customer_person(quote) or getattr(customer, 'name', '') or '',
-        'temsilci': _user_label(quote.prepared_by or quote.owner),
-        'siparisTarihi': quote.created_at,
-        'teslimTarihi': quote.valid_until,
+        'temsilci': _resolve_prepared_by_name(quote),
+        'siparisTarihi': _format_date(quote.created_at),
+        'teslimTarihi': _format_date(quote.valid_until),
         'toplamAdet': sum((_decimal(line.get('adet')) for line in lines), Decimal('0')),
         'notlar': _join_notes(technical_details, quote.notes, extra_notes),
         'teknikDetaylar': technical_details,
@@ -437,6 +442,27 @@ def _user_label(user):
     if not user:
         return ''
     return user.get_full_name() or getattr(user, 'email', '') or getattr(user, 'username', '') or ''
+
+
+def _format_date(value):
+    if not value:
+        return ''
+    if isinstance(value, datetime):
+        value = value.date()
+    if isinstance(value, date):
+        return value.strftime('%d.%m.%Y')
+    return str(value)
+
+
+def _resolve_prepared_by_name(quote):
+    if not quote:
+        return ''
+    snapshot = dict((quote.contract_config or {}).get('prepared_by_snapshot') or {})
+    snapshot_name = str(snapshot.get('name') or '').strip()
+    related_name = _user_label(getattr(quote, 'prepared_by', None)) or _user_label(getattr(quote, 'owner', None))
+    if snapshot_name and '@' not in snapshot_name:
+        return snapshot_name
+    return related_name or snapshot_name
 
 
 def _customer_person(quote):

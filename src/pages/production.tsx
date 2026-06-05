@@ -2598,6 +2598,12 @@ export function ProductionTabletPage() {
   const [token, setToken] = useState(initialToken)
   const [ctx, setCtx] = useState<TabletContext>({})
   const [selectedLineId, setSelectedLineId] = useState('')
+  const selectedLineIdRef = useRef(selectedLineId)
+
+  useEffect(() => {
+    selectedLineIdRef.current = selectedLineId
+  }, [selectedLineId])
+
   const [loginSlot, setLoginSlot] = useState<number | null>(null)
   const [loginUser, setLoginUser] = useState('')
   const [pin, setPin] = useState('')
@@ -2656,7 +2662,16 @@ export function ProductionTabletPage() {
     const data = response.data || {}
     setCtx(data)
     setLastLoadedAt(Date.now())
-    if (!selectedLineId && data.work_items?.[0]) setSelectedLineId(String(data.work_items[0].line_id))
+    
+    let nextId = selectedLineIdRef.current
+    const items = data.work_items || []
+    if (nextId && !items.some((item: any) => String(item.line_id) === nextId)) {
+      nextId = ''
+    }
+    if (!nextId && items[0]) {
+      setSelectedLineId(String(items[0].line_id))
+    }
+
     const alert = (data.alerts || []).find((item: any) => !seenAlerts.current.has(item.id))
     if (alert) {
       seenAlerts.current.add(alert.id)
@@ -3079,7 +3094,7 @@ export function ProductionTabletPage() {
               </div>
               {selectedWork.technical_notes ? <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{asText(selectedWork.technical_notes)}</p> : null}
             </div>
-            <MetricBlock label="Hedef" value={formatNumber(n(selectedWork.target_quantity))} />
+            <MetricBlock label="Adet" value={formatNumber(n(selectedWork.target_quantity))} />
             <MetricBlock label="Resmi sağlam" value={formatNumber(n(selectedWork.completed_quantity))} />
             <MetricBlock label="Makine" value={formatNumber(n(selectedWork.machine_quantity))} />
             <MetricBlock label="Pencere" value={formatNumber(n(ctx.active_window?.machine_delta))} />

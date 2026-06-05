@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from io import BytesIO
 from unittest.mock import patch
@@ -209,6 +209,65 @@ class ProductionAutomationTests(TestCase):
         rendered_values = '\n'.join(str(cell.value or '') for row in rendered.iter_rows() for cell in row)
         self.assertIn('Açıklama 1:', rendered_values)
         self.assertIn('120 cm kapılar açılır yavru kanatlı olacak', rendered_values)
+
+    def test_work_order_report_representative_and_date_formatting(self):
+        preparer = User.objects.create_user(
+            username='contract-preparer',
+            password='x',
+            organization=self.org,
+            role='Worker',
+            first_name='Ahmet',
+            last_name='Yılmaz'
+        )
+        quote = Quote.objects.create(
+            organization=self.org,
+            document_type='Contract',
+            number='AY-S-9999',
+            customer=self.customer,
+            owner=self.user,
+            prepared_by=preparer,
+            status='Approved',
+            valid_until=date(2026, 6, 20),
+        )
+        QuoteLine.objects.create(
+            quote=quote,
+            product=self.product,
+            section_key='moduler_urun',
+            name=self.product.name,
+            unit='Adet',
+            qty=Decimal('2'),
+            unit_price=Decimal('1000'),
+            tax=Decimal('20'),
+        )
+        order = create_work_order_from_contract(quote, user=self.user)
+        quote.created_at = timezone.make_aware(datetime(2026, 6, 5, 10, 30, 0))
+        quote.save()
+        order.due_date = date(2026, 6, 15)
+        order.save()
+
+        workbook = Workbook()
+        ws = workbook.active
+        ws['A1'] = '{temsilci}'
+        ws['B1'] = '{siparisTarihi}'
+        ws['C1'] = '{teslimTarihi}'
+
+        stream = BytesIO()
+        workbook.save(stream)
+        template = ProductionReportTemplate.objects.create(
+            organization=self.org,
+            name='Test Temsilci',
+            key='test-temsilci',
+            default_format='xlsx',
+            created_by=self.user,
+        )
+        template.file.save('test_temsilci.xlsx', ContentFile(stream.getvalue()), save=True)
+
+        export = build_work_order_report_export(order, template, output_format='xlsx')
+        rendered = load_workbook(export['content']).active
+
+        self.assertEqual(rendered['A1'].value, 'Ahmet Yılmaz')
+        self.assertEqual(rendered['B1'].value, '05.06.2026')
+        self.assertEqual(rendered['C1'].value, '15.06.2026')
 
     def test_station_flow_completes_and_stocks_in_once(self):
         quote = self.make_contract()
