@@ -6,6 +6,10 @@ from django.utils import timezone
 from organizations.models import Organization, Warehouse
 
 
+def production_report_template_path(instance, filename):
+    return f'production-report-templates/org_{instance.organization_id}/{filename}'
+
+
 class ProductionSettings(models.Model):
     organization = models.OneToOneField(Organization, on_delete=models.CASCADE, related_name='production_settings')
     default_completion_warehouse = models.ForeignKey(
@@ -25,6 +29,35 @@ class ProductionSettings(models.Model):
     auto_stock_in_enabled = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class ProductionReportTemplate(models.Model):
+    OUTPUT_FORMATS = [
+        ('xlsx', 'Excel'),
+        ('pdf', 'PDF'),
+    ]
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_report_templates')
+    name = models.CharField(max_length=160)
+    key = models.SlugField(max_length=80)
+    file = models.FileField(upload_to=production_report_template_path)
+    default_format = models.CharField(max_length=10, choices=OUTPUT_FORMATS, default='pdf')
+    description = models.TextField(blank=True, default='')
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_production_report_templates')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name', 'id']
+        unique_together = ('organization', 'key')
+        indexes = [
+            models.Index(fields=['organization', 'is_active']),
+            models.Index(fields=['organization', 'key']),
+        ]
+
+    def __str__(self):
+        return self.name
 
 
 class ProductionDepartment(models.Model):

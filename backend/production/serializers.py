@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from rest_framework import serializers
 
 from accounts.utils import user_has_any_perm
@@ -17,6 +19,7 @@ from .models import (
     ProductionRuleSet,
     ProductionRouteStep,
     ProductionRouteTemplate,
+    ProductionReportTemplate,
     ProductionSettings,
     ProductionSessionBreak,
     ProductionShiftBreak,
@@ -60,6 +63,28 @@ class ProductionDepartmentSerializer(serializers.ModelSerializer):
         model = ProductionDepartment
         fields = '__all__'
         read_only_fields = ['organization']
+
+
+class ProductionReportTemplateSerializer(serializers.ModelSerializer):
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductionReportTemplate
+        fields = '__all__'
+        read_only_fields = ['organization', 'created_by', 'created_at', 'updated_at', 'file_url']
+
+    def get_file_url(self, obj):
+        if not obj.file:
+            return ''
+        request = self.context.get('request')
+        url = obj.file.url
+        return request.build_absolute_uri(url) if request else url
+
+    def validate_file(self, value):
+        extension = Path(getattr(value, 'name', '') or '').suffix.lower()
+        if extension not in {'.xlsx', '.xltx'}:
+            raise serializers.ValidationError('Yalnızca .xlsx veya .xltx Excel şablonu yükleyebilirsiniz.')
+        return value
 
 
 class ProductionStationSerializer(serializers.ModelSerializer):

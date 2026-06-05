@@ -1,10 +1,13 @@
 from datetime import datetime, time, timedelta
 from decimal import Decimal
+from io import BytesIO
 from unittest.mock import patch
 
+from django.core.files.base import ContentFile
 from django.db.models import Max, Sum
 from django.test import TestCase
 from django.utils import timezone
+from openpyxl import Workbook, load_workbook
 from rest_framework.test import APIClient
 
 from accounts.models import Permission, RolePermission, User
@@ -20,6 +23,7 @@ from .models import (
     ProductionCountingParticipant,
     ProductionCountingWindow,
     ProductionOperatorProfile,
+    ProductionReportTemplate,
     ProductionSessionBreak,
     ProductionSettings,
     ProductionShiftBreak,
@@ -35,6 +39,7 @@ from .models import (
     ProductionWorkOrder,
     ProductionWorkSession,
 )
+from .report_exports import build_work_order_report_export
 from .services import (
     ProductionError,
     clone_template_preset,
@@ -110,7 +115,12 @@ class ProductionAutomationTests(TestCase):
             qty=Decimal('2'),
             unit_price=Decimal('1000'),
             tax=Decimal('20'),
-            details={'primary': '100*210', 'secondary': 'Antrasit', 'technical_notes': 'Test teknik not'},
+            details={
+                'primary': '100*210',
+                'secondary': 'Antrasit',
+                'technical_notes': 'Test teknik not',
+                'technicalItems': ['120 cm kapılar açılır yavru kanatlı olacak'],
+            },
         )
         return quote
 
@@ -151,6 +161,53 @@ class ProductionAutomationTests(TestCase):
 
         self.assertIsNone(create_work_order_from_contract(quote, user=self.user))
         self.assertEqual(ProductionWorkOrder.objects.count(), 0)
+
+    def test_work_order_foreman_report_expands_line_row(self):
+        quote = self.make_contract()
+        order = create_work_order_from_contract(quote, user=self.user)
+        first_line = order.lines.get()
+        from .services import add_manual_work_order_line
+        add_manual_work_order_line(
+            work_order=order,
+            product=self.product,
+            product_sku='PRD-002',
+            product_name='İkinci Mamul',
+            detail_1='120*215',
+            detail_2='Beyaz',
+            quantity=3,
+            technical_notes='Ek not',
+            route=order.route,
+        )
+
+        workbook = Workbook()
+        ws = workbook.active
+        ws['A1'] = 'No'
+        ws['B1'] = '{isEmriNo}'
+        ws['A2'] = '{kalem1.sn}'
+        ws['B2'] = '{kalem1.urunTipi}'
+        ws['C2'] = '{kalem1.adet}'
+        ws['A5'] = '{notlar}'
+        stream = BytesIO()
+        workbook.save(stream)
+        template = ProductionReportTemplate.objects.create(
+            organization=self.org,
+            name='Test Ustabaşı',
+            key='test-ustabasi',
+            default_format='xlsx',
+            created_by=self.user,
+        )
+        template.file.save('test.xlsx', ContentFile(stream.getvalue()), save=True)
+
+        export = build_work_order_report_export(order, template, output_format='xlsx', extra_notes='Açıklama 3')
+        rendered = load_workbook(export['content']).active
+
+        self.assertEqual(rendered['B1'].value, order.number)
+        self.assertEqual(rendered['A2'].value, 1)
+        self.assertEqual(rendered['B2'].value, first_line.product_name)
+        self.assertEqual(rendered['A3'].value, 2)
+        self.assertEqual(rendered['B3'].value, 'İkinci Mamul')
+        self.assertIn('Açıklama 1:', rendered['A5'].value)
+        self.assertIn('120 cm kapılar açılır yavru kanatlı olacak', rendered['A5'].value)
 
     def test_station_flow_completes_and_stocks_in_once(self):
         quote = self.make_contract()

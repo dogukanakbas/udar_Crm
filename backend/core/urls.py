@@ -49,7 +49,9 @@ from production.views import (
     ProductionOperatorProfileViewSet,
     ProductionPiEventView,
     ProductionReportExportView,
+    ProductionReportPlaceholderView,
     ProductionReportSummaryView,
+    ProductionReportTemplateViewSet,
     ProductionRuleBlockViewSet,
     ProductionRuleSetViewSet,
     ProductionRouteViewSet,
@@ -165,6 +167,7 @@ router.register(r'production/routes', ProductionRouteViewSet, basename='producti
 router.register(r'production/rules', ProductionRuleSetViewSet, basename='production-rules')
 router.register(r'production/rule-blocks', ProductionRuleBlockViewSet, basename='production-rule-blocks')
 router.register(r'production/template-presets', ProductionTemplatePresetViewSet, basename='production-template-presets')
+router.register(r'production/report-templates', ProductionReportTemplateViewSet, basename='production-report-templates')
 router.register(r'production/work-orders', ProductionWorkOrderViewSet, basename='production-work-orders')
 router.register(r'production/sessions', ProductionWorkSessionViewSet, basename='production-sessions')
 router.register(r'production/counting-windows', ProductionCountingWindowViewSet, basename='production-counting-windows')
@@ -250,6 +253,7 @@ urlpatterns = [
     path('api/production/pi/events/', ProductionPiEventView.as_view(), name='production-pi-events'),
     path('api/production/reports/summary/', ProductionReportSummaryView.as_view(), name='production-report-summary'),
     path('api/production/reports/shift-summary/', ProductionShiftReportSummaryView.as_view(), name='production-shift-report-summary'),
+    path('api/production/report-placeholders/', ProductionReportPlaceholderView.as_view(), name='production-report-placeholders'),
     path('api/production/reports/export/', ProductionReportExportView.as_view(), name='production-report-export'),
     path('api/search/', GlobalSearchView.as_view(), name='global-search'),
     path('api/uploads/presign/', UploadPresignView.as_view(), name='upload-presign'),

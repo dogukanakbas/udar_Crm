@@ -7,6 +7,7 @@ from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -28,6 +29,7 @@ from .models import (
     ProductionRuleBlock,
     ProductionRuleSet,
     ProductionRouteTemplate,
+    ProductionReportTemplate,
     ProductionSettings,
     ProductionSessionBreak,
     ProductionStationAlert,
@@ -58,6 +60,7 @@ from .serializers import (
     ProductionRuleBlockSerializer,
     ProductionRuleSetSerializer,
     ProductionRouteTemplateSerializer,
+    ProductionReportTemplateSerializer,
     ProductionSettingsSerializer,
     ProductionStationAlertSerializer,
     ProductionShiftBreakSerializer,
@@ -86,6 +89,11 @@ from .serializers import (
     TabletShiftCheckpointSerializer,
     TabletSessionStateSerializer,
     TabletCallManagerSerializer,
+)
+from .report_exports import (
+    build_work_order_report_export,
+    list_production_report_placeholders,
+    response_for_export,
 )
 from .services import (
     ProductionError,
@@ -167,6 +175,35 @@ class ProductionSettingsView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+class ProductionReportTemplateViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
+    serializer_class = ProductionReportTemplateSerializer
+    queryset = ProductionReportTemplate.objects.select_related('created_by')
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    required_perm = 'production.report_templates.view'
+    write_perm = 'production.report_templates.manage'
+    permission_map = {
+        'create': 'production.report_templates.manage',
+        'update': 'production.report_templates.manage',
+        'partial_update': 'production.report_templates.manage',
+        'destroy': 'production.report_templates.manage',
+    }
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name', 'key', 'description']
+    ordering_fields = ['name', 'key', 'created_at', 'updated_at']
+
+    def perform_create(self, serializer):
+        serializer.save(organization=self.request.user.organization, created_by=self.request.user)
+
+
+class ProductionReportPlaceholderView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.report_templates.view'
+
+    def get(self, request):
+        return Response({'groups': list_production_report_placeholders()})
 
 
 class ProductionDepartmentViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
@@ -488,6 +525,7 @@ class ProductionWorkOrderViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         'destroy': 'production.work_orders.manage',
         'from_contract': 'production.work_orders.manage',
         'add_line': 'production.work_orders.manage',
+        'export_report': 'production.reports.export',
     }
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['number', 'source_number', 'customer_name', 'lines__product_name', 'lines__product_sku']
@@ -580,6 +618,28 @@ class ProductionWorkOrderViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         order.refresh_from_db()
         return Response(ProductionWorkOrderSerializer(order, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'], url_path='export-report')
+    def export_report(self, request, pk=None):
+        order = self.get_object()
+        template_id = request.data.get('template_id') or request.data.get('template')
+        template = ProductionReportTemplate.objects.filter(
+            organization=request.user.organization,
+            pk=template_id,
+            is_active=True,
+        ).first()
+        if not template:
+            return Response({'detail': 'Aktif rapor şablonu bulunamadı.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            export = build_work_order_report_export(
+                order,
+                template,
+                output_format=request.data.get('format') or template.default_format,
+                extra_notes=request.data.get('extra_notes') or '',
+            )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return response_for_export(export)
 
 
 class ProductionEventViewSet(OrgScopedMixin, viewsets.ReadOnlyModelViewSet):

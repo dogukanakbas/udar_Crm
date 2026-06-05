@@ -40,6 +40,8 @@ from permissions import IsOrgMember, IsOwnerOrManager, HasAPIPermission
 from accounts.utils import user_has_perm
 from audit.utils import log_entity_action
 from production.automation import schedule_contract_production_if_approved
+from production.models import ProductionReportTemplate
+from production.report_exports import build_quote_report_export, response_for_export
 
 EXCEL_TEMPLATE_CONTENT_TYPES = {
     '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -209,6 +211,7 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         'reject': 'quotes.approve',
         'apply_preview': 'quotes.edit.own',
         'template_library_upload': 'templates.excel.upload',
+        'export_production_report': 'production.reports.export',
     }
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['number', 'customer__name', 'status', 'document_type']
@@ -523,6 +526,28 @@ class QuoteViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         response['Pragma'] = 'no-cache'
         response['Expires'] = '0'
         return response
+
+    @action(detail=True, methods=['post'], url_path='export-production-report')
+    def export_production_report(self, request, pk=None):
+        quote = self.get_object()
+        template_id = request.data.get('template_id') or request.data.get('template')
+        template = ProductionReportTemplate.objects.filter(
+            organization=request.user.organization,
+            pk=template_id,
+            is_active=True,
+        ).first()
+        if not template:
+            return Response({'detail': 'Aktif rapor şablonu bulunamadı.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            export = build_quote_report_export(
+                quote,
+                template,
+                output_format=request.data.get('format') or template.default_format,
+                extra_notes=request.data.get('extra_notes') or '',
+            )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return response_for_export(export)
 
     @action(detail=True, methods=['get'], url_path='export-files')
     def export_files(self, request, pk=None):

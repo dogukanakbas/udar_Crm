@@ -34,6 +34,7 @@ type DataField = { id: number; station?: number | null; station_code?: string; k
 type RuleSet = { id: number; name: string; scope: string; station?: number | null; route?: number | null; trigger_event: string; is_active: boolean; order: number; blocks?: RuleBlock[] }
 type RuleBlock = { id: number; rule_set: number; block_type: string; config: Record<string, any>; is_active: boolean; order: number }
 type TemplatePreset = { id: number; key: string; name: string; description?: string; is_active: boolean }
+type ProductionReportTemplate = { id: number; name: string; key: string; default_format: 'xlsx' | 'pdf'; description?: string; is_active: boolean; file?: string; file_url?: string; created_at?: string; updated_at?: string }
 type RouteStep = { id: number; station: number; station_code?: string; station_name?: string; department_name?: string; order: number; is_required: boolean; start_policy?: string }
 type RouteTemplate = { id: number; name: string; product_group_key?: string; is_default: boolean; steps?: RouteStep[] }
 type WarehouseLocation = { id: number; code: string; name?: string; warehouse: number; warehouse_name?: string }
@@ -341,6 +342,21 @@ function downloadJson(data: BlobPart, filename: string) {
   window.URL.revokeObjectURL(url)
 }
 
+function downloadBlobResponse(response: any, fallbackFilename: string) {
+  const blob = response.data instanceof Blob ? response.data : new Blob([response.data])
+  const header = response.headers?.['content-disposition'] || response.headers?.['Content-Disposition'] || ''
+  const match = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(header)
+  const filename = match ? decodeURIComponent(match[1].replace(/"/g, '')) : fallbackFilename
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
 function userLabel(user?: UserLite) {
   if (!user) return ''
   return user.full_name || `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username || user.email || `#${user.id}`
@@ -394,6 +410,7 @@ export function ProductionManagementPage() {
   const { toast } = useToast()
   const configImportRef = useRef<HTMLInputElement | null>(null)
   const drawingFileRef = useRef<HTMLInputElement | null>(null)
+  const reportTemplateFileRef = useRef<HTMLInputElement | null>(null)
   const [departments, setDepartments] = useState<Department[]>([])
   const [stations, setStations] = useState<Station[]>([])
   const [stationAssignments, setStationAssignments] = useState<StationAssignment[]>([])
@@ -414,6 +431,7 @@ export function ProductionManagementPage() {
   const [products, setProducts] = useState<ProductLite[]>([])
   const [drawingFolders, setDrawingFolders] = useState<DrawingFolder[]>([])
   const [drawings, setDrawings] = useState<TechnicalDrawing[]>([])
+  const [reportTemplates, setReportTemplates] = useState<ProductionReportTemplate[]>([])
   const [settings, setSettings] = useState<ProductionSettings>({})
   const [summary, setSummary] = useState<any>({})
   const [busy, setBusy] = useState(false)
@@ -445,10 +463,12 @@ export function ProductionManagementPage() {
   const [drawingDraft, setDrawingDraft] = useState(emptyDrawingDraft)
   const [drawingFolderDraft, setDrawingFolderDraft] = useState('')
   const [drawingSearch, setDrawingSearch] = useState('')
+  const [reportTemplateDraft, setReportTemplateDraft] = useState({ name: '', key: '', default_format: 'pdf', description: '', is_active: true })
+  const [editingReportTemplateId, setEditingReportTemplateId] = useState<number | null>(null)
   const productionUsers = useMemo(() => users.filter(canUseProductionTablet), [users])
 
   const load = async () => {
-    const [d, s, assignmentRows, userRows, dev, tabletRows, shiftRows, breakRows, profileRows, alertRows, maps, fields, r, ruleRows, presetRows, l, productRows, folderRows, drawingRows, cfg, dash, groups] = await Promise.all([
+    const [d, s, assignmentRows, userRows, dev, tabletRows, shiftRows, breakRows, profileRows, alertRows, maps, fields, r, ruleRows, presetRows, reportTemplateRows, l, productRows, folderRows, drawingRows, cfg, dash, groups] = await Promise.all([
       fetchAll<Department>('/production/departments/'),
       fetchAll<Station>('/production/stations/'),
       fetchAll<StationAssignment>('/production/station-users/'),
@@ -464,6 +484,7 @@ export function ProductionManagementPage() {
       fetchAll<RouteTemplate>('/production/routes/'),
       fetchAll<RuleSet>('/production/rules/'),
       fetchAll<TemplatePreset>('/production/template-presets/'),
+      fetchAll<ProductionReportTemplate>('/production/report-templates/').catch(() => []),
       fetchAll<WarehouseLocation>('/inventory-locations/'),
       fetchAll<ProductLite>('/products/').catch(() => []),
       fetchAll<DrawingFolder>('/technical-drawing-folders/').catch(() => []),
@@ -488,6 +509,7 @@ export function ProductionManagementPage() {
     setRoutes(r)
     setRules(ruleRows)
     setPresets(presetRows)
+    setReportTemplates(reportTemplateRows)
     setLocations(l)
     setProducts(productRows)
     setDrawingFolders(folderRows)
@@ -570,6 +592,48 @@ export function ProductionManagementPage() {
 
   const deleteDrawing = async (drawing: TechnicalDrawing) => {
     await deleteItem(`/product-technical-drawings/${drawing.id}/`, asText(drawing.title, 'Teknik resim'))
+  }
+
+  const resetReportTemplateForm = () => {
+    setEditingReportTemplateId(null)
+    setReportTemplateDraft({ name: '', key: '', default_format: 'pdf', description: '', is_active: true })
+    if (reportTemplateFileRef.current) reportTemplateFileRef.current.value = ''
+  }
+
+  const editReportTemplate = (template: ProductionReportTemplate) => {
+    setEditingReportTemplateId(template.id)
+    setReportTemplateDraft({
+      name: template.name || '',
+      key: template.key || '',
+      default_format: template.default_format || 'pdf',
+      description: template.description || '',
+      is_active: template.is_active,
+    })
+    if (reportTemplateFileRef.current) reportTemplateFileRef.current.value = ''
+  }
+
+  const saveReportTemplate = async () => {
+    const file = reportTemplateFileRef.current?.files?.[0]
+    if (!editingReportTemplateId && !file) {
+      toast({ title: 'Excel şablonu seçin', variant: 'destructive' })
+      return
+    }
+    if (file && !/\.(xlsx|xltx)$/i.test(file.name)) {
+      toast({ title: 'Yalnızca .xlsx veya .xltx yükleyebilirsiniz', variant: 'destructive' })
+      return
+    }
+    const form = new FormData()
+    form.append('name', reportTemplateDraft.name)
+    form.append('key', reportTemplateDraft.key || reportTemplateDraft.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''))
+    form.append('default_format', reportTemplateDraft.default_format)
+    form.append('description', reportTemplateDraft.description)
+    form.append('is_active', String(reportTemplateDraft.is_active))
+    if (file) form.append('file', file)
+    if (editingReportTemplateId) await api.patch(`/production/report-templates/${editingReportTemplateId}/`, form, { headers: { 'Content-Type': 'multipart/form-data' } })
+    else await api.post('/production/report-templates/', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+    toast({ title: editingReportTemplateId ? 'Rapor şablonu güncellendi' : 'Rapor şablonu yüklendi' })
+    resetReportTemplateForm()
+    await load()
   }
 
   const resetDepartmentForm = () => {
@@ -1090,6 +1154,7 @@ export function ProductionManagementPage() {
           <TabsTrigger value="shifts">Vardiyalar</TabsTrigger>
           <TabsTrigger value="alerts">Bildirimler</TabsTrigger>
           <TabsTrigger value="drawings">Teknik Resimler</TabsTrigger>
+          <TabsTrigger value="report-templates">Rapor Şablonları</TabsTrigger>
           <TabsTrigger value="devices">Cihaz & Veri</TabsTrigger>
           <TabsTrigger value="flow">Akış Tasarımcısı</TabsTrigger>
           <TabsTrigger value="presets">Şablonlar</TabsTrigger>
@@ -1666,6 +1731,70 @@ export function ProductionManagementPage() {
           </div>
         </TabsContent>
 
+        <TabsContent value="report-templates">
+          <div className="grid gap-4 xl:grid-cols-[430px_1fr]">
+            <Card>
+              <CardHeader><CardTitle>{editingReportTemplateId ? 'Rapor şablonunu düzenle' : 'Rapor şablonu yükle'}</CardTitle></CardHeader>
+              <CardContent className="space-y-3">
+                <Input placeholder="Şablon adı" value={reportTemplateDraft.name} onChange={(event) => setReportTemplateDraft((current) => ({ ...current, name: event.target.value }))} />
+                <Input placeholder="Anahtar: pres-ustabaşı" value={reportTemplateDraft.key} onChange={(event) => setReportTemplateDraft((current) => ({ ...current, key: event.target.value }))} />
+                <Select value={reportTemplateDraft.default_format} onValueChange={(value) => setReportTemplateDraft((current) => ({ ...current, default_format: value }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pdf">Varsayılan PDF</SelectItem>
+                    <SelectItem value="xlsx">Varsayılan Excel</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Textarea placeholder="Açıklama" value={reportTemplateDraft.description} onChange={(event) => setReportTemplateDraft((current) => ({ ...current, description: event.target.value }))} />
+                <input ref={reportTemplateFileRef} type="file" accept=".xlsx,.xltx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="block w-full rounded-md border p-2 text-sm" />
+                <label className="flex items-center justify-between rounded-md border p-3 text-sm">
+                  <span>Aktif</span>
+                  <Switch checked={reportTemplateDraft.is_active} onCheckedChange={(checked) => setReportTemplateDraft((current) => ({ ...current, is_active: checked }))} />
+                </label>
+                <div className="flex gap-2">
+                  <Button onClick={saveReportTemplate} disabled={!reportTemplateDraft.name.trim()}>
+                    {editingReportTemplateId ? <Save className="mr-2 h-4 w-4" /> : <Upload className="mr-2 h-4 w-4" />}
+                    {editingReportTemplateId ? 'Güncelle' : 'Yükle'}
+                  </Button>
+                  {editingReportTemplateId && <Button variant="outline" onClick={resetReportTemplateForm}><X className="mr-2 h-4 w-4" /> İptal</Button>}
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>Ustabaşı rapor şablonları</CardTitle></CardHeader>
+              <CardContent className="space-y-3">
+                {reportTemplates.map((template) => (
+                  <div key={template.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/10 p-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold">{template.name}</p>
+                      <p className="text-xs text-muted-foreground">{template.key} · {template.default_format?.toUpperCase()} · {template.is_active ? 'Aktif' : 'Pasif'}</p>
+                      {template.description ? <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{template.description}</p> : null}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {template.file_url ? (
+                        <Button variant="outline" size="sm" onClick={() => window.open(template.file_url, '_blank', 'noopener,noreferrer')}>
+                          <Download className="mr-2 h-4 w-4" /> Şablon
+                        </Button>
+                      ) : null}
+                      <Button variant="outline" size="sm" onClick={() => editReportTemplate(template)}>
+                        <Edit3 className="mr-2 h-4 w-4" /> Düzenle
+                      </Button>
+                      <Button variant="ghost" size="sm" className="text-destructive" onClick={() => deleteItem(`/production/report-templates/${template.id}/`, template.name)}>
+                        <Trash2 className="mr-2 h-4 w-4" /> Sil
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                {!reportTemplates.length && (
+                  <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                    Excel şablonu yükleyin. Şablonda genel alanları ve bir örnek kalem satırında <code>{'{kalem1.urunTipi}'}</code>, <code>{'{kalem1.adet}'}</code> gibi placeholderları kullanabilirsiniz.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
         <TabsContent value="devices">
           <div className="grid gap-4 xl:grid-cols-3">
             <Card>
@@ -1913,6 +2042,7 @@ export function ProductionWorkOrdersPage() {
   const [orders, setOrders] = useState<WorkOrder[]>([])
   const [contracts, setContracts] = useState<any[]>([])
   const [tablets, setTablets] = useState<Tablet[]>([])
+  const [reportTemplates, setReportTemplates] = useState<ProductionReportTemplate[]>([])
   const [stepTargetDraft, setStepTargetDraft] = useState<Record<number, string>>({})
   const [contractId, setContractId] = useState('')
   const [query, setQuery] = useState('')
@@ -1921,16 +2051,23 @@ export function ProductionWorkOrdersPage() {
   const [drawingSearching, setDrawingSearching] = useState(false)
   const [publishingId, setPublishingId] = useState<number | null>(null)
   const [expandedLines, setExpandedLines] = useState<Record<number, boolean>>({})
+  const [reportOrder, setReportOrder] = useState<WorkOrder | null>(null)
+  const [reportTemplateId, setReportTemplateId] = useState('')
+  const [reportFormat, setReportFormat] = useState<'xlsx' | 'pdf'>('pdf')
+  const [reportNotes, setReportNotes] = useState('')
+  const [reportExporting, setReportExporting] = useState(false)
 
   const load = async () => {
-    const [wo, qs, tabletRows] = await Promise.all([
+    const [wo, qs, tabletRows, templateRows] = await Promise.all([
       fetchAll<WorkOrder>('/production/work-orders/'),
       fetchAll<any>('/quotes/?document_type=Contract&summary=1'),
       fetchAll<Tablet>('/production/tablets/'),
+      fetchAll<ProductionReportTemplate>('/production/report-templates/').catch(() => []),
     ])
     setOrders(wo)
     setContracts(qs.filter((item) => item.status === 'Approved' || item.status === 'Onaylandı'))
     setTablets(tabletRows)
+    setReportTemplates(templateRows.filter((item) => item.is_active))
   }
 
   useEffect(() => {
@@ -2012,6 +2149,33 @@ export function ProductionWorkOrdersPage() {
     }
   }
 
+  const openWorkOrderReport = (order: WorkOrder) => {
+    const preferred = reportTemplates.find((item) => item.is_active) || reportTemplates[0]
+    setReportOrder(order)
+    setReportTemplateId(preferred ? String(preferred.id) : '')
+    setReportFormat(preferred?.default_format || 'pdf')
+    setReportNotes('')
+  }
+
+  const exportWorkOrderReport = async () => {
+    if (!reportOrder || !reportTemplateId) return
+    setReportExporting(true)
+    try {
+      const response = await api.post(
+        `/production/work-orders/${reportOrder.id}/export-report/`,
+        { template_id: reportTemplateId, format: reportFormat, extra_notes: reportNotes },
+        { responseType: 'blob' },
+      )
+      downloadBlobResponse(response, `${reportOrder.number}-ustabasi-raporu.${reportFormat}`)
+      toast({ title: 'Ustabaşı raporu indirildi' })
+      setReportOrder(null)
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Rapor oluşturulamadı', variant: 'destructive' })
+    } finally {
+      setReportExporting(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -2087,6 +2251,9 @@ export function ProductionWorkOrdersPage() {
                 <p className="text-sm text-muted-foreground">{order.customer_name || 'Cari yok'} · {order.source_number || 'Manuel'} · {order.route_name || 'Rota'}</p>
               </div>
               <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" onClick={() => openWorkOrderReport(order)} disabled={!reportTemplates.length}>
+                  <Download className="mr-2 h-4 w-4" /> Ustabaşı Raporu
+                </Button>
                 {order.status === 'draft' && (
                   <Button
                     size="sm"
@@ -2200,6 +2367,40 @@ export function ProductionWorkOrdersPage() {
           </Card>
         ))}
       </div>
+      <Dialog open={Boolean(reportOrder)} onOpenChange={(open) => { if (!open) setReportOrder(null) }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Ustabaşı raporu oluştur</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">{reportOrder?.number} · {reportOrder?.customer_name || 'Cari yok'}</p>
+            <Select value={reportTemplateId} onValueChange={(value) => {
+              setReportTemplateId(value)
+              const selected = reportTemplates.find((item) => String(item.id) === value)
+              if (selected?.default_format) setReportFormat(selected.default_format)
+            }}>
+              <SelectTrigger><SelectValue placeholder="Rapor şablonu seç" /></SelectTrigger>
+              <SelectContent>
+                {reportTemplates.map((template) => (
+                  <SelectItem key={template.id} value={String(template.id)}>{template.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={reportFormat} onValueChange={(value) => setReportFormat(value as 'xlsx' | 'pdf')}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="pdf">PDF</SelectItem>
+                <SelectItem value="xlsx">Excel</SelectItem>
+              </SelectContent>
+            </Select>
+            <Textarea value={reportNotes} onChange={(event) => setReportNotes(event.target.value)} placeholder="Ek açıklamalar / Açıklama 3-4 gibi basılacak notlar" rows={4} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReportOrder(null)}>İptal</Button>
+            <Button onClick={exportWorkOrderReport} disabled={!reportTemplateId || reportExporting}>
+              <Download className="mr-2 h-4 w-4" /> İndir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

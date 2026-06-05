@@ -1024,6 +1024,105 @@ async function downloadDocument(quoteId: string, documentNumber?: string) {
   window.URL.revokeObjectURL(url)
 }
 
+function downloadBlobResponse(response: any, fallbackFilename: string) {
+  const blob = response.data instanceof Blob ? response.data : new Blob([response.data])
+  const header = response.headers?.['content-disposition'] || response.headers?.['Content-Disposition'] || ''
+  const encodedFileNameMatch = /filename\*=UTF-8''([^;]+)/i.exec(header)
+  const fileNameMatch = /filename="?([^";]+)"?/i.exec(header)
+  const filename = encodedFileNameMatch?.[1] ? decodeURIComponent(encodedFileNameMatch[1]) : fileNameMatch?.[1] || fallbackFilename
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+function ProductionReportExportDialog({ quote, open, onOpenChange }: { quote: Quote | null; open: boolean; onOpenChange: (open: boolean) => void }) {
+  const { toast } = useToast()
+  const [templates, setTemplates] = useState<any[]>([])
+  const [templateId, setTemplateId] = useState('')
+  const [format, setFormat] = useState<'xlsx' | 'pdf'>('pdf')
+  const [notes, setNotes] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    api.get('/production/report-templates/').then((res) => {
+      if (!alive) return
+      const rows = (Array.isArray(res.data) ? res.data : res.data?.results || []).filter((item: any) => item.is_active)
+      setTemplates(rows)
+      const first = rows[0]
+      setTemplateId(first ? String(first.id) : '')
+      setFormat(first?.default_format || 'pdf')
+      setNotes('')
+    }).catch(() => {
+      if (alive) setTemplates([])
+    })
+    return () => { alive = false }
+  }, [open])
+
+  const exportReport = async () => {
+    if (!quote || !templateId) return
+    setBusy(true)
+    try {
+      const response = await api.post(
+        `/quotes/${quote.id}/export-production-report/`,
+        { template_id: templateId, format, extra_notes: notes },
+        { responseType: 'blob' },
+      )
+      downloadBlobResponse(response, `${quote.number}-ustabasi-raporu.${format}`)
+      toast({ title: 'Ustabaşı raporu indirildi' })
+      onOpenChange(false)
+    } catch (error: any) {
+      toast({ title: error?.response?.data?.detail || 'Rapor oluşturulamadı', variant: 'destructive' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Ustabaşı raporu oluştur</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">{quote?.number} · {quote?.customerName || 'Cari yok'}</p>
+          <Select value={templateId} onValueChange={(value) => {
+            setTemplateId(value)
+            const selected = templates.find((item) => String(item.id) === value)
+            if (selected?.default_format) setFormat(selected.default_format)
+          }}>
+            <SelectTrigger><SelectValue placeholder="Rapor şablonu seç" /></SelectTrigger>
+            <SelectContent>
+              {templates.map((template) => (
+                <SelectItem key={template.id} value={String(template.id)}>{template.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={format} onValueChange={(value) => setFormat(value as any)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="pdf">PDF</SelectItem>
+              <SelectItem value="xlsx">Excel</SelectItem>
+            </SelectContent>
+          </Select>
+          <Textarea rows={4} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Ek açıklamalar / Açıklama 3-4 gibi basılacak notlar" />
+          {!templates.length && <p className="text-sm text-muted-foreground">Önce İmalat Yönetimi &gt; Rapor Şablonları bölümünden Excel şablonu yükleyin.</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>İptal</Button>
+          <Button onClick={exportReport} disabled={!templateId || busy}>
+            <Download className="mr-2 h-4 w-4" /> İndir
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function NumericEditor({ value, onValueChange, min = 0, max }: { value?: number; onValueChange: (value: number) => void; min?: number; max?: number }) {
   const [draft, setDraft] = useState(value === undefined || value === null ? '' : String(value))
   const [focused, setFocused] = useState(false)
@@ -1134,6 +1233,7 @@ export function QuotesPage() {
   const [loadingQuoteId, setLoadingQuoteId] = useState<string | null>(null)
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null)
   const [productionConfirmQuote, setProductionConfirmQuote] = useState<Quote | null>(null)
+  const [reportQuote, setReportQuote] = useState<Quote | null>(null)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkEditOpen, setBulkEditOpen] = useState(false)
   const [bulkEditIds, setBulkEditIds] = useState<string[]>([])
@@ -1403,6 +1503,11 @@ export function QuotesPage() {
             <Button variant="ghost" size="icon" onClick={() => handleDownload(row.original)} title="İndir">
               <Download className="h-4 w-4" />
             </Button>
+            <RbacGuard perm="production.reports.export">
+              <Button variant="ghost" size="icon" onClick={() => setReportQuote(row.original)} title="Ustabaşı raporu">
+                <FileCheck2 className="h-4 w-4" />
+              </Button>
+            </RbacGuard>
             {row.original.documentType === 'Quote' ? (
               <RbacGuard perm="quotes.edit">
                 <Button variant="ghost" size="icon" onClick={() => handleConvert(row.original)} title="Sözleşmeye dönüştür">
@@ -1484,6 +1589,8 @@ export function QuotesPage() {
           }}
         />
       ) : null}
+
+      <ProductionReportExportDialog quote={reportQuote} open={Boolean(reportQuote)} onOpenChange={(open) => { if (!open) setReportQuote(null) }} />
 
       <Dialog open={bulkEditOpen} onOpenChange={setBulkEditOpen}>
         <DialogContent className="max-w-2xl">
@@ -2421,6 +2528,7 @@ export function QuoteDetailPage() {
   const [deleting, setDeleting] = useState(false)
   const [fullQuote, setFullQuote] = useState<Quote | null>(null)
   const [productionConfirmQuote, setProductionConfirmQuote] = useState<Quote | null>(null)
+  const [reportOpen, setReportOpen] = useState(false)
   const storeQuote = data.quotes.find((item) => item.id === params.quoteId) ?? data.quotes[0]
   const quote = fullQuote ?? storeQuote
   const company = data.companies.find((item) => item.id === quote?.customerId)
@@ -2537,11 +2645,16 @@ export function QuoteDetailPage() {
               />
             </RbacGuard>
             <Button onClick={handleDownload}><Download className="mr-2 h-4 w-4" />İndir</Button>
+            <RbacGuard perm="production.reports.export">
+              <Button size="sm" variant="outline" onClick={() => setReportOpen(true)}><FileCheck2 className="mr-2 h-4 w-4" />Ustabaşı Raporu</Button>
+            </RbacGuard>
             {quote.documentType === 'Quote' ? <RbacGuard perm="quotes.edit"><Button size="sm" onClick={handleConvert}><Check className="mr-2 h-4 w-4" />Sözleşmeye dönüştür</Button></RbacGuard> : null}
             <RbacGuard perm="quotes.edit"><Button size="sm" variant="destructive" disabled={deleting} onClick={handleDelete}><Trash2 className="mr-2 h-4 w-4" />Sil</Button></RbacGuard>
           </div>
         }
       />
+
+      <ProductionReportExportDialog quote={quote} open={reportOpen} onOpenChange={setReportOpen} />
 
       <Tabs defaultValue="overview">
         <TabsList className="mb-3">
