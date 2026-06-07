@@ -76,7 +76,7 @@ type TechnicalDrawing = {
   is_active?: boolean
   uploaded_at?: string
 }
-type ProductLite = { id: number | string; sku?: string; name?: string; category_name?: string; categoryName?: string; technical_drawing_count?: number; technicalDrawingCount?: number; product_type?: string }
+type ProductLite = { id: number | string; sku?: string; name?: string; category_name?: string; categoryName?: string; technical_drawing_count?: number; technicalDrawingCount?: number; product_type?: string; stock?: string | number; inventory_mode?: string; attribute_values?: Record<string, any>; template_defaults?: Record<string, any> }
 type DrawingFolder = { id: number; name: string; description?: string; order?: number; drawing_count?: number }
 type WorkOrderLine = {
   id: number
@@ -509,6 +509,18 @@ export function ProductionManagementPage() {
   const [selectedProductId, setSelectedProductId] = useState<string>('')
   const [operationDraft, setOperationDraft] = useState({ station: '', order: '0', name: '', description: '' })
   const [materialDraft, setMaterialDraft] = useState({ operation: '', material_product: '', quantity_type: 'fixed', quantity_per_unit: '1', formula: '', unit: 'Adet', scrap_percent: '0', default_location: 'none', conditions: '', note: '' })
+  const [stockInOpen, setStockInOpen] = useState(false)
+  const [stockInForm, setStockInForm] = useState({
+    product_id: '',
+    location_id: '',
+    quantity: '',
+    detail_1_override: '',
+    detail_2_override: '',
+    reference: 'ÜRETİM GİRİŞİ',
+    note: 'Hammadde hızlı girişi',
+  })
+  const [targetProductStocks, setTargetProductStocks] = useState<any[]>([])
+  const [isLoadingStocks, setIsLoadingStocks] = useState(false)
   const productionUsers = useMemo(() => users.filter(canUseProductionTablet), [users])
 
   const load = async () => {
@@ -707,6 +719,66 @@ export function ProductionManagementPage() {
     toast({ title: 'Ürün reçetesi oluşturuldu' })
     setSelectedProductId(String(productId))
     await load()
+  }
+
+  const openStockInForProduct = async (productId: string | number, initialLocationId?: number | null) => {
+    const product = products.find((p) => String(p.id) === String(productId))
+    if (!product) return
+
+    const details = Object.values(product.attribute_values || {}).filter((value) => value != null && String(value).trim())
+    const defaultD1 = String(product.template_defaults?.primary || details[0] || '')
+    const defaultD2 = String(product.template_defaults?.secondary || details[1] || '')
+
+    setStockInForm({
+      product_id: String(productId),
+      location_id: initialLocationId ? String(initialLocationId) : '',
+      quantity: '',
+      detail_1_override: defaultD1,
+      detail_2_override: defaultD2,
+      reference: 'ÜRETİM GİRİŞİ',
+      note: 'Hammadde hızlı girişi',
+    })
+
+    setStockInOpen(true)
+    setIsLoadingStocks(true)
+    try {
+      const response = await api.get('/warehouse-stocks/', { params: { product: productId } })
+      setTargetProductStocks(response.data || [])
+      if (!initialLocationId && response.data && response.data.length > 0) {
+        setStockInForm((prev) => ({
+          ...prev,
+          location_id: String(response.data[0].location),
+        }))
+      }
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setIsLoadingStocks(false)
+    }
+  }
+
+  const submitStockIn = async () => {
+    if (!stockInForm.product_id || !stockInForm.location_id || !stockInForm.quantity) {
+      toast({ title: 'Lütfen ürün, raf ve miktar alanlarını doldurun', variant: 'destructive' })
+      return
+    }
+    try {
+      await api.post('/warehouse-stocks/stock-in/', {
+        product_id: Number(stockInForm.product_id),
+        location_id: Number(stockInForm.location_id),
+        quantity: stockInForm.quantity,
+        detail_1_override: stockInForm.detail_1_override,
+        detail_2_override: stockInForm.detail_2_override,
+        reference: stockInForm.reference,
+        note: stockInForm.note,
+      })
+      setStockInOpen(false)
+      toast({ title: 'Hammadde girişi başarıyla yapıldı' })
+      await load()
+    } catch (error: any) {
+      const msg = error?.response?.data?.detail || 'Hammadde girişi tamamlanamadı'
+      toast({ title: 'Hammadde girişi başarısız', description: msg, variant: 'destructive' })
+    }
   }
 
   const saveRecipeOperation = async () => {
@@ -1821,6 +1893,9 @@ export function ProductionManagementPage() {
                   </div>
                   {selectedRecipe && (
                     <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => openStockInForProduct(selectedRecipe.product)}>
+                        <Plus className="mr-2 h-4 w-4" /> Hammadde Girişi Yap
+                      </Button>
                       <Button variant="ghost" size="sm" className="text-destructive hover:bg-destructive/10" onClick={async () => {
                         await deleteItem(`/product-recipes/${selectedRecipe.id}/`, `${selectedRecipe.product_sku} reçetesi`);
                         setSelectedProductId('');
@@ -1952,9 +2027,14 @@ export function ProductionManagementPage() {
                                     </td>
                                     <td className="max-w-[220px] truncate py-2">{Object.keys(material.conditions || {}).length ? JSON.stringify(material.conditions) : '-'}</td>
                                     <td className="py-2 text-right">
-                                      <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/product-recipe-materials/${material.id}/`, material.material_sku || 'Ham madde')}>
-                                        <Trash2 className="h-4 w-4" />
-                                      </Button>
+                                      <div className="flex justify-end gap-1">
+                                        <Button variant="outline" size="sm" className="h-8 text-primary border-primary/20 hover:bg-primary/5" onClick={() => openStockInForProduct(material.material_product, material.default_location)}>
+                                          <Plus className="mr-1 h-3.5 w-3.5" /> Giriş Yap
+                                        </Button>
+                                        <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/product-recipe-materials/${material.id}/`, material.material_sku || 'Ham madde')}>
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </div>
                                     </td>
                                   </tr>
                                 ))}
@@ -3713,6 +3793,147 @@ export function ProductionTabletPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setCallManagerOpen(false)} disabled={submitting}>Vazgeç</Button>
             <Button onClick={callManager} disabled={submitting} className="bg-amber-500 hover:bg-amber-600 text-white font-bold">Çağrıyı Gönder</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={stockInOpen} onOpenChange={setStockInOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-primary">
+              <Plus className="h-5 w-5" /> Hammadde Girişi (Depoya Mal Kabul)
+            </DialogTitle>
+          </DialogHeader>
+
+          {(() => {
+            const product = products.find((p) => String(p.id) === String(stockInForm.product_id))
+            if (!product) return null
+            
+            const hasExisting = targetProductStocks.length > 0
+            const totalStockVal = targetProductStocks.reduce((sum, s) => sum + Number(s.quantity || 0), 0)
+
+            return (
+              <div className="space-y-3">
+                <div className="rounded-lg bg-muted/40 p-3 border text-xs space-y-1">
+                  <p className="font-semibold text-muted-foreground uppercase">Ürün Detayı</p>
+                  <p className="font-medium text-sm text-foreground">{product.sku} · {product.name}</p>
+                  <p className="text-muted-foreground">Kategori: {product.category_name || product.categoryName || 'Belirtilmemiş'}</p>
+                </div>
+
+                {isLoadingStocks ? (
+                  <div className="flex items-center justify-center p-3 text-xs text-muted-foreground">
+                    <RefreshCw className="mr-2 h-3 w-3 animate-spin" /> Stok bilgisi sorgulanıyor...
+                  </div>
+                ) : !hasExisting ? (
+                  <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 p-3 text-xs">
+                    <p className="font-semibold text-amber-600 flex items-center gap-1">
+                      ⚠️ Depoya İlk Giriş Yapılacak
+                    </p>
+                    <p className="mt-1 text-muted-foreground">
+                      Bu ürün daha önce depoya alınmamıştır. Sistemdeki eski toplam stok bakiyesi (<strong>{product.stock || 0} Adet</strong>) otomatik olarak seçeceğiniz rafa devredilecektir.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 p-3 text-xs">
+                    <p className="font-semibold text-emerald-600 flex items-center gap-1">
+                      ✅ Depoda Stok Kaydı Mevcut
+                    </p>
+                    <div className="mt-1.5 space-y-1">
+                      <p className="text-muted-foreground font-medium">Mevcut Raflar ve Stoklar:</p>
+                      <ul className="list-disc list-inside text-muted-foreground pl-1 space-y-0.5">
+                        {targetProductStocks.map((s, idx) => (
+                          <li key={idx}>
+                            {s.warehouse_name} / <strong>{s.location_code}</strong>: {s.quantity} Adet
+                            { (s.detail_1 || s.detail_2) && ` (${s.detail_1 || ''} / ${s.detail_2 || ''})` }
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="mt-1 text-[10px] text-muted-foreground italic">
+                        Toplam Depo Bakiyesi: {totalStockVal} Adet (Katalog Bakiyesi: {product.stock || 0})
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
+          <div className="space-y-3 py-2 text-sm">
+            <div className="grid gap-1">
+              <Label>Giriş Yapılacak Depo / Raf</Label>
+              <Select 
+                value={stockInForm.location_id} 
+                onValueChange={(val) => setStockInForm(prev => ({ ...prev, location_id: val }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Depo/raf seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  {locations.map((loc) => (
+                    <SelectItem key={loc.id} value={String(loc.id)}>
+                      {loc.warehouse_name || 'Depo'} / {loc.code}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1">
+                <Label>Detay-1 (Boy/Ölçü)</Label>
+                <Input 
+                  value={stockInForm.detail_1_override} 
+                  onChange={(e) => setStockInForm(prev => ({ ...prev, detail_1_override: e.target.value }))}
+                  placeholder="örn: 60"
+                />
+              </div>
+              <div className="grid gap-1">
+                <Label>Detay-2 (Renk/Özellik)</Label>
+                <Input 
+                  value={stockInForm.detail_2_override} 
+                  onChange={(e) => setStockInForm(prev => ({ ...prev, detail_2_override: e.target.value }))}
+                  placeholder="örn: Kırmızı"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-1">
+              <Label>Eklenecek Miktar</Label>
+              <Input 
+                type="number" 
+                min="0.01" 
+                step="any"
+                value={stockInForm.quantity} 
+                onChange={(e) => setStockInForm(prev => ({ ...prev, quantity: e.target.value }))}
+                placeholder="0.00"
+              />
+            </div>
+
+            <div className="grid gap-1">
+              <Label>Referans (Evrak/İrsaliye)</Label>
+              <Input 
+                value={stockInForm.reference} 
+                onChange={(e) => setStockInForm(prev => ({ ...prev, reference: e.target.value }))}
+                placeholder="İrsaliye no vb."
+              />
+            </div>
+
+            <div className="grid gap-1">
+              <Label>Açıklama</Label>
+              <Textarea 
+                value={stockInForm.note} 
+                onChange={(e) => setStockInForm(prev => ({ ...prev, note: e.target.value }))}
+                placeholder="Açıklama yazın..."
+                rows={2}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStockInOpen(false)}>İptal</Button>
+            <Button onClick={submitStockIn} className="bg-primary hover:bg-primary/95 text-white">
+              Stok Girişini Tamamla
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

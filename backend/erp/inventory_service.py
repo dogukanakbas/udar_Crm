@@ -51,10 +51,37 @@ def _normalize_detail(value):
 def _get_locked_stock(organization, product, location, *, allow_legacy=False, detail_1_override='', detail_2_override=''):
     _validate_location(organization, location)
     if not allow_legacy and product.inventory_mode != 'warehouse':
-        if product.stock:
-            raise InventoryError('Mevcut bakiyesi bulunan ürün önce açılış stok devriyle depo sistemine alınmalıdır.')
+        legacy_qty = product.stock
         Product.objects.filter(pk=product.pk).update(inventory_mode='warehouse')
         product.inventory_mode = 'warehouse'
+        
+        stock, created = WarehouseStock.objects.select_for_update().get_or_create(
+            organization=organization,
+            warehouse=location.warehouse,
+            location=location,
+            product=product,
+            detail_1_override=_normalize_detail(detail_1_override),
+            detail_2_override=_normalize_detail(detail_2_override),
+        )
+        if legacy_qty > 0:
+            stock.quantity += legacy_qty
+            stock.save()
+            
+            _record(
+                organization=organization,
+                product=product,
+                movement_type='OPENING',
+                quantity=legacy_qty,
+                reference='OTOMATİK GEÇİŞ',
+                note='Stok girişi sırasında eski toplam bakiye bu rafa devredildi.',
+                source_type='opening',
+                to_stock=stock,
+                previous_quantity=Decimal('0'),
+                resulting_quantity=stock.quantity
+            )
+            sync_product_total(product)
+        return stock
+
     stock, _ = WarehouseStock.objects.select_for_update().get_or_create(
         organization=organization,
         warehouse=location.warehouse,
