@@ -76,7 +76,7 @@ type TechnicalDrawing = {
   is_active?: boolean
   uploaded_at?: string
 }
-type ProductLite = { id: number | string; sku?: string; name?: string; category_name?: string; categoryName?: string; technical_drawing_count?: number; technicalDrawingCount?: number }
+type ProductLite = { id: number | string; sku?: string; name?: string; category_name?: string; categoryName?: string; technical_drawing_count?: number; technicalDrawingCount?: number; product_type?: string }
 type DrawingFolder = { id: number; name: string; description?: string; order?: number; drawing_count?: number }
 type WorkOrderLine = {
   id: number
@@ -506,8 +506,7 @@ export function ProductionManagementPage() {
   const [drawingSearch, setDrawingSearch] = useState('')
   const [reportTemplateDraft, setReportTemplateDraft] = useState({ name: '', key: '', default_format: 'pdf', description: '', is_active: true })
   const [editingReportTemplateId, setEditingReportTemplateId] = useState<number | null>(null)
-  const [recipeDraft, setRecipeDraft] = useState({ product: '', version: 'v1', description: '', valid_from: '', valid_to: '' })
-  const [selectedRecipeId, setSelectedRecipeId] = useState<number | null>(null)
+  const [selectedProductId, setSelectedProductId] = useState<string>('')
   const [operationDraft, setOperationDraft] = useState({ station: '', order: '0', name: '', description: '' })
   const [materialDraft, setMaterialDraft] = useState({ operation: '', material_product: '', quantity_type: 'fixed', quantity_per_unit: '1', formula: '', unit: 'Adet', scrap_percent: '0', default_location: 'none', conditions: '', note: '' })
   const productionUsers = useMemo(() => users.filter(canUseProductionTablet), [users])
@@ -595,10 +594,16 @@ export function ProductionManagementPage() {
     ].join(' ').toLowerCase().includes(q))
   }, [drawings, drawingSearch])
 
-  const selectedRecipe = useMemo(
-    () => recipes.find((recipe) => recipe.id === selectedRecipeId) || recipes[0],
-    [recipes, selectedRecipeId],
-  )
+  const recipeProducts = useMemo(() => {
+    return products.filter((p) => !p.product_type || p.product_type === 'finished' || p.product_type === 'semi_finished')
+  }, [products])
+
+  const selectedRecipe = useMemo(() => {
+    if (!selectedProductId) return undefined
+    return recipes.find((recipe) => String(recipe.product) === String(selectedProductId))
+  }, [recipes, selectedProductId])
+
+  const selectedRecipeId = selectedRecipe?.id || null
 
   const saveSettings = async () => {
     await api.patch('/production/settings/', settings)
@@ -688,36 +693,19 @@ export function ProductionManagementPage() {
     await load()
   }
 
-  const saveRecipe = async () => {
-    if (!recipeDraft.product) {
-      toast({ title: 'Ürün seçin', variant: 'destructive' })
-      return
-    }
+  const initializeRecipeForProduct = async (productId: string | number) => {
+    if (!productId) return
     const payload = {
-      product: Number(recipeDraft.product),
-      version: recipeDraft.version || 'v1',
-      description: recipeDraft.description,
-      valid_from: recipeDraft.valid_from || null,
-      valid_to: recipeDraft.valid_to || null,
-      status: 'draft',
+      product: Number(productId),
+      version: 'v1',
+      description: 'Ürün reçetesi',
+      status: 'published',
     }
     const response = await api.post('/product-recipes/', payload)
-    setSelectedRecipeId(response.data.id)
-    setRecipeDraft({ product: '', version: 'v1', description: '', valid_from: '', valid_to: '' })
-    toast({ title: 'Reçete taslağı oluşturuldu' })
-    await load()
-  }
-
-  const publishRecipe = async (recipe: ProductRecipe) => {
-    await api.post(`/product-recipes/${recipe.id}/publish/`)
-    toast({ title: 'Reçete yayınlandı' })
-    await load()
-  }
-
-  const cloneRecipe = async (recipe: ProductRecipe) => {
-    const response = await api.post(`/product-recipes/${recipe.id}/clone-draft/`)
-    setSelectedRecipeId(response.data.id)
-    toast({ title: 'Reçete taslağı kopyalandı' })
+    const newRecipeId = response.data.id
+    await api.post(`/product-recipes/${newRecipeId}/publish/`)
+    toast({ title: 'Ürün reçetesi oluşturuldu' })
+    setSelectedProductId(String(productId))
     await load()
   }
 
@@ -1780,50 +1768,42 @@ export function ProductionManagementPage() {
             <div className="space-y-4">
               <Card>
                 <CardHeader>
-                  <CardTitle>Reçete taslağı oluştur</CardTitle>
-                  <p className="text-sm text-muted-foreground">Yayınlanan reçete yeni iş emirlerine snapshot olarak düşer. Eski işler kendi reçete kopyasıyla kalır.</p>
+                  <CardTitle>Ürün Reçetesi Seçimi</CardTitle>
+                  <p className="text-sm text-muted-foreground">Reçetesini düzenlemek veya oluşturmak istediğiniz mamülü seçin.</p>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <Select value={recipeDraft.product} onValueChange={(value) => setRecipeDraft((current) => ({ ...current, product: value }))}>
-                    <SelectTrigger><SelectValue placeholder="Mamül / yarı mamül ürün seç" /></SelectTrigger>
+                  <Select value={selectedProductId} onValueChange={(value) => setSelectedProductId(value)}>
+                    <SelectTrigger><SelectValue placeholder="Mamül / yarı mamül seçin" /></SelectTrigger>
                     <SelectContent>
-                      {products.map((product) => (
+                      {recipeProducts.map((product) => (
                         <SelectItem key={String(product.id)} value={String(product.id)}>{asText(product.sku, 'Kodsuz')} - {asText(product.name, 'Ürün')}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    <Input placeholder="Versiyon" value={recipeDraft.version} onChange={(event) => setRecipeDraft((current) => ({ ...current, version: event.target.value }))} />
-                    <Input type="date" value={recipeDraft.valid_from} onChange={(event) => setRecipeDraft((current) => ({ ...current, valid_from: event.target.value }))} />
-                    <Input type="date" value={recipeDraft.valid_to} onChange={(event) => setRecipeDraft((current) => ({ ...current, valid_to: event.target.value }))} />
-                  </div>
-                  <Textarea placeholder="Reçete açıklaması" value={recipeDraft.description} onChange={(event) => setRecipeDraft((current) => ({ ...current, description: event.target.value }))} />
-                  <Button onClick={saveRecipe} disabled={!recipeDraft.product}>
-                    <Plus className="mr-2 h-4 w-4" /> Taslak oluştur
-                  </Button>
                 </CardContent>
               </Card>
 
               <Card>
-                <CardHeader><CardTitle>Reçeteler</CardTitle></CardHeader>
+                <CardHeader>
+                  <CardTitle>Mevcut Reçeteler</CardTitle>
+                  <p className="text-sm text-muted-foreground">Sistemde tanımlı reçetesi bulunan mamüller.</p>
+                </CardHeader>
                 <CardContent className="space-y-2">
                   {recipes.map((recipe) => (
                     <button
                       key={recipe.id}
                       type="button"
-                      className={`w-full rounded-lg border p-3 text-left hover:bg-muted/30 ${selectedRecipe?.id === recipe.id ? 'bg-muted/30' : ''}`}
-                      onClick={() => setSelectedRecipeId(recipe.id)}
+                      className={`w-full rounded-lg border p-3 text-left hover:bg-muted/30 ${selectedProductId === String(recipe.product) ? 'bg-muted/30 border-primary' : ''}`}
+                      onClick={() => setSelectedProductId(String(recipe.product))}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
                           <p className="truncate font-semibold">{asText(recipe.product_sku, 'Kodsuz')} · {asText(recipe.product_name, 'Ürün')}</p>
-                          <p className="text-xs text-muted-foreground">Versiyon {recipe.version}</p>
                         </div>
-                        <Badge variant={recipe.status === 'published' ? 'secondary' : 'outline'}>{recipe.status === 'published' ? 'Yayında' : recipe.status === 'archived' ? 'Arşiv' : 'Taslak'}</Badge>
                       </div>
                     </button>
                   ))}
-                  {!recipes.length && <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">Henüz ürün reçetesi yok.</p>}
+                  {!recipes.length && <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">Henüz tanımlı ürün reçetesi yok.</p>}
                 </CardContent>
               </Card>
             </div>
@@ -1832,28 +1812,40 @@ export function ProductionManagementPage() {
               <CardHeader>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <CardTitle>Reçete operasyonları ve hammaddeler</CardTitle>
-                    <p className="text-sm text-muted-foreground">
-                      {selectedRecipe ? `${asText(selectedRecipe.product_sku, 'Kodsuz')} · ${asText(selectedRecipe.product_name, 'Ürün')} · ${selectedRecipe.version}` : 'Reçete seçin'}
-                    </p>
+                    <CardTitle>Reçete İçeriği (Operasyonlar ve Hammaddeler)</CardTitle>
+                    {selectedRecipe && (
+                      <p className="text-sm text-muted-foreground font-semibold text-primary mt-1">
+                        {asText(selectedRecipe.product_sku, 'Kodsuz')} · {asText(selectedRecipe.product_name, 'Ürün')}
+                      </p>
+                    )}
                   </div>
                   {selectedRecipe && (
                     <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={() => cloneRecipe(selectedRecipe)}>
-                        <Copy className="mr-2 h-4 w-4" /> Kopyala
-                      </Button>
-                      <Button size="sm" onClick={() => publishRecipe(selectedRecipe)} disabled={selectedRecipe.status === 'published'}>
-                        <CheckCircle2 className="mr-2 h-4 w-4" /> Yayınla
-                      </Button>
-                      <Button variant="ghost" size="sm" className="text-destructive" onClick={() => deleteItem(`/product-recipes/${selectedRecipe.id}/`, `${selectedRecipe.product_sku} reçetesi`)}>
-                        <Trash2 className="mr-2 h-4 w-4" /> Sil
+                      <Button variant="ghost" size="sm" className="text-destructive hover:bg-destructive/10" onClick={async () => {
+                        await deleteItem(`/product-recipes/${selectedRecipe.id}/`, `${selectedRecipe.product_sku} reçetesi`);
+                        setSelectedProductId('');
+                      }}>
+                        <Trash2 className="mr-2 h-4 w-4" /> Reçeteyi Sil
                       </Button>
                     </div>
                   )}
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                {selectedRecipe ? (
+                {selectedProductId && !selectedRecipe ? (
+                  <div className="flex flex-col items-center justify-center p-12 text-center border border-dashed rounded-lg bg-muted/5">
+                    <div className="p-3 mb-3 rounded-full bg-primary/10 text-primary">
+                      <Plus className="h-6 w-6" />
+                    </div>
+                    <h3 className="font-semibold text-lg">Bu ürünün henüz bir reçetesi bulunmuyor</h3>
+                    <p className="text-sm text-muted-foreground max-w-sm mt-1 mb-4">
+                      Bu mamül için operasyonları ve kullanılacak malzemeleri tanımlamaya başlamak için hemen bir reçete oluşturun.
+                    </p>
+                    <Button onClick={() => initializeRecipeForProduct(selectedProductId)}>
+                      Reçete Tanımla
+                    </Button>
+                  </div>
+                ) : selectedRecipe ? (
                   <>
                     <div className="grid gap-2 rounded-lg border p-3 lg:grid-cols-[1fr_110px_1fr_auto]">
                       <Select value={operationDraft.station} onValueChange={(value) => setOperationDraft((current) => ({ ...current, station: value }))}>
@@ -1980,7 +1972,9 @@ export function ProductionManagementPage() {
                     </div>
                   </>
                 ) : (
-                  <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">Sol taraftan reçete seçin veya yeni taslak oluşturun.</div>
+                  <div className="flex items-center justify-center p-12 text-center text-muted-foreground">
+                    Lütfen reçete düzenlemek veya oluşturmak için sol taraftan bir ürün seçin.
+                  </div>
                 )}
               </CardContent>
             </Card>
