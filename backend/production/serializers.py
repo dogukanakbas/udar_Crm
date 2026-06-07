@@ -557,11 +557,13 @@ class ProductRecipeMaterialSerializer(serializers.ModelSerializer):
     operation_station = serializers.CharField(source='operation.station.code', read_only=True)
     recipe = serializers.IntegerField(source='operation.recipe_id', read_only=True)
     default_location_label = serializers.SerializerMethodField()
+    total_stock = serializers.SerializerMethodField()
+    location_stock = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductRecipeMaterial
         fields = '__all__'
-        read_only_fields = ['organization', 'material_sku', 'material_name', 'operation_station', 'recipe', 'default_location_label']
+        read_only_fields = ['organization', 'material_sku', 'material_name', 'operation_station', 'recipe', 'default_location_label', 'total_stock', 'location_stock']
 
     def validate(self, attrs):
         org = getattr(getattr(self.context.get('request'), 'user', None), 'organization', None)
@@ -586,17 +588,29 @@ class ProductRecipeMaterialSerializer(serializers.ModelSerializer):
         warehouse = obj.default_location.warehouse
         return f'{warehouse.code} / {obj.default_location.code}{(" - " + obj.default_location.name) if obj.default_location.name else ""}'
 
+    def get_total_stock(self, obj):
+        return obj.material_product.stock
+
+    def get_location_stock(self, obj):
+        if not obj.default_location:
+            return 0
+        from django.db.models import Sum
+        return obj.default_location.stocks.filter(product=obj.material_product).aggregate(total=Sum('quantity'))['total'] or 0
+
 
 class ProductionMaterialRequirementSerializer(serializers.ModelSerializer):
     station_code = serializers.CharField(source='station.code', read_only=True)
     station_name = serializers.CharField(source='station.name', read_only=True)
     location_label = serializers.SerializerMethodField()
     remaining_quantity = serializers.SerializerMethodField()
+    total_stock = serializers.SerializerMethodField()
+    location_stock = serializers.SerializerMethodField()
+    matching_stock = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductionMaterialRequirement
         fields = '__all__'
-        read_only_fields = ['organization', 'work_order', 'line', 'step', 'station_code', 'station_name', 'location_label', 'remaining_quantity', 'created_at']
+        read_only_fields = ['organization', 'work_order', 'line', 'step', 'station_code', 'station_name', 'location_label', 'remaining_quantity', 'created_at', 'total_stock', 'location_stock', 'matching_stock']
 
     def get_location_label(self, obj):
         if not obj.default_location:
@@ -606,6 +620,27 @@ class ProductionMaterialRequirementSerializer(serializers.ModelSerializer):
 
     def get_remaining_quantity(self, obj):
         return max(obj.planned_quantity - obj.consumed_quantity, 0)
+
+    def get_total_stock(self, obj):
+        return obj.material_product.stock
+
+    def get_location_stock(self, obj):
+        if not obj.default_location:
+            return 0
+        from django.db.models import Sum
+        return obj.default_location.stocks.filter(product=obj.material_product).aggregate(total=Sum('quantity'))['total'] or 0
+
+    def get_matching_stock(self, obj):
+        if not obj.default_location:
+            return 0
+        d1 = str(obj.detail_1_override or '').strip()
+        d2 = str(obj.detail_2_override or '').strip()
+        stock = obj.default_location.stocks.filter(
+            product=obj.material_product,
+            detail_1_override=d1,
+            detail_2_override=d2
+        ).first()
+        return stock.quantity if stock else 0
 
 
 class ProductionMaterialConsumptionSerializer(serializers.ModelSerializer):

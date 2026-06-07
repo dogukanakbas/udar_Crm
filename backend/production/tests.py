@@ -1404,3 +1404,82 @@ class ProductionAutomationTests(TestCase):
         self.assertEqual(win.start_total, Decimal('50.00'))
         self.assertTrue(win.participants.filter(user=selami).exists())
         self.assertFalse(win.participants.filter(user=ali).exists())
+
+    def test_dynamic_detail_templates_and_stock_calc(self):
+        # 1. Setup recipe with dynamic templates
+        raw = Product.objects.create(
+            organization=self.org,
+            sku='RAW-DYNAMIC',
+            name='Dinamik Ham Madde',
+            product_type='raw_material',
+        )
+        recipe = ProductRecipe.objects.create(
+            organization=self.org,
+            product=self.product,
+            version='v1',
+            status='published',
+            published_by=self.user,
+            published_at=timezone.now(),
+        )
+        station = ProductionStation.objects.filter(organization=self.org).order_by('department__order', 'order', 'id').first()
+        operation = ProductRecipeOperation.objects.create(
+            organization=self.org,
+            recipe=recipe,
+            station=station,
+            order=0,
+            name='Test operasyon',
+        )
+        material = ProductRecipeMaterial.objects.create(
+            organization=self.org,
+            operation=operation,
+            material_product=raw,
+            unit='Adet',
+            quantity_type='fixed',
+            quantity_per_unit=Decimal('5'),
+            default_location=self.location,
+            detail_1_override='{width + 10}x{height + 20}',
+            detail_2_override='{color} Boya',
+        )
+
+        # 2. Setup Warehouse Stock
+        # Exact matching override stock
+        WarehouseStock.objects.create(
+            organization=self.org,
+            warehouse=self.warehouse,
+            location=self.location,
+            product=raw,
+            detail_1_override='110x230',
+            detail_2_override='Antrasit Boya',
+            quantity=Decimal('15'),
+        )
+        # Other override stock
+        WarehouseStock.objects.create(
+            organization=self.org,
+            warehouse=self.warehouse,
+            location=self.location,
+            product=raw,
+            detail_1_override='100x200',
+            detail_2_override='Beyaz',
+            quantity=Decimal('25'),
+        )
+        raw.stock = Decimal('40')
+        raw.save(update_fields=['stock'])
+
+        # 3. Create Contract & Work Order
+        order = create_work_order_from_contract(self.make_contract(), user=self.user)
+        line = order.lines.get()
+        requirement = ProductionMaterialRequirement.objects.get(line=line)
+
+        # 4. Assert template rendering and resolved overrides
+        self.assertEqual(requirement.detail_1_override, '110x230')
+        self.assertEqual(requirement.detail_2_override, 'Antrasit Boya')
+
+        # 5. Assert stock levels via API
+        client = APIClient()
+        client.force_authenticate(user=self.user)
+        res = client.get(f'/api/production/work-orders/{order.id}/material-requirements/')
+        self.assertEqual(res.status_code, 200)
+        req_data = res.data[0]
+        self.assertEqual(float(req_data['total_stock']), 40.0)
+        self.assertEqual(float(req_data['location_stock']), 40.0)
+        self.assertEqual(float(req_data['matching_stock']), 15.0)

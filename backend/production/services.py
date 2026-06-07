@@ -252,6 +252,29 @@ def _condition_matches_recipe(condition, context):
     return True
 
 
+def _eval_detail_template(template, context):
+    if not template:
+        return ''
+    import re
+    def replace_match(match):
+        expr = match.group(1).strip()
+        # First try as a safe formula evaluation (numeric)
+        try:
+            val = _safe_formula_eval(expr, context)
+            if val == int(val):
+                return str(int(val))
+            return str(val).rstrip('0').rstrip('.')
+        except Exception:
+            # Fallback to key lookup in context if it is a simple variable name
+            val = _condition_lookup(context, expr)
+            if val is not None:
+                return str(val)
+            if expr in context:
+                return str(context[expr])
+            return match.group(0)
+    return re.sub(r'\{([^{}]+)\}', replace_match, template)
+
+
 def _material_quantity(row, line, produced_quantity):
     context = _recipe_context(line, produced_quantity)
     if getattr(row, 'quantity_type', 'fixed') == 'formula':
@@ -322,8 +345,8 @@ def build_material_requirements_for_line(line):
                     scrap_percent=material.scrap_percent,
                     planned_quantity=planned,
                     default_location=material.default_location,
-                    detail_1_override=material.detail_1_override,
-                    detail_2_override=material.detail_2_override,
+                    detail_1_override=_eval_detail_template(material.detail_1_override, context),
+                    detail_2_override=_eval_detail_template(material.detail_2_override, context),
                     conditions_snapshot=deepcopy(material.conditions or {}),
                     note=material.note,
                 )

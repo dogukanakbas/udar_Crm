@@ -39,8 +39,8 @@ type RouteStep = { id: number; station: number; station_code?: string; station_n
 type RouteTemplate = { id: number; name: string; product_group_key?: string; is_default: boolean; steps?: RouteStep[] }
 type WarehouseLocation = { id: number; code: string; name?: string; warehouse: number; warehouse_name?: string }
 type ProductionSettings = { default_completion_location?: number | null; default_completion_warehouse?: number | null; auto_stock_in_enabled?: boolean }
-type MaterialRequirement = { id: number; material_product?: number; material_sku: string; material_name: string; station_code?: string; station_name?: string; unit?: string; planned_quantity: string | number; consumed_quantity: string | number; remaining_quantity?: string | number; location_label?: string; note?: string }
-type ProductRecipeMaterial = { id: number; operation: number; material_product: number; material_sku?: string; material_name?: string; unit: string; quantity_type: 'fixed' | 'formula'; quantity_per_unit: string | number; formula?: string; scrap_percent?: string | number; conditions?: Record<string, any>; default_location?: number | null; default_location_label?: string; note?: string; is_active: boolean; order: number }
+type MaterialRequirement = { id: number; material_product?: number; material_sku: string; material_name: string; station_code?: string; station_name?: string; unit?: string; planned_quantity: string | number; consumed_quantity: string | number; remaining_quantity?: string | number; location_label?: string; note?: string; total_stock?: string | number; location_stock?: string | number; matching_stock?: string | number }
+type ProductRecipeMaterial = { id: number; operation: number; material_product: number; material_sku?: string; material_name?: string; unit: string; quantity_type: 'fixed' | 'formula'; quantity_per_unit: string | number; formula?: string; scrap_percent?: string | number; conditions?: Record<string, any>; default_location?: number | null; default_location_label?: string; note?: string; is_active: boolean; order: number; total_stock?: string | number; location_stock?: string | number }
 type ProductRecipeOperation = { id: number; recipe: number; station: number; station_code?: string; station_name?: string; department_name?: string; order: number; name?: string; description?: string; materials?: ProductRecipeMaterial[] }
 type ProductRecipe = { id: number; product: number; product_sku?: string; product_name?: string; version: string; status: 'draft' | 'published' | 'archived'; description?: string; valid_from?: string | null; valid_to?: string | null; operations?: ProductRecipeOperation[] }
 type DepartmentDraft = { code: string; name: string; color: string; notification_group: string; is_active: boolean }
@@ -338,13 +338,28 @@ function MaterialRequirementList({ rows, compact = false }: { rows?: MaterialReq
   return (
     <div className={`rounded-md border bg-muted/10 ${compact ? 'p-2' : 'p-3'}`}>
       <p className={`${compact ? 'text-[11px]' : 'text-xs'} font-semibold uppercase tracking-wide text-muted-foreground`}>Bu istasyonda kullanılacak hammaddeler</p>
-      <div className={`mt-2 grid gap-1 ${compact ? 'text-[11px]' : 'text-xs'}`}>
-        {items.slice(0, compact ? 4 : 12).map((row) => (
-          <div key={row.id} className="flex items-center justify-between gap-3">
-            <span className="min-w-0 truncate">{asText(row.material_sku, 'Kodsuz')} · {asText(row.material_name, 'Ham madde')}</span>
-            <span className="shrink-0 font-semibold">{formatNumber(n(row.remaining_quantity ?? row.planned_quantity))} {row.unit || ''}</span>
-          </div>
-        ))}
+      <div className={`mt-2 grid gap-1.5 ${compact ? 'text-[11px]' : 'text-xs'}`}>
+        {items.slice(0, compact ? 4 : 12).map((row) => {
+          const reqQty = n(row.remaining_quantity ?? row.planned_quantity);
+          const availableStock = row.location_label ? n(row.matching_stock) : n(row.total_stock);
+          const isShortage = availableStock < reqQty;
+          return (
+            <div key={row.id} className="flex items-center justify-between gap-3 border-b border-dashed border-muted/50 pb-1 last:border-0 last:pb-0">
+              <div className="flex flex-col min-w-0">
+                <span className="truncate font-medium text-foreground">{asText(row.material_sku, 'Kodsuz')} · {asText(row.material_name, 'Ham madde')}</span>
+                <span className="text-[10px] text-muted-foreground truncate">
+                  {row.location_label ? `${row.location_label} (Raf Stok: ` : 'Toplam Stok: '}
+                  <span className={isShortage ? "text-destructive font-semibold" : "text-emerald-600 font-semibold"}>
+                    {formatNumber(availableStock)}
+                  </span>
+                  {row.location_label && ` / Toplam: ${formatNumber(n(row.total_stock))}`}
+                  {`)`}
+                </span>
+              </div>
+              <span className="shrink-0 font-semibold text-right text-foreground">{formatNumber(reqQty)} {row.unit || ''}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   )
@@ -1920,6 +1935,7 @@ export function ProductionManagementPage() {
                                   <th className="py-2 text-left">Miktar</th>
                                   <th className="py-2 text-left">Fire</th>
                                   <th className="py-2 text-left">Depo / Raf</th>
+                                  <th className="py-2 text-left">Stok (Raf / Toplam)</th>
                                   <th className="py-2 text-left">Koşul</th>
                                   <th />
                                 </tr>
@@ -1931,6 +1947,17 @@ export function ProductionManagementPage() {
                                     <td className="py-2">{material.quantity_type === 'formula' ? material.formula : `${formatNumber(n(material.quantity_per_unit))} ${material.unit}`}</td>
                                     <td className="py-2">%{formatNumber(n(material.scrap_percent))}</td>
                                     <td className="py-2">{material.default_location_label || '-'}</td>
+                                    <td className="py-2">
+                                      {material.default_location ? (
+                                        <span className={n(material.location_stock) <= 0 ? "text-destructive font-medium" : "text-muted-foreground font-medium"}>
+                                          {formatNumber(n(material.location_stock))} / {formatNumber(n(material.total_stock))} {material.unit}
+                                        </span>
+                                      ) : (
+                                        <span className={n(material.total_stock) <= 0 ? "text-destructive font-medium" : "text-muted-foreground font-medium"}>
+                                          - / {formatNumber(n(material.total_stock))} {material.unit}
+                                        </span>
+                                      )}
+                                    </td>
                                     <td className="max-w-[220px] truncate py-2">{Object.keys(material.conditions || {}).length ? JSON.stringify(material.conditions) : '-'}</td>
                                     <td className="py-2 text-right">
                                       <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/product-recipe-materials/${material.id}/`, material.material_sku || 'Ham madde')}>
@@ -1940,7 +1967,7 @@ export function ProductionManagementPage() {
                                   </tr>
                                 ))}
                                 {!(operation.materials || []).length && (
-                                  <tr><td colSpan={6} className="py-3 text-sm text-muted-foreground">Bu operasyona bağlı ham madde yok.</td></tr>
+                                  <tr><td colSpan={7} className="py-3 text-sm text-muted-foreground">Bu operasyona bağlı ham madde yok.</td></tr>
                                 )}
                               </tbody>
                             </table>
