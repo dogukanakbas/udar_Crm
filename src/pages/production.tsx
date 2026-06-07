@@ -615,7 +615,6 @@ export function ProductionManagementPage() {
     return recipes.find((recipe) => String(recipe.product) === String(selectedProductId))
   }, [recipes, selectedProductId])
 
-  const selectedRecipeId = selectedRecipe?.id || null
 
   const saveSettings = async () => {
     await api.patch('/production/settings/', settings)
@@ -2460,6 +2459,147 @@ export function ProductionManagementPage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={stockInOpen} onOpenChange={setStockInOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-primary">
+              <Plus className="h-5 w-5" /> Hammadde Girişi (Depoya Mal Kabul)
+            </DialogTitle>
+          </DialogHeader>
+
+          {(() => {
+            const product = products.find((p: any) => String(p.id) === String(stockInForm.product_id))
+            if (!product) return null
+            
+            const hasExisting = targetProductStocks.length > 0
+            const totalStockVal = targetProductStocks.reduce((sum: number, s: any) => sum + Number(s.quantity || 0), 0)
+
+            return (
+              <div className="space-y-3">
+                <div className="rounded-lg bg-muted/40 p-3 border text-xs space-y-1">
+                  <p className="font-semibold text-muted-foreground uppercase">Ürün Detayı</p>
+                  <p className="font-medium text-sm text-foreground">{product.sku} · {product.name}</p>
+                  <p className="text-muted-foreground">Kategori: {product.category_name || product.categoryName || 'Belirtilmemiş'}</p>
+                </div>
+
+                {isLoadingStocks ? (
+                  <div className="flex items-center justify-center p-3 text-xs text-muted-foreground">
+                    <RefreshCw className="mr-2 h-3 w-3 animate-spin" /> Stok bilgisi sorgulanıyor...
+                  </div>
+                ) : !hasExisting ? (
+                  <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 p-3 text-xs">
+                    <p className="font-semibold text-amber-600 flex items-center gap-1">
+                      ⚠️ Depoya İlk Giriş Yapılacak
+                    </p>
+                    <p className="mt-1 text-muted-foreground">
+                      Bu ürün daha önce depoya alınmamıştır. Sistemdeki eski toplam stok bakiyesi (<strong>{product.stock || 0} Adet</strong>) otomatik olarak seçeceğiniz rafa devredilecektir.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 p-3 text-xs">
+                    <p className="font-semibold text-emerald-600 flex items-center gap-1">
+                      ✅ Depoda Stok Kaydı Mevcut
+                    </p>
+                    <div className="mt-1.5 space-y-1">
+                      <p className="text-muted-foreground font-medium">Mevcut Raflar ve Stoklar:</p>
+                      <ul className="list-disc list-inside text-muted-foreground pl-1 space-y-0.5">
+                        {targetProductStocks.map((s: any, idx: number) => (
+                          <li key={idx}>
+                            {s.warehouse_name} / <strong>{s.location_code}</strong>: {s.quantity} Adet
+                            { (s.detail_1 || s.detail_2) && ` (${s.detail_1 || ''} / ${s.detail_2 || ''})` }
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="mt-1 text-[10px] text-muted-foreground italic">
+                        Toplam Depo Bakiyesi: {totalStockVal} Adet (Katalog Bakiyesi: {product.stock || 0})
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
+          <div className="space-y-3 py-2 text-sm">
+            <div className="grid gap-1">
+              <Label>Giriş Yapılacak Depo / Raf</Label>
+              <Select 
+                value={stockInForm.location_id} 
+                onValueChange={(val) => setStockInForm((prev: any) => ({ ...prev, location_id: val }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Depo/raf seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  {locations.map((loc: any) => (
+                    <SelectItem key={loc.id} value={String(loc.id)}>
+                      {loc.warehouse_name || 'Depo'} / {loc.code}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1">
+                <Label>Detay-1 (Boy/Ölçü)</Label>
+                <Input 
+                  value={stockInForm.detail_1_override} 
+                  onChange={(e) => setStockInForm((prev: any) => ({ ...prev, detail_1_override: e.target.value }))}
+                  placeholder="örn: 60"
+                />
+              </div>
+              <div className="grid gap-1">
+                <Label>Detay-2 (Renk/Özellik)</Label>
+                <Input 
+                  value={stockInForm.detail_2_override} 
+                  onChange={(e) => setStockInForm((prev: any) => ({ ...prev, detail_2_override: e.target.value }))}
+                  placeholder="örn: Kırmızı"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-1">
+              <Label>Eklenecek Miktar</Label>
+              <Input 
+                type="number" 
+                min="0.01" 
+                step="any"
+                value={stockInForm.quantity} 
+                onChange={(e) => setStockInForm((prev: any) => ({ ...prev, quantity: e.target.value }))}
+                placeholder="0.00"
+              />
+            </div>
+
+            <div className="grid gap-1">
+              <Label>Referans (Evrak/İrsaliye)</Label>
+              <Input 
+                value={stockInForm.reference} 
+                onChange={(e) => setStockInForm((prev: any) => ({ ...prev, reference: e.target.value }))}
+                placeholder="İrsaliye no vb."
+              />
+            </div>
+
+            <div className="grid gap-1">
+              <Label>Açıklama</Label>
+              <Textarea 
+                value={stockInForm.note} 
+                onChange={(e) => setStockInForm((prev: any) => ({ ...prev, note: e.target.value }))}
+                placeholder="Açıklama yazın..."
+                rows={2}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStockInOpen(false)}>İptal</Button>
+            <Button onClick={submitStockIn} className="bg-primary hover:bg-primary/95 text-white">
+              Stok Girişini Tamamla
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -3793,147 +3933,6 @@ export function ProductionTabletPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setCallManagerOpen(false)} disabled={submitting}>Vazgeç</Button>
             <Button onClick={callManager} disabled={submitting} className="bg-amber-500 hover:bg-amber-600 text-white font-bold">Çağrıyı Gönder</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={stockInOpen} onOpenChange={setStockInOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-primary">
-              <Plus className="h-5 w-5" /> Hammadde Girişi (Depoya Mal Kabul)
-            </DialogTitle>
-          </DialogHeader>
-
-          {(() => {
-            const product = products.find((p) => String(p.id) === String(stockInForm.product_id))
-            if (!product) return null
-            
-            const hasExisting = targetProductStocks.length > 0
-            const totalStockVal = targetProductStocks.reduce((sum, s) => sum + Number(s.quantity || 0), 0)
-
-            return (
-              <div className="space-y-3">
-                <div className="rounded-lg bg-muted/40 p-3 border text-xs space-y-1">
-                  <p className="font-semibold text-muted-foreground uppercase">Ürün Detayı</p>
-                  <p className="font-medium text-sm text-foreground">{product.sku} · {product.name}</p>
-                  <p className="text-muted-foreground">Kategori: {product.category_name || product.categoryName || 'Belirtilmemiş'}</p>
-                </div>
-
-                {isLoadingStocks ? (
-                  <div className="flex items-center justify-center p-3 text-xs text-muted-foreground">
-                    <RefreshCw className="mr-2 h-3 w-3 animate-spin" /> Stok bilgisi sorgulanıyor...
-                  </div>
-                ) : !hasExisting ? (
-                  <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 p-3 text-xs">
-                    <p className="font-semibold text-amber-600 flex items-center gap-1">
-                      ⚠️ Depoya İlk Giriş Yapılacak
-                    </p>
-                    <p className="mt-1 text-muted-foreground">
-                      Bu ürün daha önce depoya alınmamıştır. Sistemdeki eski toplam stok bakiyesi (<strong>{product.stock || 0} Adet</strong>) otomatik olarak seçeceğiniz rafa devredilecektir.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 p-3 text-xs">
-                    <p className="font-semibold text-emerald-600 flex items-center gap-1">
-                      ✅ Depoda Stok Kaydı Mevcut
-                    </p>
-                    <div className="mt-1.5 space-y-1">
-                      <p className="text-muted-foreground font-medium">Mevcut Raflar ve Stoklar:</p>
-                      <ul className="list-disc list-inside text-muted-foreground pl-1 space-y-0.5">
-                        {targetProductStocks.map((s, idx) => (
-                          <li key={idx}>
-                            {s.warehouse_name} / <strong>{s.location_code}</strong>: {s.quantity} Adet
-                            { (s.detail_1 || s.detail_2) && ` (${s.detail_1 || ''} / ${s.detail_2 || ''})` }
-                          </li>
-                        ))}
-                      </ul>
-                      <p className="mt-1 text-[10px] text-muted-foreground italic">
-                        Toplam Depo Bakiyesi: {totalStockVal} Adet (Katalog Bakiyesi: {product.stock || 0})
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )
-          })()}
-
-          <div className="space-y-3 py-2 text-sm">
-            <div className="grid gap-1">
-              <Label>Giriş Yapılacak Depo / Raf</Label>
-              <Select 
-                value={stockInForm.location_id} 
-                onValueChange={(val) => setStockInForm(prev => ({ ...prev, location_id: val }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Depo/raf seçin" />
-                </SelectTrigger>
-                <SelectContent>
-                  {locations.map((loc) => (
-                    <SelectItem key={loc.id} value={String(loc.id)}>
-                      {loc.warehouse_name || 'Depo'} / {loc.code}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1">
-                <Label>Detay-1 (Boy/Ölçü)</Label>
-                <Input 
-                  value={stockInForm.detail_1_override} 
-                  onChange={(e) => setStockInForm(prev => ({ ...prev, detail_1_override: e.target.value }))}
-                  placeholder="örn: 60"
-                />
-              </div>
-              <div className="grid gap-1">
-                <Label>Detay-2 (Renk/Özellik)</Label>
-                <Input 
-                  value={stockInForm.detail_2_override} 
-                  onChange={(e) => setStockInForm(prev => ({ ...prev, detail_2_override: e.target.value }))}
-                  placeholder="örn: Kırmızı"
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-1">
-              <Label>Eklenecek Miktar</Label>
-              <Input 
-                type="number" 
-                min="0.01" 
-                step="any"
-                value={stockInForm.quantity} 
-                onChange={(e) => setStockInForm(prev => ({ ...prev, quantity: e.target.value }))}
-                placeholder="0.00"
-              />
-            </div>
-
-            <div className="grid gap-1">
-              <Label>Referans (Evrak/İrsaliye)</Label>
-              <Input 
-                value={stockInForm.reference} 
-                onChange={(e) => setStockInForm(prev => ({ ...prev, reference: e.target.value }))}
-                placeholder="İrsaliye no vb."
-              />
-            </div>
-
-            <div className="grid gap-1">
-              <Label>Açıklama</Label>
-              <Textarea 
-                value={stockInForm.note} 
-                onChange={(e) => setStockInForm(prev => ({ ...prev, note: e.target.value }))}
-                placeholder="Açıklama yazın..."
-                rows={2}
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setStockInOpen(false)}>İptal</Button>
-            <Button onClick={submitStockIn} className="bg-primary hover:bg-primary/95 text-white">
-              Stok Girişini Tamamla
-            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
