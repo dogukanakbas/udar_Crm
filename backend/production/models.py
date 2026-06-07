@@ -437,6 +437,160 @@ class ProductionWorkOrderLine(models.Model):
         return self.product_name
 
 
+class ProductRecipe(models.Model):
+    STATUSES = [
+        ('draft', 'Taslak'),
+        ('published', 'Yayinda'),
+        ('archived', 'Arsiv'),
+    ]
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='product_recipes')
+    product = models.ForeignKey('erp.Product', on_delete=models.CASCADE, related_name='recipes')
+    version = models.CharField(max_length=50, default='v1')
+    status = models.CharField(max_length=20, choices=STATUSES, default='draft')
+    description = models.TextField(blank=True, default='')
+    valid_from = models.DateField(null=True, blank=True)
+    valid_to = models.DateField(null=True, blank=True)
+    published_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='published_product_recipes')
+    published_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_product_recipes')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['product__sku', '-published_at', '-id']
+        unique_together = ('organization', 'product', 'version')
+        indexes = [
+            models.Index(fields=['organization', 'product', 'status']),
+            models.Index(fields=['organization', 'status']),
+        ]
+
+    def __str__(self):
+        return f'{self.product.sku} - {self.version}'
+
+
+class ProductRecipeOperation(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='product_recipe_operations')
+    recipe = models.ForeignKey(ProductRecipe, on_delete=models.CASCADE, related_name='operations')
+    station = models.ForeignKey(ProductionStation, on_delete=models.PROTECT, related_name='recipe_operations')
+    order = models.PositiveIntegerField(default=0, db_index=True)
+    name = models.CharField(max_length=160, blank=True, default='')
+    description = models.TextField(blank=True, default='')
+
+    class Meta:
+        ordering = ['recipe', 'order', 'id']
+        unique_together = ('recipe', 'station')
+        indexes = [
+            models.Index(fields=['organization', 'recipe', 'order']),
+            models.Index(fields=['station']),
+        ]
+
+    def __str__(self):
+        return self.name or f'{self.recipe} - {self.station.code}'
+
+
+class ProductRecipeMaterial(models.Model):
+    QUANTITY_TYPES = [
+        ('fixed', 'Sabit'),
+        ('formula', 'Formul'),
+    ]
+    CONSUMPTION_TIMINGS = [
+        ('station_close', 'Istasyon kapanisinda'),
+    ]
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='product_recipe_materials')
+    operation = models.ForeignKey(ProductRecipeOperation, on_delete=models.CASCADE, related_name='materials')
+    material_product = models.ForeignKey('erp.Product', on_delete=models.PROTECT, related_name='used_in_recipes')
+    unit = models.CharField(max_length=40, blank=True, default='Adet')
+    quantity_type = models.CharField(max_length=20, choices=QUANTITY_TYPES, default='fixed')
+    quantity_per_unit = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    formula = models.CharField(max_length=500, blank=True, default='')
+    scrap_percent = models.DecimalField(max_digits=7, decimal_places=3, default=0)
+    conditions = models.JSONField(default=dict, blank=True)
+    default_location = models.ForeignKey('erp.InventoryLocation', on_delete=models.PROTECT, null=True, blank=True, related_name='recipe_material_defaults')
+    detail_1_override = models.CharField(max_length=500, blank=True, default='')
+    detail_2_override = models.CharField(max_length=500, blank=True, default='')
+    consumption_timing = models.CharField(max_length=30, choices=CONSUMPTION_TIMINGS, default='station_close')
+    note = models.TextField(blank=True, default='')
+    is_active = models.BooleanField(default=True)
+    order = models.PositiveIntegerField(default=0, db_index=True)
+
+    class Meta:
+        ordering = ['operation__order', 'order', 'id']
+        indexes = [
+            models.Index(fields=['organization', 'operation', 'is_active']),
+            models.Index(fields=['material_product']),
+        ]
+
+    def __str__(self):
+        return f'{self.operation} - {self.material_product.sku}'
+
+
+class ProductionMaterialRequirement(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_material_requirements')
+    work_order = models.ForeignKey(ProductionWorkOrder, on_delete=models.CASCADE, related_name='material_requirements')
+    line = models.ForeignKey(ProductionWorkOrderLine, on_delete=models.CASCADE, related_name='material_requirements')
+    step = models.ForeignKey('ProductionStepProgress', on_delete=models.CASCADE, null=True, blank=True, related_name='material_requirements')
+    station = models.ForeignKey(ProductionStation, on_delete=models.PROTECT, related_name='material_requirements')
+    recipe = models.ForeignKey(ProductRecipe, on_delete=models.SET_NULL, null=True, blank=True, related_name='production_requirements')
+    recipe_version = models.CharField(max_length=50, blank=True, default='')
+    recipe_material = models.ForeignKey(ProductRecipeMaterial, on_delete=models.SET_NULL, null=True, blank=True, related_name='production_requirements')
+    material_product = models.ForeignKey('erp.Product', on_delete=models.PROTECT, related_name='production_requirements')
+    material_sku = models.CharField(max_length=120)
+    material_name = models.CharField(max_length=255)
+    unit = models.CharField(max_length=40, blank=True, default='Adet')
+    quantity_type = models.CharField(max_length=20, default='fixed')
+    quantity_per_unit = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    formula = models.CharField(max_length=500, blank=True, default='')
+    scrap_percent = models.DecimalField(max_digits=7, decimal_places=3, default=0)
+    planned_quantity = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    consumed_quantity = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    default_location = models.ForeignKey('erp.InventoryLocation', on_delete=models.PROTECT, null=True, blank=True, related_name='production_material_requirements')
+    detail_1_override = models.CharField(max_length=500, blank=True, default='')
+    detail_2_override = models.CharField(max_length=500, blank=True, default='')
+    conditions_snapshot = models.JSONField(default=dict, blank=True)
+    note = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['station__order', 'id']
+        indexes = [
+            models.Index(fields=['organization', 'work_order']),
+            models.Index(fields=['line', 'station']),
+            models.Index(fields=['material_product']),
+        ]
+
+    def __str__(self):
+        return f'{self.work_order.number} - {self.material_sku}'
+
+
+class ProductionMaterialConsumption(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='production_material_consumptions')
+    requirement = models.ForeignKey(ProductionMaterialRequirement, on_delete=models.PROTECT, related_name='consumptions')
+    window = models.ForeignKey('ProductionCountingWindow', on_delete=models.PROTECT, null=True, blank=True, related_name='material_consumptions')
+    work_order = models.ForeignKey(ProductionWorkOrder, on_delete=models.CASCADE, related_name='material_consumptions')
+    line = models.ForeignKey(ProductionWorkOrderLine, on_delete=models.CASCADE, related_name='material_consumptions')
+    step = models.ForeignKey('ProductionStepProgress', on_delete=models.CASCADE, null=True, blank=True, related_name='material_consumptions')
+    station = models.ForeignKey(ProductionStation, on_delete=models.PROTECT, related_name='material_consumptions')
+    material_product = models.ForeignKey('erp.Product', on_delete=models.PROTECT, related_name='production_material_consumptions')
+    location = models.ForeignKey('erp.InventoryLocation', on_delete=models.PROTECT, related_name='production_material_consumptions')
+    quantity = models.DecimalField(max_digits=14, decimal_places=4)
+    produced_quantity = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    stock_movement_id = models.BigIntegerField(null=True, blank=True)
+    source_key = models.CharField(max_length=120)
+    note = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+        unique_together = ('organization', 'requirement', 'source_key')
+        indexes = [
+            models.Index(fields=['organization', 'work_order']),
+            models.Index(fields=['station', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.material_product} - {self.quantity}'
+
+
 class ProductionStepProgress(models.Model):
     STATUSES = [
         ('locked', 'Kilitli'),

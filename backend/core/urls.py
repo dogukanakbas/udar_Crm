@@ -46,6 +46,10 @@ from production.views import (
     ProductionDevicePayloadMapViewSet,
     ProductionDocumentViewSet,
     ProductionEventViewSet,
+    ProductRecipeMaterialViewSet,
+    ProductRecipeOperationViewSet,
+    ProductRecipeViewSet,
+    ProductionMaterialConsumptionViewSet,
     ProductionOperatorProfileViewSet,
     ProductionPiEventView,
     ProductionReportExportView,
@@ -168,7 +172,11 @@ router.register(r'production/rules', ProductionRuleSetViewSet, basename='product
 router.register(r'production/rule-blocks', ProductionRuleBlockViewSet, basename='production-rule-blocks')
 router.register(r'production/template-presets', ProductionTemplatePresetViewSet, basename='production-template-presets')
 router.register(r'production/report-templates', ProductionReportTemplateViewSet, basename='production-report-templates')
+router.register(r'product-recipes', ProductRecipeViewSet, basename='product-recipes')
+router.register(r'product-recipe-operations', ProductRecipeOperationViewSet, basename='product-recipe-operations')
+router.register(r'product-recipe-materials', ProductRecipeMaterialViewSet, basename='product-recipe-materials')
 router.register(r'production/work-orders', ProductionWorkOrderViewSet, basename='production-work-orders')
+router.register(r'production/material-consumptions', ProductionMaterialConsumptionViewSet, basename='production-material-consumptions')
 router.register(r'production/sessions', ProductionWorkSessionViewSet, basename='production-sessions')
 router.register(r'production/counting-windows', ProductionCountingWindowViewSet, basename='production-counting-windows')
 router.register(r'production/events', ProductionEventViewSet, basename='production-events')

@@ -20,8 +20,13 @@ from .models import (
     ProductionDevice,
     ProductionDevicePayloadMap,
     ProductionEvent,
+    ProductRecipe,
+    ProductRecipeMaterial,
+    ProductRecipeOperation,
     ProductionCountingParticipant,
     ProductionCountingWindow,
+    ProductionMaterialConsumption,
+    ProductionMaterialRequirement,
     ProductionOperatorProfile,
     ProductionReportTemplate,
     ProductionSessionBreak,
@@ -138,6 +143,98 @@ class ProductionAutomationTests(TestCase):
         statuses = list(line.steps.order_by('order').values_list('status', flat=True))
         self.assertEqual(statuses[0], 'ready')
         self.assertTrue(all(status == 'locked' for status in statuses[1:]))
+
+    def make_recipe(self, *, quantity_per_unit='2', formula='', quantity_type='fixed', conditions=None):
+        raw = Product.objects.create(
+            organization=self.org,
+            sku='RAW-001',
+            name='Ham Madde',
+            product_type='raw_material',
+        )
+        WarehouseStock.objects.create(
+            organization=self.org,
+            warehouse=self.warehouse,
+            location=self.location,
+            product=raw,
+            quantity=Decimal('100'),
+        )
+        recipe = ProductRecipe.objects.create(
+            organization=self.org,
+            product=self.product,
+            version='v1',
+            status='published',
+            published_by=self.user,
+            published_at=timezone.now(),
+        )
+        station = ProductionStation.objects.filter(organization=self.org).order_by('department__order', 'order', 'id').first()
+        operation = ProductRecipeOperation.objects.create(
+            organization=self.org,
+            recipe=recipe,
+            station=station,
+            order=0,
+            name='Test operasyon',
+        )
+        material = ProductRecipeMaterial.objects.create(
+            organization=self.org,
+            operation=operation,
+            material_product=raw,
+            unit='Adet',
+            quantity_type=quantity_type,
+            quantity_per_unit=Decimal(quantity_per_unit),
+            formula=formula,
+            conditions=conditions or {},
+            default_location=self.location,
+        )
+        return recipe, operation, material, raw
+
+    def test_published_recipe_creates_material_snapshot_for_work_order_line(self):
+        _recipe, operation, material, _raw = self.make_recipe(quantity_per_unit='3')
+
+        order = create_work_order_from_contract(self.make_contract(), user=self.user)
+        line = order.lines.get()
+        requirement = ProductionMaterialRequirement.objects.get(line=line)
+
+        self.assertEqual(requirement.recipe_version, 'v1')
+        self.assertEqual(requirement.station, operation.station)
+        self.assertEqual(requirement.recipe_material, material)
+        self.assertEqual(requirement.planned_quantity, Decimal('6'))
+
+    def test_station_checkpoint_consumes_recipe_material_once(self):
+        _recipe, operation, _material, raw = self.make_recipe(quantity_per_unit='2')
+        order = create_work_order_from_contract(self.make_contract(), user=self.user)
+        line = order.lines.get()
+        tablet = ProductionStationTablet.objects.create(
+            organization=self.org,
+            station=operation.station,
+            name='Test tablet',
+        )
+        ProductionStationUser.objects.create(
+            organization=self.org,
+            station=operation.station,
+            user=self.user,
+            role='operator',
+        )
+        profile = ProductionOperatorProfile.objects.create(
+            organization=self.org,
+            user=self.user,
+        )
+        profile.set_pin('1234')
+        profile.save()
+
+        tablet_login_slot(token=tablet.token, user_id=self.user.id, pin='1234', line_id=line.id, slot_index=0)
+        tablet_checkpoint(token=tablet.token, line_id=line.id, checkpoint_total=Decimal('2'))
+        tablet_checkpoint(token=tablet.token, line_id=line.id, checkpoint_total=Decimal('0'))
+
+        stock = WarehouseStock.objects.get(organization=self.org, location=self.location, product=raw)
+        self.assertEqual(stock.quantity, Decimal('96.00'))
+        self.assertEqual(ProductionMaterialConsumption.objects.filter(work_order=order).count(), 1)
+
+    def test_recipe_condition_excludes_material_requirement(self):
+        self.make_recipe(quantity_per_unit='1', conditions={'field': 'detay2', 'operator': 'contains', 'value': 'Kırmızı'})
+
+        order = create_work_order_from_contract(self.make_contract(), user=self.user)
+
+        self.assertFalse(ProductionMaterialRequirement.objects.filter(work_order=order).exists())
 
     def test_non_approved_or_non_contract_does_not_create_work_order(self):
         self.assertIsNone(create_work_order_from_contract(self.make_contract(status='Pending'), user=self.user))

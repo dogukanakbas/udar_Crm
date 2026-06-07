@@ -14,6 +14,11 @@ from .models import (
     ProductionDevicePayloadMap,
     ProductionDocument,
     ProductionEvent,
+    ProductRecipe,
+    ProductRecipeMaterial,
+    ProductRecipeOperation,
+    ProductionMaterialConsumption,
+    ProductionMaterialRequirement,
     ProductionOperatorProfile,
     ProductionRuleBlock,
     ProductionRuleSet,
@@ -450,6 +455,7 @@ class ProductionStepTabletAssignmentSerializer(serializers.ModelSerializer):
 class ProductionWorkOrderLineSerializer(serializers.ModelSerializer):
     steps = ProductionStepProgressSerializer(many=True, read_only=True)
     technical_drawings = serializers.SerializerMethodField()
+    material_requirements = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductionWorkOrderLine
@@ -464,6 +470,10 @@ class ProductionWorkOrderLineSerializer(serializers.ModelSerializer):
             serialize_technical_drawing_summary(row, request)
             for row in technical_drawing_summary_queryset(obj.product).select_related('product', 'folder')[:10]
         ]
+
+    def get_material_requirements(self, obj):
+        rows = obj.material_requirements.select_related('station', 'material_product', 'default_location__warehouse').order_by('station__order', 'id')[:50]
+        return ProductionMaterialRequirementSerializer(rows, many=True, context=self.context).data
 
 
 class ProductionWorkOrderSerializer(serializers.ModelSerializer):
@@ -485,6 +495,135 @@ class ProductionWorkOrderSerializer(serializers.ModelSerializer):
             'updated_at',
             'lines',
         ]
+
+
+class ProductRecipeSerializer(serializers.ModelSerializer):
+    product_sku = serializers.CharField(source='product.sku', read_only=True)
+    product_name = serializers.CharField(source='product.name', read_only=True)
+    operations = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductRecipe
+        fields = '__all__'
+        read_only_fields = ['organization', 'published_by', 'published_at', 'created_by', 'created_at', 'updated_at', 'product_sku', 'product_name', 'operations']
+
+    def validate(self, attrs):
+        org = getattr(getattr(self.context.get('request'), 'user', None), 'organization', None)
+        product = attrs.get('product') or getattr(self.instance, 'product', None)
+        if org and product and product.organization_id != org.id:
+            raise serializers.ValidationError({'product': 'Ürün bu organizasyona ait değil.'})
+        return attrs
+
+    def get_operations(self, obj):
+        return ProductRecipeOperationSerializer(
+            obj.operations.select_related('station__department').prefetch_related('materials__material_product', 'materials__default_location__warehouse').all(),
+            many=True,
+            context=self.context,
+        ).data
+
+
+class ProductRecipeOperationSerializer(serializers.ModelSerializer):
+    station_code = serializers.CharField(source='station.code', read_only=True)
+    station_name = serializers.CharField(source='station.name', read_only=True)
+    department_name = serializers.CharField(source='station.department.name', read_only=True)
+    materials = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductRecipeOperation
+        fields = '__all__'
+        read_only_fields = ['organization', 'station_code', 'station_name', 'department_name', 'materials']
+
+    def get_materials(self, obj):
+        return ProductRecipeMaterialSerializer(
+            obj.materials.select_related('material_product', 'default_location__warehouse').all(),
+            many=True,
+            context=self.context,
+        ).data
+
+    def validate(self, attrs):
+        org = getattr(getattr(self.context.get('request'), 'user', None), 'organization', None)
+        recipe = attrs.get('recipe') or getattr(self.instance, 'recipe', None)
+        station = attrs.get('station') or getattr(self.instance, 'station', None)
+        if org and recipe and recipe.organization_id != org.id:
+            raise serializers.ValidationError({'recipe': 'Reçete bu organizasyona ait değil.'})
+        if org and station and station.organization_id != org.id:
+            raise serializers.ValidationError({'station': 'İstasyon bu organizasyona ait değil.'})
+        return attrs
+
+
+class ProductRecipeMaterialSerializer(serializers.ModelSerializer):
+    material_sku = serializers.CharField(source='material_product.sku', read_only=True)
+    material_name = serializers.CharField(source='material_product.name', read_only=True)
+    operation_station = serializers.CharField(source='operation.station.code', read_only=True)
+    recipe = serializers.IntegerField(source='operation.recipe_id', read_only=True)
+    default_location_label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductRecipeMaterial
+        fields = '__all__'
+        read_only_fields = ['organization', 'material_sku', 'material_name', 'operation_station', 'recipe', 'default_location_label']
+
+    def validate(self, attrs):
+        org = getattr(getattr(self.context.get('request'), 'user', None), 'organization', None)
+        operation = attrs.get('operation') or getattr(self.instance, 'operation', None)
+        material_product = attrs.get('material_product') or getattr(self.instance, 'material_product', None)
+        default_location = attrs.get('default_location') or getattr(self.instance, 'default_location', None)
+        if org and operation and operation.organization_id != org.id:
+            raise serializers.ValidationError({'operation': 'Operasyon bu organizasyona ait değil.'})
+        if org and material_product and material_product.organization_id != org.id:
+            raise serializers.ValidationError({'material_product': 'Ham madde ürünü bu organizasyona ait değil.'})
+        if org and default_location and default_location.organization_id != org.id:
+            raise serializers.ValidationError({'default_location': 'Depo/raf bu organizasyona ait değil.'})
+        if (attrs.get('quantity_type') or getattr(self.instance, 'quantity_type', 'fixed')) == 'formula':
+            formula = attrs.get('formula') if 'formula' in attrs else getattr(self.instance, 'formula', '')
+            if not formula:
+                raise serializers.ValidationError({'formula': 'Formül tipi seçildiğinde formül zorunludur.'})
+        return attrs
+
+    def get_default_location_label(self, obj):
+        if not obj.default_location:
+            return ''
+        warehouse = obj.default_location.warehouse
+        return f'{warehouse.code} / {obj.default_location.code}{(" - " + obj.default_location.name) if obj.default_location.name else ""}'
+
+
+class ProductionMaterialRequirementSerializer(serializers.ModelSerializer):
+    station_code = serializers.CharField(source='station.code', read_only=True)
+    station_name = serializers.CharField(source='station.name', read_only=True)
+    location_label = serializers.SerializerMethodField()
+    remaining_quantity = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductionMaterialRequirement
+        fields = '__all__'
+        read_only_fields = ['organization', 'work_order', 'line', 'step', 'station_code', 'station_name', 'location_label', 'remaining_quantity', 'created_at']
+
+    def get_location_label(self, obj):
+        if not obj.default_location:
+            return ''
+        warehouse = obj.default_location.warehouse
+        return f'{warehouse.code} / {obj.default_location.code}{(" - " + obj.default_location.name) if obj.default_location.name else ""}'
+
+    def get_remaining_quantity(self, obj):
+        return max(obj.planned_quantity - obj.consumed_quantity, 0)
+
+
+class ProductionMaterialConsumptionSerializer(serializers.ModelSerializer):
+    station_code = serializers.CharField(source='station.code', read_only=True)
+    work_order_number = serializers.CharField(source='work_order.number', read_only=True)
+    product_name = serializers.CharField(source='line.product_name', read_only=True)
+    material_sku = serializers.CharField(source='material_product.sku', read_only=True)
+    material_name = serializers.CharField(source='material_product.name', read_only=True)
+    location_label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductionMaterialConsumption
+        fields = '__all__'
+        read_only_fields = ['organization', 'stock_movement_id', 'created_at', 'station_code', 'work_order_number', 'product_name', 'material_sku', 'material_name', 'location_label']
+
+    def get_location_label(self, obj):
+        warehouse = obj.location.warehouse
+        return f'{warehouse.code} / {obj.location.code}{(" - " + obj.location.name) if obj.location.name else ""}'
 
 
 class ProductionEventSerializer(serializers.ModelSerializer):

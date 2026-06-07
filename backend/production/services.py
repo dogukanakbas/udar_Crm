@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import ast
+import operator
 import json
+import re
 import unicodedata
 from copy import deepcopy
 from datetime import datetime, timedelta
@@ -15,7 +18,7 @@ from django.utils import timezone
 
 from accounts.utils import user_has_perm
 from core.events import push_event
-from erp.inventory_service import InventoryError, stock_in
+from erp.inventory_service import InventoryError, stock_in, stock_out
 from erp.models import InventoryLocation, Product
 from erp.serializers import serialize_technical_drawing_summary, technical_drawing_summary_queryset
 
@@ -27,6 +30,10 @@ from .models import (
     ProductionDevice,
     ProductionDevicePayloadMap,
     ProductionEvent,
+    ProductRecipe,
+    ProductRecipeMaterial,
+    ProductionMaterialConsumption,
+    ProductionMaterialRequirement,
     ProductionOperatorProfile,
     ProductionRuleSet,
     ProductionRouteStep,
@@ -110,6 +117,280 @@ def _signed_decimal(value, label='Miktar') -> Decimal:
         return Decimal(str(value or 0))
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise ProductionError(f'{label} sayisal olmalidir.') from exc
+
+
+_FORMULA_BINOPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+
+
+def _line_numbers(value):
+    return [Decimal(item.replace(',', '.')) for item in re.findall(r'\d+(?:[.,]\d+)?', str(value or ''))]
+
+
+def _recipe_context(line, quantity):
+    detail_1 = _norm(getattr(line, 'detail_1', ''))
+    detail_2 = _norm(getattr(line, 'detail_2', ''))
+    numbers = _line_numbers(detail_1)
+    details = dict(getattr(line, 'details', None) or {})
+    context = {
+        'adet': _decimal(quantity),
+        'qty': _decimal(quantity),
+        'quantity': _decimal(quantity),
+        'detay1': detail_1,
+        'detail1': detail_1,
+        'detail_1': detail_1,
+        'detay2': detail_2,
+        'detail2': detail_2,
+        'detail_2': detail_2,
+        'renk': detail_2,
+        'color': detail_2,
+        'olcu': detail_1,
+        'measure': detail_1,
+    }
+    for idx, number in enumerate(numbers[:6], start=1):
+        context[f'olcu{idx}'] = number
+        context[f'measure{idx}'] = number
+    if numbers:
+        context['width'] = numbers[0]
+        context['en'] = numbers[0]
+    if len(numbers) > 1:
+        context['height'] = numbers[1]
+        context['boy'] = numbers[1]
+    if len(numbers) > 2:
+        context['depth'] = numbers[2]
+        context['derinlik'] = numbers[2]
+    for key, value in details.items():
+        normalized_key = product_group_key_from_value(key)
+        if normalized_key and normalized_key not in context:
+            context[normalized_key] = value
+    return context
+
+
+def _safe_formula_eval(expression, context):
+    expression = _norm(expression)
+    if not expression:
+        raise ProductionError('Formül boş olamaz.')
+    tree = ast.parse(expression, mode='eval')
+
+    def eval_node(node):
+        if isinstance(node, ast.Expression):
+            return eval_node(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return Decimal(str(node.value))
+        if isinstance(node, ast.Num):
+            return Decimal(str(node.n))
+        if isinstance(node, ast.Name):
+            if node.id not in context:
+                raise ProductionError(f'Formülde bilinmeyen alan: {node.id}')
+            value = context[node.id]
+            try:
+                return Decimal(str(value or 0).replace(',', '.'))
+            except (InvalidOperation, ValueError) as exc:
+                raise ProductionError(f'{node.id} formülde sayısal kullanılmalı.') from exc
+        if isinstance(node, ast.BinOp) and type(node.op) in _FORMULA_BINOPS:
+            return _FORMULA_BINOPS[type(node.op)](eval_node(node.left), eval_node(node.right))
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            value = eval_node(node.operand)
+            return value if isinstance(node.op, ast.UAdd) else -value
+        raise ProductionError('Formül yalnız sayılar, alanlar ve matematik operatörleri içerebilir.')
+
+    result = eval_node(tree)
+    if result < 0:
+        raise ProductionError('Formül sonucu negatif olamaz.')
+    return result
+
+
+def _condition_lookup(context, field):
+    key = product_group_key_from_value(field)
+    aliases = {
+        'detay_1': 'detail_1',
+        'detay1': 'detail_1',
+        'olcu': 'detail_1',
+        'detay_2': 'detail_2',
+        'detay2': 'detail_2',
+        'renk': 'detail_2',
+    }
+    return context.get(key) if key in context else context.get(aliases.get(key, key))
+
+
+def _condition_matches_recipe(condition, context):
+    if not condition:
+        return True
+    if isinstance(condition, list):
+        return all(_condition_matches_recipe(item, context) for item in condition)
+    if not isinstance(condition, dict):
+        return True
+    if 'all' in condition:
+        return all(_condition_matches_recipe(item, context) for item in condition.get('all') or [])
+    if 'any' in condition:
+        return any(_condition_matches_recipe(item, context) for item in condition.get('any') or [])
+    field = condition.get('field') or condition.get('key')
+    op = condition.get('operator') or condition.get('op') or 'eq'
+    expected = condition.get('value')
+    actual = _condition_lookup(context, field)
+    if op in {'contains', 'not_contains'}:
+        matched = str(expected or '').lower() in str(actual or '').lower()
+        return not matched if op == 'not_contains' else matched
+    if op in {'eq', 'neq'}:
+        matched = str(actual or '').strip().lower() == str(expected or '').strip().lower()
+        return not matched if op == 'neq' else matched
+    if op in {'gt', 'gte', 'lt', 'lte'}:
+        left = Decimal(str(actual or 0).replace(',', '.'))
+        right = Decimal(str(expected or 0).replace(',', '.'))
+        return {
+            'gt': left > right,
+            'gte': left >= right,
+            'lt': left < right,
+            'lte': left <= right,
+        }[op]
+    return True
+
+
+def _material_quantity(row, line, produced_quantity):
+    context = _recipe_context(line, produced_quantity)
+    if getattr(row, 'quantity_type', 'fixed') == 'formula':
+        quantity = _safe_formula_eval(getattr(row, 'formula', ''), context)
+    else:
+        quantity = _decimal(getattr(row, 'quantity_per_unit', 0), 'Reçete miktarı') * _decimal(produced_quantity)
+    scrap = _decimal(getattr(row, 'scrap_percent', 0), 'Fire yüzdesi')
+    if scrap:
+        quantity = quantity * (Decimal('1') + scrap / Decimal('100'))
+    return quantity
+
+
+def _published_recipe_for_product(organization, product):
+    today = timezone.localdate()
+    return (
+        ProductRecipe.objects.filter(organization=organization, product=product, status='published')
+        .filter(models.Q(valid_from__isnull=True) | models.Q(valid_from__lte=today))
+        .filter(models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=today))
+        .order_by('-published_at', '-id')
+        .first()
+    )
+
+
+def build_material_requirements_for_line(line):
+    if not line.product_id:
+        return []
+    recipe = _published_recipe_for_product(line.work_order.organization, line.product)
+    if not recipe:
+        return []
+    steps_by_station = {
+        step.station_id: step
+        for step in line.steps.select_related('station').all()
+    }
+    context = _recipe_context(line, line.quantity)
+    created = []
+    operations = (
+        recipe.operations.select_related('station')
+        .prefetch_related('materials__material_product', 'materials__default_location__warehouse')
+        .order_by('order', 'id')
+    )
+    for operation in operations:
+        step = steps_by_station.get(operation.station_id)
+        for material in operation.materials.all().order_by('order', 'id'):
+            if not material.is_active:
+                continue
+            if not _condition_matches_recipe(material.conditions, context):
+                continue
+            planned = _material_quantity(material, line, line.quantity)
+            if planned <= 0:
+                continue
+            created.append(
+                ProductionMaterialRequirement.objects.create(
+                    organization=line.work_order.organization,
+                    work_order=line.work_order,
+                    line=line,
+                    step=step,
+                    station=operation.station,
+                    recipe=recipe,
+                    recipe_version=recipe.version,
+                    recipe_material=material,
+                    material_product=material.material_product,
+                    material_sku=material.material_product.sku,
+                    material_name=material.material_product.name,
+                    unit=material.unit,
+                    quantity_type=material.quantity_type,
+                    quantity_per_unit=material.quantity_per_unit,
+                    formula=material.formula,
+                    scrap_percent=material.scrap_percent,
+                    planned_quantity=planned,
+                    default_location=material.default_location,
+                    detail_1_override=material.detail_1_override,
+                    detail_2_override=material.detail_2_override,
+                    conditions_snapshot=deepcopy(material.conditions or {}),
+                    note=material.note,
+                )
+            )
+    return created
+
+
+def consume_materials_for_step_delta(step, produced_quantity, *, source_key, user=None, window=None, note=''):
+    produced_quantity = _decimal(produced_quantity, 'Üretim miktarı')
+    if produced_quantity <= 0:
+        return []
+    source_key = _norm(source_key)[:120]
+    rows = []
+    requirements = (
+        ProductionMaterialRequirement.objects.select_for_update()
+        .filter(line=step.line, station=step.station)
+        .select_related('material_product', 'line__work_order', 'station')
+        .order_by('id')
+    )
+    for requirement in requirements:
+        if ProductionMaterialConsumption.objects.filter(
+            organization=requirement.organization,
+            requirement=requirement,
+            source_key=source_key,
+        ).exists():
+            continue
+        if not location_id_safe(requirement.default_location, requirement.organization):
+            raise ProductionError(f'{requirement.material_sku} için reçetede aktif depo/raf seçilmemiş.')
+        quantity = _material_quantity(requirement, requirement.line, produced_quantity)
+        if quantity <= 0:
+            continue
+        try:
+            movement = stock_out(
+                organization=requirement.organization,
+                product=requirement.material_product,
+                location=requirement.default_location,
+                quantity=quantity,
+                user=user,
+                reference=requirement.work_order.number,
+                note=note or f'{requirement.station.code} reçete tüketimi',
+                source_type='production_material',
+                source_id=source_key,
+                detail_1_override=requirement.detail_1_override,
+                detail_2_override=requirement.detail_2_override,
+            )
+        except InventoryError as exc:
+            raise ProductionError(str(exc)) from exc
+        consumption = ProductionMaterialConsumption.objects.create(
+            organization=requirement.organization,
+            requirement=requirement,
+            window=window,
+            work_order=requirement.work_order,
+            line=requirement.line,
+            step=step,
+            station=requirement.station,
+            material_product=requirement.material_product,
+            location=requirement.default_location,
+            quantity=quantity,
+            produced_quantity=produced_quantity,
+            stock_movement_id=movement.id,
+            source_key=source_key,
+            note=note or '',
+        )
+        requirement.consumed_quantity = requirement.consumed_quantity + quantity
+        requirement.save(update_fields=['consumed_quantity'])
+        rows.append(consumption)
+    return rows
 
 
 def _aware_at(day, clock):
@@ -697,6 +978,7 @@ def create_work_order_from_contract(quote, *, user=None):
         payload = quote_line_payload(ql)
         line = ProductionWorkOrderLine.objects.create(work_order=order, route=line_route, **payload)
         create_progress_steps(line, line_route)
+        build_material_requirements_for_line(line)
 
     config = deepcopy(quote.contract_config or {})
     config['production_work_order_id'] = order.id
@@ -755,6 +1037,7 @@ def add_manual_work_order_line(*, work_order, product=None, product_sku='', prod
     if not selected_route:
         raise ProductionError('Uretim rotasi zorunludur.')
     create_progress_steps(line, selected_route)
+    build_material_requirements_for_line(line)
     return line
 
 
@@ -1290,6 +1573,13 @@ def _close_counting_window(*, tablet, step, declared_totals, reason='manual', no
                 progress.status = 'in_progress'
                 progress.started_at = progress.started_at or timezone.now()
             progress.save(update_fields=['completed_quantity', 'status', 'started_at'])
+            consume_materials_for_step_delta(
+                progress,
+                official_delta,
+                source_key=f'window:{window.id}',
+                window=window,
+                note=note or f'Tablet checkpoint: {reason}',
+            )
         ProductionEvent.objects.create(
             organization=tablet.organization,
             work_order=window.work_order,
@@ -1494,6 +1784,7 @@ def close_work_session(*, organization, user, session_id, declared_good_quantity
 
     if session.step_id:
         step = ProductionStepProgress.objects.select_for_update().get(pk=session.step_id)
+        previous_completed = step.completed_quantity
         step.completed_quantity = min(step.target_quantity, step.completed_quantity + good)
         if step.completed_quantity >= step.target_quantity:
             step.status = 'completed'
@@ -1504,6 +1795,15 @@ def close_work_session(*, organization, user, session_id, declared_good_quantity
         step.save(update_fields=['completed_quantity', 'status', 'completed_at', 'completed_by'])
 
         event = _create_session_event(session=session, event_type='complete', quantity_delta=good, counter_value=end_counter, note=note)
+        produced_delta = step.completed_quantity - previous_completed
+        if produced_delta > 0:
+            consume_materials_for_step_delta(
+                step,
+                produced_delta,
+                source_key=f'event:{event.id}',
+                user=user,
+                note=note or 'İstasyon oturumu kapandı',
+            )
         if step.status == 'completed':
             nxt = _next_step(step)
             if nxt and nxt.status == 'locked':
@@ -1665,6 +1965,23 @@ def _work_item_for_step(step, tablet=None):
             serialize_technical_drawing_summary(row)
             for row in technical_drawing_summary_queryset(line.product).select_related('product', 'folder')[:10]
         ]
+    material_requirements = [
+        {
+            'id': row.id,
+            'material_product': row.material_product_id,
+            'material_sku': row.material_sku,
+            'material_name': row.material_name,
+            'unit': row.unit,
+            'planned_quantity': row.planned_quantity,
+            'consumed_quantity': row.consumed_quantity,
+            'remaining_quantity': max(row.planned_quantity - row.consumed_quantity, Decimal('0')),
+            'location_label': f'{row.default_location.warehouse.name} / {row.default_location.code}' if row.default_location_id else '',
+            'note': row.note,
+        }
+        for row in ProductionMaterialRequirement.objects.filter(line=line, station=step.station)
+        .select_related('material_product', 'default_location__warehouse')
+        .order_by('id')
+    ]
     return {
         'line_id': line.id,
         'work_order_id': line.work_order_id,
@@ -1677,6 +1994,7 @@ def _work_item_for_step(step, tablet=None):
         'technical_notes': line.technical_notes,
         'details': line.details or {},
         'technical_drawings': drawings,
+        'material_requirements': material_requirements,
         'status': step.status,
         'target_quantity': step.target_quantity,
         'completed_quantity': step.completed_quantity,
@@ -1932,10 +2250,21 @@ def tablet_complete_work_item(*, token, line_id, checkpoint_total=None, particip
         totals = _require_checkpoint_payload(active, checkpoint_total=checkpoint_total, participant_totals=participant_totals)
         _close_counting_window(tablet=tablet, step=step, declared_totals=totals, reason='work_complete', note=note)
     step = ProductionStepProgress.objects.select_for_update().get(pk=step.pk)
+    previous_completed = step.completed_quantity
     step.status = 'completed'
+    if step.completed_quantity <= 0:
+        step.completed_quantity = step.target_quantity
     step.completed_at = timezone.now()
     step.completed_by = None
-    step.save(update_fields=['status', 'completed_at', 'completed_by'])
+    step.save(update_fields=['completed_quantity', 'status', 'completed_at', 'completed_by'])
+    produced_delta = step.completed_quantity - previous_completed
+    if produced_delta > 0:
+        consume_materials_for_step_delta(
+            step,
+            produced_delta,
+            source_key=f'step_complete:{step.id}',
+            note=note or 'Tablet iş tamamlandı',
+        )
     nxt = _next_step(step)
     if nxt and nxt.status == 'locked':
         nxt.status = 'ready'
@@ -2069,6 +2398,7 @@ def record_station_event(*, organization, line_id, station_code, event_type, qua
         .select_related('station', 'line__work_order')
         .get(line=line, station=station)
     )
+    previous_completed = step.completed_quantity
     context = apply_rule_blocks({
         'organization': organization,
         'line': line,
@@ -2165,6 +2495,15 @@ def record_station_event(*, organization, line_id, station_code, event_type, qua
         normalized_payload=normalized_payload or {},
         mapping_errors=mapping_errors or [],
     )
+    produced_delta = step.completed_quantity - previous_completed
+    if produced_delta > 0 and event_type in {'quantity', 'complete', 'handover'}:
+        consume_materials_for_step_delta(
+            step,
+            produced_delta,
+            source_key=f'event:{event.id}',
+            user=user,
+            note=note or f'{station.code} üretim tüketimi',
+        )
 
     if step.status == 'completed':
         nxt = _next_step(step)

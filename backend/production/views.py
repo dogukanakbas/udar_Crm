@@ -26,6 +26,11 @@ from .models import (
     ProductionDevicePayloadMap,
     ProductionDocument,
     ProductionEvent,
+    ProductRecipe,
+    ProductRecipeMaterial,
+    ProductRecipeOperation,
+    ProductionMaterialConsumption,
+    ProductionMaterialRequirement,
     ProductionOperatorProfile,
     ProductionRuleBlock,
     ProductionRuleSet,
@@ -57,6 +62,11 @@ from .serializers import (
     ProductionDevicePayloadMapSerializer,
     ProductionDocumentSerializer,
     ProductionEventSerializer,
+    ProductRecipeSerializer,
+    ProductRecipeMaterialSerializer,
+    ProductRecipeOperationSerializer,
+    ProductionMaterialConsumptionSerializer,
+    ProductionMaterialRequirementSerializer,
     ProductionOperatorProfileSerializer,
     ProductionRuleBlockSerializer,
     ProductionRuleSetSerializer,
@@ -100,6 +110,7 @@ from .services import (
     ProductionError,
     add_manual_work_order_line,
     apply_device_payload_maps,
+    build_material_requirements_for_line,
     clone_template_preset,
     create_manual_work_order,
     create_work_order_from_contract,
@@ -205,6 +216,127 @@ class ProductionReportPlaceholderView(APIView):
 
     def get(self, request):
         return Response({'groups': list_production_report_placeholders()})
+
+
+class ProductRecipeViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
+    serializer_class = ProductRecipeSerializer
+    queryset = ProductRecipe.objects.select_related('product', 'published_by', 'created_by').prefetch_related('operations__materials')
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.view'
+    write_perm = 'production.manage'
+    permission_map = {
+        'create': 'production.manage',
+        'update': 'production.manage',
+        'partial_update': 'production.manage',
+        'destroy': 'production.manage',
+        'publish': 'production.manage',
+        'clone_draft': 'production.manage',
+    }
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['product__sku', 'product__name', 'version', 'description']
+    ordering_fields = ['product__sku', 'version', 'status', 'updated_at']
+
+    def perform_create(self, serializer):
+        serializer.save(organization=self.request.user.organization, created_by=self.request.user)
+
+    @action(detail=True, methods=['post'], url_path='publish')
+    def publish(self, request, pk=None):
+        recipe = self.get_object()
+        ProductRecipe.objects.filter(
+            organization=request.user.organization,
+            product=recipe.product,
+            status='published',
+        ).exclude(pk=recipe.pk).update(status='archived')
+        recipe.status = 'published'
+        recipe.published_by = request.user
+        recipe.published_at = timezone.now()
+        recipe.save(update_fields=['status', 'published_by', 'published_at', 'updated_at'])
+        return Response(ProductRecipeSerializer(recipe, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'], url_path='clone-draft')
+    def clone_draft(self, request, pk=None):
+        recipe = self.get_object()
+        base = request.data.get('version') or f'{recipe.version}-kopya'
+        version = base
+        suffix = 2
+        while ProductRecipe.objects.filter(organization=request.user.organization, product=recipe.product, version=version).exists():
+            version = f'{base}-{suffix}'
+            suffix += 1
+        clone = ProductRecipe.objects.create(
+            organization=request.user.organization,
+            product=recipe.product,
+            version=version,
+            status='draft',
+            description=recipe.description,
+            valid_from=recipe.valid_from,
+            valid_to=recipe.valid_to,
+            created_by=request.user,
+        )
+        operation_map = {}
+        for operation in recipe.operations.all().order_by('order', 'id'):
+            new_operation = ProductRecipeOperation.objects.create(
+                organization=request.user.organization,
+                recipe=clone,
+                station=operation.station,
+                order=operation.order,
+                name=operation.name,
+                description=operation.description,
+            )
+            operation_map[operation.id] = new_operation
+        for material in ProductRecipeMaterial.objects.filter(operation__recipe=recipe).order_by('operation__order', 'order', 'id'):
+            ProductRecipeMaterial.objects.create(
+                organization=request.user.organization,
+                operation=operation_map[material.operation_id],
+                material_product=material.material_product,
+                unit=material.unit,
+                quantity_type=material.quantity_type,
+                quantity_per_unit=material.quantity_per_unit,
+                formula=material.formula,
+                scrap_percent=material.scrap_percent,
+                conditions=material.conditions,
+                default_location=material.default_location,
+                detail_1_override=material.detail_1_override,
+                detail_2_override=material.detail_2_override,
+                consumption_timing=material.consumption_timing,
+                note=material.note,
+                is_active=material.is_active,
+                order=material.order,
+            )
+        return Response(ProductRecipeSerializer(clone, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+
+class ProductRecipeOperationViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
+    serializer_class = ProductRecipeOperationSerializer
+    queryset = ProductRecipeOperation.objects.select_related('recipe__product', 'station__department')
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.view'
+    write_perm = 'production.manage'
+    permission_map = {'create': 'production.manage', 'update': 'production.manage', 'partial_update': 'production.manage', 'destroy': 'production.manage'}
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['recipe__product__sku', 'recipe__product__name', 'station__code', 'station__name', 'name']
+    ordering_fields = ['order', 'station__code']
+
+
+class ProductRecipeMaterialViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
+    serializer_class = ProductRecipeMaterialSerializer
+    queryset = ProductRecipeMaterial.objects.select_related('operation__recipe__product', 'operation__station', 'material_product', 'default_location__warehouse')
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.view'
+    write_perm = 'production.manage'
+    permission_map = {'create': 'production.manage', 'update': 'production.manage', 'partial_update': 'production.manage', 'destroy': 'production.manage'}
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['operation__recipe__product__sku', 'operation__station__code', 'material_product__sku', 'material_product__name', 'note']
+    ordering_fields = ['order', 'material_product__sku']
+
+
+class ProductionMaterialConsumptionViewSet(OrgScopedMixin, viewsets.ReadOnlyModelViewSet):
+    serializer_class = ProductionMaterialConsumptionSerializer
+    queryset = ProductionMaterialConsumption.objects.select_related('work_order', 'line', 'station', 'material_product', 'location__warehouse')
+    permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
+    required_perm = 'production.work_orders.view'
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['work_order__number', 'line__product_sku', 'material_product__sku', 'material_product__name', 'station__code']
+    ordering_fields = ['created_at', 'quantity']
 
 
 class ProductionDepartmentViewSet(SafeDestroyMixin, OrgScopedMixin, viewsets.ModelViewSet):
@@ -527,6 +659,8 @@ class ProductionWorkOrderViewSet(OrgScopedMixin, viewsets.ModelViewSet):
         'from_contract': 'production.work_orders.manage',
         'add_line': 'production.work_orders.manage',
         'export_report': 'production.reports.export',
+        'material_requirements': 'production.work_orders.view',
+        'rebuild_material_snapshot': 'production.work_orders.manage',
     }
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['number', 'source_number', 'customer_name', 'lines__product_name', 'lines__product_sku']
@@ -619,6 +753,30 @@ class ProductionWorkOrderViewSet(OrgScopedMixin, viewsets.ModelViewSet):
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         order.refresh_from_db()
         return Response(ProductionWorkOrderSerializer(order, context={'request': request}).data)
+
+    @action(detail=True, methods=['get'], url_path='material-requirements')
+    def material_requirements(self, request, pk=None):
+        order = self.get_object()
+        rows = ProductionMaterialRequirement.objects.filter(work_order=order).select_related(
+            'line',
+            'station',
+            'material_product',
+            'default_location__warehouse',
+        ).order_by('line__sort_order', 'station__order', 'id')
+        return Response(ProductionMaterialRequirementSerializer(rows, many=True, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'], url_path='rebuild-material-snapshot')
+    def rebuild_material_snapshot(self, request, pk=None):
+        order = self.get_object()
+        if order.status not in {'draft', 'waiting'}:
+            return Response({'detail': 'Reçete snapshot yalnız taslak veya bekleyen iş emirlerinde yenilenebilir.'}, status=status.HTTP_400_BAD_REQUEST)
+        if ProductionMaterialConsumption.objects.filter(work_order=order).exists():
+            return Response({'detail': 'Bu iş emrinde ham madde tüketimi başladı; snapshot değiştirilemez.'}, status=status.HTTP_400_BAD_REQUEST)
+        ProductionMaterialRequirement.objects.filter(work_order=order).delete()
+        created = []
+        for line in order.lines.select_related('product', 'work_order').prefetch_related('steps__station').all():
+            created.extend(build_material_requirements_for_line(line))
+        return Response(ProductionMaterialRequirementSerializer(created, many=True, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='export-report')
     def export_report(self, request, pk=None):

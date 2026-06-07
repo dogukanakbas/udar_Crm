@@ -39,6 +39,10 @@ type RouteStep = { id: number; station: number; station_code?: string; station_n
 type RouteTemplate = { id: number; name: string; product_group_key?: string; is_default: boolean; steps?: RouteStep[] }
 type WarehouseLocation = { id: number; code: string; name?: string; warehouse: number; warehouse_name?: string }
 type ProductionSettings = { default_completion_location?: number | null; default_completion_warehouse?: number | null; auto_stock_in_enabled?: boolean }
+type MaterialRequirement = { id: number; material_product?: number; material_sku: string; material_name: string; station_code?: string; station_name?: string; unit?: string; planned_quantity: string | number; consumed_quantity: string | number; remaining_quantity?: string | number; location_label?: string; note?: string }
+type ProductRecipeMaterial = { id: number; operation: number; material_product: number; material_sku?: string; material_name?: string; unit: string; quantity_type: 'fixed' | 'formula'; quantity_per_unit: string | number; formula?: string; scrap_percent?: string | number; conditions?: Record<string, any>; default_location?: number | null; default_location_label?: string; note?: string; is_active: boolean; order: number }
+type ProductRecipeOperation = { id: number; recipe: number; station: number; station_code?: string; station_name?: string; department_name?: string; order: number; name?: string; description?: string; materials?: ProductRecipeMaterial[] }
+type ProductRecipe = { id: number; product: number; product_sku?: string; product_name?: string; version: string; status: 'draft' | 'published' | 'archived'; description?: string; valid_from?: string | null; valid_to?: string | null; operations?: ProductRecipeOperation[] }
 type DepartmentDraft = { code: string; name: string; color: string; notification_group: string; is_active: boolean }
 type StationDraft = { department: string; code: string; name: string; max_workers: string; default_daily_target: string; is_handover: boolean; is_final: boolean; is_active: boolean }
 type DeviceDraft = { station: string; name: string; is_active: boolean }
@@ -85,6 +89,7 @@ type WorkOrderLine = {
   technical_notes?: string
   details?: Record<string, any>
   technical_drawings?: TechnicalDrawing[]
+  material_requirements?: MaterialRequirement[]
   stock_in_done?: boolean
   steps?: StepProgress[]
 }
@@ -133,6 +138,7 @@ type ConsoleItem = {
   technical_notes?: string
   details?: Record<string, any>
   technical_drawings?: TechnicalDrawing[]
+  material_requirements?: MaterialRequirement[]
   station_code: string
   station_name: string
   department_name: string
@@ -326,6 +332,24 @@ function TechnicalDrawingButton({ drawings, compact = false }: { drawings?: Tech
   )
 }
 
+function MaterialRequirementList({ rows, compact = false }: { rows?: MaterialRequirement[]; compact?: boolean }) {
+  const items = (rows || []).filter(Boolean)
+  if (!items.length) return null
+  return (
+    <div className={`rounded-md border bg-muted/10 ${compact ? 'p-2' : 'p-3'}`}>
+      <p className={`${compact ? 'text-[11px]' : 'text-xs'} font-semibold uppercase tracking-wide text-muted-foreground`}>Bu istasyonda kullanılacak hammaddeler</p>
+      <div className={`mt-2 grid gap-1 ${compact ? 'text-[11px]' : 'text-xs'}`}>
+        {items.slice(0, compact ? 4 : 12).map((row) => (
+          <div key={row.id} className="flex items-center justify-between gap-3">
+            <span className="min-w-0 truncate">{asText(row.material_sku, 'Kodsuz')} · {asText(row.material_name, 'Ham madde')}</span>
+            <span className="shrink-0 font-semibold">{formatNumber(n(row.remaining_quantity ?? row.planned_quantity))} {row.unit || ''}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 async function fetchAll<T = any>(url: string): Promise<T[]> {
   const res = await api.get(url)
   return Array.isArray(res.data) ? res.data : res.data?.results || []
@@ -433,6 +457,7 @@ export function ProductionManagementPage() {
   const [drawingFolders, setDrawingFolders] = useState<DrawingFolder[]>([])
   const [drawings, setDrawings] = useState<TechnicalDrawing[]>([])
   const [reportTemplates, setReportTemplates] = useState<ProductionReportTemplate[]>([])
+  const [recipes, setRecipes] = useState<ProductRecipe[]>([])
   const [settings, setSettings] = useState<ProductionSettings>({})
   const [summary, setSummary] = useState<any>({})
   const [busy, setBusy] = useState(false)
@@ -466,10 +491,14 @@ export function ProductionManagementPage() {
   const [drawingSearch, setDrawingSearch] = useState('')
   const [reportTemplateDraft, setReportTemplateDraft] = useState({ name: '', key: '', default_format: 'pdf', description: '', is_active: true })
   const [editingReportTemplateId, setEditingReportTemplateId] = useState<number | null>(null)
+  const [recipeDraft, setRecipeDraft] = useState({ product: '', version: 'v1', description: '', valid_from: '', valid_to: '' })
+  const [selectedRecipeId, setSelectedRecipeId] = useState<number | null>(null)
+  const [operationDraft, setOperationDraft] = useState({ station: '', order: '0', name: '', description: '' })
+  const [materialDraft, setMaterialDraft] = useState({ operation: '', material_product: '', quantity_type: 'fixed', quantity_per_unit: '1', formula: '', unit: 'Adet', scrap_percent: '0', default_location: 'none', conditions: '', note: '' })
   const productionUsers = useMemo(() => users.filter(canUseProductionTablet), [users])
 
   const load = async () => {
-    const [d, s, assignmentRows, userRows, dev, tabletRows, shiftRows, breakRows, profileRows, alertRows, maps, fields, r, ruleRows, presetRows, reportTemplateRows, l, productRows, folderRows, drawingRows, cfg, dash, groups] = await Promise.all([
+    const [d, s, assignmentRows, userRows, dev, tabletRows, shiftRows, breakRows, profileRows, alertRows, maps, fields, r, ruleRows, presetRows, reportTemplateRows, recipeRows, l, productRows, folderRows, drawingRows, cfg, dash, groups] = await Promise.all([
       fetchAll<Department>('/production/departments/'),
       fetchAll<Station>('/production/stations/'),
       fetchAll<StationAssignment>('/production/station-users/'),
@@ -486,6 +515,7 @@ export function ProductionManagementPage() {
       fetchAll<RuleSet>('/production/rules/'),
       fetchAll<TemplatePreset>('/production/template-presets/'),
       fetchAll<ProductionReportTemplate>('/production/report-templates/').catch(() => []),
+      fetchAll<ProductRecipe>('/product-recipes/').catch(() => []),
       fetchAll<WarehouseLocation>('/inventory-locations/'),
       fetchAll<ProductLite>('/products/').catch(() => []),
       fetchAll<DrawingFolder>('/technical-drawing-folders/').catch(() => []),
@@ -511,6 +541,7 @@ export function ProductionManagementPage() {
     setRules(ruleRows)
     setPresets(presetRows)
     setReportTemplates(reportTemplateRows)
+    setRecipes(recipeRows)
     setLocations(l)
     setProducts(productRows)
     setDrawingFolders(folderRows)
@@ -548,6 +579,11 @@ export function ProductionManagementPage() {
       asText(drawing.tags),
     ].join(' ').toLowerCase().includes(q))
   }, [drawings, drawingSearch])
+
+  const selectedRecipe = useMemo(
+    () => recipes.find((recipe) => recipe.id === selectedRecipeId) || recipes[0],
+    [recipes, selectedRecipeId],
+  )
 
   const saveSettings = async () => {
     await api.patch('/production/settings/', settings)
@@ -634,6 +670,84 @@ export function ProductionManagementPage() {
     else await api.post('/production/report-templates/', form, { headers: { 'Content-Type': 'multipart/form-data' } })
     toast({ title: editingReportTemplateId ? 'Rapor şablonu güncellendi' : 'Rapor şablonu yüklendi' })
     resetReportTemplateForm()
+    await load()
+  }
+
+  const saveRecipe = async () => {
+    if (!recipeDraft.product) {
+      toast({ title: 'Ürün seçin', variant: 'destructive' })
+      return
+    }
+    const payload = {
+      product: Number(recipeDraft.product),
+      version: recipeDraft.version || 'v1',
+      description: recipeDraft.description,
+      valid_from: recipeDraft.valid_from || null,
+      valid_to: recipeDraft.valid_to || null,
+      status: 'draft',
+    }
+    const response = await api.post('/product-recipes/', payload)
+    setSelectedRecipeId(response.data.id)
+    setRecipeDraft({ product: '', version: 'v1', description: '', valid_from: '', valid_to: '' })
+    toast({ title: 'Reçete taslağı oluşturuldu' })
+    await load()
+  }
+
+  const publishRecipe = async (recipe: ProductRecipe) => {
+    await api.post(`/product-recipes/${recipe.id}/publish/`)
+    toast({ title: 'Reçete yayınlandı' })
+    await load()
+  }
+
+  const cloneRecipe = async (recipe: ProductRecipe) => {
+    const response = await api.post(`/product-recipes/${recipe.id}/clone-draft/`)
+    setSelectedRecipeId(response.data.id)
+    toast({ title: 'Reçete taslağı kopyalandı' })
+    await load()
+  }
+
+  const saveRecipeOperation = async () => {
+    const recipeId = selectedRecipe?.id
+    if (!recipeId || !operationDraft.station) return
+    await api.post('/product-recipe-operations/', {
+      recipe: recipeId,
+      station: Number(operationDraft.station),
+      order: Number(operationDraft.order || 0),
+      name: operationDraft.name,
+      description: operationDraft.description,
+    })
+    setOperationDraft({ station: '', order: '0', name: '', description: '' })
+    toast({ title: 'Reçete operasyonu eklendi' })
+    await load()
+  }
+
+  const saveRecipeMaterial = async () => {
+    if (!materialDraft.operation || !materialDraft.material_product) return
+    let conditions: Record<string, any> = {}
+    if (materialDraft.conditions.trim()) {
+      try {
+        conditions = JSON.parse(materialDraft.conditions)
+      } catch {
+        toast({ title: 'Koşul JSON formatında olmalı', variant: 'destructive' })
+        return
+      }
+    }
+    await api.post('/product-recipe-materials/', {
+      operation: Number(materialDraft.operation),
+      material_product: Number(materialDraft.material_product),
+      unit: materialDraft.unit || 'Adet',
+      quantity_type: materialDraft.quantity_type,
+      quantity_per_unit: materialDraft.quantity_per_unit || 0,
+      formula: materialDraft.formula,
+      scrap_percent: materialDraft.scrap_percent || 0,
+      conditions,
+      default_location: materialDraft.default_location === 'none' ? null : Number(materialDraft.default_location),
+      note: materialDraft.note,
+      is_active: true,
+      order: 0,
+    })
+    setMaterialDraft({ operation: materialDraft.operation, material_product: '', quantity_type: 'fixed', quantity_per_unit: '1', formula: '', unit: 'Adet', scrap_percent: '0', default_location: 'none', conditions: '', note: '' })
+    toast({ title: 'Reçete ham maddesi eklendi' })
     await load()
   }
 
@@ -1164,6 +1278,7 @@ export function ProductionManagementPage() {
           <TabsTrigger value="tablets">Tablet & PIN</TabsTrigger>
           <TabsTrigger value="shifts">Vardiyalar</TabsTrigger>
           <TabsTrigger value="alerts">Bildirimler</TabsTrigger>
+          <TabsTrigger value="recipes">Ürün Reçeteleri</TabsTrigger>
           <TabsTrigger value="drawings">Teknik Resimler</TabsTrigger>
           <TabsTrigger value="report-templates">Rapor Şablonları</TabsTrigger>
           <TabsTrigger value="devices">Cihaz & Veri</TabsTrigger>
@@ -1640,6 +1755,206 @@ export function ProductionManagementPage() {
                     </div>
                   </div>
                 ))}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="recipes">
+          <div className="grid gap-4 xl:grid-cols-[430px_1fr]">
+            <div className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Reçete taslağı oluştur</CardTitle>
+                  <p className="text-sm text-muted-foreground">Yayınlanan reçete yeni iş emirlerine snapshot olarak düşer. Eski işler kendi reçete kopyasıyla kalır.</p>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <Select value={recipeDraft.product} onValueChange={(value) => setRecipeDraft((current) => ({ ...current, product: value }))}>
+                    <SelectTrigger><SelectValue placeholder="Mamül / yarı mamül ürün seç" /></SelectTrigger>
+                    <SelectContent>
+                      {products.map((product) => (
+                        <SelectItem key={String(product.id)} value={String(product.id)}>{asText(product.sku, 'Kodsuz')} - {asText(product.name, 'Ürün')}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    <Input placeholder="Versiyon" value={recipeDraft.version} onChange={(event) => setRecipeDraft((current) => ({ ...current, version: event.target.value }))} />
+                    <Input type="date" value={recipeDraft.valid_from} onChange={(event) => setRecipeDraft((current) => ({ ...current, valid_from: event.target.value }))} />
+                    <Input type="date" value={recipeDraft.valid_to} onChange={(event) => setRecipeDraft((current) => ({ ...current, valid_to: event.target.value }))} />
+                  </div>
+                  <Textarea placeholder="Reçete açıklaması" value={recipeDraft.description} onChange={(event) => setRecipeDraft((current) => ({ ...current, description: event.target.value }))} />
+                  <Button onClick={saveRecipe} disabled={!recipeDraft.product}>
+                    <Plus className="mr-2 h-4 w-4" /> Taslak oluştur
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader><CardTitle>Reçeteler</CardTitle></CardHeader>
+                <CardContent className="space-y-2">
+                  {recipes.map((recipe) => (
+                    <button
+                      key={recipe.id}
+                      type="button"
+                      className={`w-full rounded-lg border p-3 text-left hover:bg-muted/30 ${selectedRecipe?.id === recipe.id ? 'bg-muted/30' : ''}`}
+                      onClick={() => setSelectedRecipeId(recipe.id)}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold">{asText(recipe.product_sku, 'Kodsuz')} · {asText(recipe.product_name, 'Ürün')}</p>
+                          <p className="text-xs text-muted-foreground">Versiyon {recipe.version}</p>
+                        </div>
+                        <Badge variant={recipe.status === 'published' ? 'secondary' : 'outline'}>{recipe.status === 'published' ? 'Yayında' : recipe.status === 'archived' ? 'Arşiv' : 'Taslak'}</Badge>
+                      </div>
+                    </button>
+                  ))}
+                  {!recipes.length && <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">Henüz ürün reçetesi yok.</p>}
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card>
+              <CardHeader>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <CardTitle>Reçete operasyonları ve hammaddeler</CardTitle>
+                    <p className="text-sm text-muted-foreground">
+                      {selectedRecipe ? `${asText(selectedRecipe.product_sku, 'Kodsuz')} · ${asText(selectedRecipe.product_name, 'Ürün')} · ${selectedRecipe.version}` : 'Reçete seçin'}
+                    </p>
+                  </div>
+                  {selectedRecipe && (
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => cloneRecipe(selectedRecipe)}>
+                        <Copy className="mr-2 h-4 w-4" /> Kopyala
+                      </Button>
+                      <Button size="sm" onClick={() => publishRecipe(selectedRecipe)} disabled={selectedRecipe.status === 'published'}>
+                        <CheckCircle2 className="mr-2 h-4 w-4" /> Yayınla
+                      </Button>
+                      <Button variant="ghost" size="sm" className="text-destructive" onClick={() => deleteItem(`/product-recipes/${selectedRecipe.id}/`, `${selectedRecipe.product_sku} reçetesi`)}>
+                        <Trash2 className="mr-2 h-4 w-4" /> Sil
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {selectedRecipe ? (
+                  <>
+                    <div className="grid gap-2 rounded-lg border p-3 lg:grid-cols-[1fr_110px_1fr_auto]">
+                      <Select value={operationDraft.station} onValueChange={(value) => setOperationDraft((current) => ({ ...current, station: value }))}>
+                        <SelectTrigger><SelectValue placeholder="İstasyon / operasyon seç" /></SelectTrigger>
+                        <SelectContent>
+                          {stations.map((station) => (
+                            <SelectItem key={station.id} value={String(station.id)}>{station.code} - {station.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Input placeholder="Sıra" value={operationDraft.order} onChange={(event) => setOperationDraft((current) => ({ ...current, order: event.target.value }))} />
+                      <Input placeholder="Operasyon adı (opsiyonel)" value={operationDraft.name} onChange={(event) => setOperationDraft((current) => ({ ...current, name: event.target.value }))} />
+                      <Button onClick={saveRecipeOperation} disabled={!operationDraft.station}>
+                        <Plus className="mr-2 h-4 w-4" /> Operasyon
+                      </Button>
+                    </div>
+
+                    <div className="grid gap-2 rounded-lg border p-3 xl:grid-cols-[1fr_1fr_100px_120px_100px_1fr]">
+                      <Select value={materialDraft.operation} onValueChange={(value) => setMaterialDraft((current) => ({ ...current, operation: value }))}>
+                        <SelectTrigger><SelectValue placeholder="Operasyon" /></SelectTrigger>
+                        <SelectContent>
+                          {(selectedRecipe.operations || []).map((operation) => (
+                            <SelectItem key={operation.id} value={String(operation.id)}>{operation.station_code} - {operation.name || operation.station_name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Select value={materialDraft.material_product} onValueChange={(value) => setMaterialDraft((current) => ({ ...current, material_product: value }))}>
+                        <SelectTrigger><SelectValue placeholder="Ham madde ürünü" /></SelectTrigger>
+                        <SelectContent>
+                          {products.map((product) => (
+                            <SelectItem key={String(product.id)} value={String(product.id)}>{asText(product.sku, 'Kodsuz')} - {asText(product.name, 'Ürün')}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Select value={materialDraft.quantity_type} onValueChange={(value) => setMaterialDraft((current) => ({ ...current, quantity_type: value }))}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="fixed">Sabit</SelectItem>
+                          <SelectItem value="formula">Formül</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input placeholder="Miktar" value={materialDraft.quantity_per_unit} onChange={(event) => setMaterialDraft((current) => ({ ...current, quantity_per_unit: event.target.value }))} />
+                      <Input placeholder="Birim" value={materialDraft.unit} onChange={(event) => setMaterialDraft((current) => ({ ...current, unit: event.target.value }))} />
+                      <Select value={materialDraft.default_location} onValueChange={(value) => setMaterialDraft((current) => ({ ...current, default_location: value }))}>
+                        <SelectTrigger><SelectValue placeholder="Depo / raf" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Depo/raf seç</SelectItem>
+                          {locations.map((location) => (
+                            <SelectItem key={location.id} value={String(location.id)}>{location.warehouse_name || 'Depo'} / {location.code}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Input placeholder="Formül: adet * 2" value={materialDraft.formula} onChange={(event) => setMaterialDraft((current) => ({ ...current, formula: event.target.value }))} />
+                      <Input placeholder="Fire %" value={materialDraft.scrap_percent} onChange={(event) => setMaterialDraft((current) => ({ ...current, scrap_percent: event.target.value }))} />
+                      <Input placeholder='Koşul JSON: {"field":"detay2","operator":"contains","value":"Kırmızı"}' className="xl:col-span-2" value={materialDraft.conditions} onChange={(event) => setMaterialDraft((current) => ({ ...current, conditions: event.target.value }))} />
+                      <Input placeholder="Not" className="xl:col-span-2" value={materialDraft.note} onChange={(event) => setMaterialDraft((current) => ({ ...current, note: event.target.value }))} />
+                      <Button onClick={saveRecipeMaterial} disabled={!materialDraft.operation || !materialDraft.material_product}>
+                        <Plus className="mr-2 h-4 w-4" /> Ham madde
+                      </Button>
+                    </div>
+
+                    <div className="space-y-3">
+                      {(selectedRecipe.operations || []).map((operation) => (
+                        <div key={operation.id} className="rounded-lg border bg-muted/10 p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="font-semibold">{operation.station_code} · {operation.name || operation.station_name}</p>
+                              <p className="text-xs text-muted-foreground">{operation.department_name} · Sıra {operation.order}</p>
+                            </div>
+                            <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/product-recipe-operations/${operation.id}/`, operation.station_code || 'Operasyon')}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          <div className="mt-3 overflow-x-auto">
+                            <table className="w-full min-w-[760px] text-sm">
+                              <thead className="text-xs uppercase text-muted-foreground">
+                                <tr className="border-b">
+                                  <th className="py-2 text-left">Ham madde</th>
+                                  <th className="py-2 text-left">Miktar</th>
+                                  <th className="py-2 text-left">Fire</th>
+                                  <th className="py-2 text-left">Depo / Raf</th>
+                                  <th className="py-2 text-left">Koşul</th>
+                                  <th />
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(operation.materials || []).map((material) => (
+                                  <tr key={material.id} className="border-b last:border-0">
+                                    <td className="py-2">{material.material_sku} · {material.material_name}</td>
+                                    <td className="py-2">{material.quantity_type === 'formula' ? material.formula : `${formatNumber(n(material.quantity_per_unit))} ${material.unit}`}</td>
+                                    <td className="py-2">%{formatNumber(n(material.scrap_percent))}</td>
+                                    <td className="py-2">{material.default_location_label || '-'}</td>
+                                    <td className="max-w-[220px] truncate py-2">{Object.keys(material.conditions || {}).length ? JSON.stringify(material.conditions) : '-'}</td>
+                                    <td className="py-2 text-right">
+                                      <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteItem(`/product-recipe-materials/${material.id}/`, material.material_sku || 'Ham madde')}>
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </td>
+                                  </tr>
+                                ))}
+                                {!(operation.materials || []).length && (
+                                  <tr><td colSpan={6} className="py-3 text-sm text-muted-foreground">Bu operasyona bağlı ham madde yok.</td></tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ))}
+                      {!(selectedRecipe.operations || []).length && (
+                        <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">Önce bu reçeteye istasyon/operasyon ekleyin.</div>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">Sol taraftan reçete seçin veya yeni taslak oluşturun.</div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -2293,6 +2608,9 @@ export function ProductionWorkOrdersPage() {
                         <p><span className="font-medium text-foreground">Detay-2:</span> {asText(line.detail_2, '-')}</p>
                       </div>
                       {line.technical_notes ? <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{asText(line.technical_notes)}</p> : null}
+                      <div className="mt-2">
+                        <MaterialRequirementList rows={line.material_requirements} compact />
+                      </div>
                     </div>
                     <div className="text-sm xl:text-right">
                       <p>{formatNumber(n(line.completed_quantity))} / {formatNumber(n(line.quantity))}</p>
@@ -3093,6 +3411,9 @@ export function ProductionTabletPage() {
                 <p><span className="font-medium text-foreground">Detay-2:</span> {asText(selectedWork.detail_2, '-')}</p>
               </div>
               {selectedWork.technical_notes ? <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{asText(selectedWork.technical_notes)}</p> : null}
+              <div className="mt-2">
+                <MaterialRequirementList rows={selectedWork.material_requirements} compact />
+              </div>
             </div>
             <MetricBlock label="Adet" value={formatNumber(n(selectedWork.target_quantity))} />
             <MetricBlock label="Resmi sağlam" value={formatNumber(n(selectedWork.completed_quantity))} />
