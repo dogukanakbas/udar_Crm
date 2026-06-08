@@ -24,6 +24,10 @@ import { AlertCircle, ShieldCheck, Plus, Trash2, ImageIcon, Pencil, Upload, Save
 import { RbacGuard } from '@/components/rbac'
 import { RolesPermissionPanel } from '@/pages/roles'
 import { resolveBrandingUrl } from '@/lib/branding'
+import { useRouterState, useNavigate } from '@tanstack/react-router'
+import { cn } from '@/lib/utils'
+import { User, Clock, Users, Bell, Zap, Hammer, Network, LayoutGrid, SlidersHorizontal, Activity } from 'lucide-react'
+
 
 function formatApiError(err: unknown): string {
   const e = err as { response?: { data?: Record<string, unknown> | string } }
@@ -116,6 +120,33 @@ export function SettingsPage() {
   const canEditUsers = hasPermission(data.settings.role, data.rolePermissions || [], 'users.edit')
   const canDeleteUsers = hasPermission(data.settings.role, data.rolePermissions || [], 'users.delete')
   const canManageAddons = hasPermission(data.settings.role, data.rolePermissions || [], 'addons.manage')
+
+  const routerState = useRouterState()
+  const navigate = useNavigate()
+  const activeTab = (routerState.location.search as { tab?: string }).tab || 'profile'
+  const setActiveTab = (tab: string) => {
+    navigate({
+      search: (prev: any) => ({ ...prev, tab }),
+    } as any)
+  }
+
+  const settingsTabs = [
+    { id: 'profile' as const, label: 'Genel Profil', icon: User },
+    { id: 'working-hours' as const, label: 'Mesai & Çalışma Planı', icon: Clock },
+    { id: 'users' as const, label: 'Kullanıcı Yönetimi', icon: Users },
+    { id: 'notifications' as const, label: 'Bildirim Ayarları', icon: Bell },
+    { id: 'automation' as const, label: 'Otomasyon Kuralları', icon: Zap },
+    { id: 'models' as const, label: 'Görev Modelleri', icon: Hammer },
+    { id: 'teams' as const, label: 'Ekipler & Saha', icon: Network },
+    { id: 'system' as const, label: 'Sistem Sağlığı & ICS', icon: Activity },
+    ...(canManageAddons
+      ? [
+          { id: 'addons' as const, label: 'Add-on Yönetimi', icon: LayoutGrid },
+          { id: 'menu-designer' as const, label: 'Sol Menü Tasarımı', icon: SlidersHorizontal },
+        ]
+      : []),
+  ]
+
   const [addons, setAddons] = useState<Array<{ id: number; addon_id: string; title: string; version: string; is_installed: boolean; is_enabled: boolean; can_delete?: boolean; counts?: Record<string, number> }>>([])
   const [addonUploading, setAddonUploading] = useState(false)
   type NavigationItem = {
@@ -474,9 +505,56 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <PageHeader title="Ayarlar" description="Çalışma alanı tercihleri, kullanıcılar, tema" />
-      {canManageAddons && (
+    <div className="space-y-6">
+      <PageHeader title="Ayarlar" description="Çalışma alanı tercihleri, kullanıcılar, tema ve modüller" />
+
+      <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
+        {/* Left Sub-Sidebar (Desktop) */}
+        <aside className="hidden lg:block space-y-1">
+          <div className="bg-card border rounded-lg p-2.5 space-y-1 shadow-sm">
+            <p className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-muted-foreground/60 mb-1">
+              Kategoriler
+            </p>
+            {settingsTabs.map((tab) => {
+              const TabIcon = tab.icon
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-semibold transition-all duration-150 border border-transparent",
+                    activeTab === tab.id
+                      ? "bg-primary text-primary-foreground font-bold shadow-sm"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                  )}
+                >
+                  <TabIcon className="h-4.5 w-4.5 shrink-0 opacity-80" />
+                  <span>{tab.label}</span>
+                </button>
+              )
+            })}
+          </div>
+        </aside>
+
+        {/* Mobile Tab Selector */}
+        <div className="lg:hidden">
+          <Select value={activeTab} onValueChange={(val) => setActiveTab(val)}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Kategori seçin" />
+            </SelectTrigger>
+            <SelectContent>
+              {settingsTabs.map((tab) => (
+                <SelectItem key={tab.id} value={tab.id}>
+                  {tab.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Settings Content Area */}
+        <div className="space-y-6 min-w-0">
+          {activeTab === 'addons' && canManageAddons && (
         <Card>
           <CardHeader>
             <CardTitle>Add-on yönetimi</CardTitle>
@@ -557,7 +635,8 @@ export function SettingsPage() {
           </CardContent>
         </Card>
       )}
-      {canManageAddons && (
+
+      {activeTab === 'menu-designer' && canManageAddons && (
         <Card>
           <CardHeader>
             <CardTitle>Sol menü tasarımı</CardTitle>
@@ -680,12 +759,10 @@ export function SettingsPage() {
             </div>
           </CardContent>
         </Card>
-      )}
-      <RbacGuard perm="roles.view">
-        <RolesPermissionPanel embedded />
-      </RbacGuard>
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
+          )}
+
+          {activeTab === 'profile' && (
+            <Card>
           <CardHeader>
             <CardTitle>Organizasyon profili</CardTitle>
             <CardDescription>Organizasyon adı ve yerel ayarlar</CardDescription>
@@ -781,8 +858,11 @@ export function SettingsPage() {
             </Button>
           </CardContent>
         </Card>
-        <RbacGuard perm="settings.organization.edit">
-          <Card>
+          )}
+
+          {activeTab === 'working-hours' && (
+            <RbacGuard perm="settings.organization.edit">
+              <Card>
             <CardHeader>
               <CardTitle>Mesai saatleri</CardTitle>
               <CardDescription>Worker ekibi sadece mesai saatleri ve günleri içinde giriş yapabilir</CardDescription>
@@ -853,7 +933,14 @@ export function SettingsPage() {
             </CardContent>
           </Card>
         </RbacGuard>
-        <RbacGuard perm="users.create">
+          )}
+
+          {activeTab === 'users' && (
+            <>
+              <RbacGuard perm="roles.view">
+                <RolesPermissionPanel embedded />
+              </RbacGuard>
+              <RbacGuard perm="users.create">
           <Card>
           <CardHeader>
             <CardTitle>Kullanıcılar & roller</CardTitle>
@@ -1025,10 +1112,12 @@ export function SettingsPage() {
               </div>
             </div>
           </CardContent>
-          </Card>
-        </RbacGuard>
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">
+            </Card>
+          </RbacGuard>
+        </>
+      )}
+
+      {activeTab === 'notifications' && (
         <Card>
           <CardHeader>
             <CardTitle>Bildirimler</CardTitle>
@@ -1054,7 +1143,11 @@ export function SettingsPage() {
             <Button onClick={saveNotifSettings}>Kaydet</Button>
           </CardContent>
         </Card>
-        <Card>
+      )}
+
+      {activeTab === 'profile' && (
+        <>
+          <Card>
           <CardHeader>
             <CardTitle>Şifre değiştir</CardTitle>
             <CardDescription>Eski şifreyi doğrulayarak yeni şifre belirle</CardDescription>
@@ -1118,6 +1211,10 @@ export function SettingsPage() {
             </div>
           </CardContent>
         </Card>
+        </>
+      )}
+
+      {activeTab === 'system' && (
         <Card>
           <CardHeader>
             <CardTitle>Sağlık / Bağımlılıklar</CardTitle>
@@ -1145,8 +1242,9 @@ export function SettingsPage() {
             </Button>
           </CardContent>
         </Card>
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">
+      )}
+
+      {activeTab === 'automation' && (
         <Card>
           <CardHeader>
             <CardTitle>Otomasyon kuralları</CardTitle>
@@ -1397,6 +1495,9 @@ export function SettingsPage() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {activeTab === 'models' && (
         <RbacGuard perm="tasks.edit">
           <Card>
             <CardHeader>
@@ -1565,8 +1666,9 @@ export function SettingsPage() {
             </CardContent>
           </Card>
         </RbacGuard>
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">
+      )}
+
+      {activeTab === 'users' && (
         <Card>
           <CardHeader>
             <CardTitle>Kullanıcı listesi</CardTitle>
@@ -1576,6 +1678,9 @@ export function SettingsPage() {
             <DataTable columns={userColumns} data={data.users} searchKey="username" />
           </CardContent>
         </Card>
+      )}
+
+      {activeTab === 'teams' && (
         <RbacGuard perm="teams.edit">
           <Card>
             <CardHeader>
@@ -1739,7 +1844,7 @@ export function SettingsPage() {
             </CardContent>
           </Card>
         </RbacGuard>
-      </div>
+      )}
       <Dialog
         open={editUserOpen}
         onOpenChange={(open) => {
@@ -1797,10 +1902,11 @@ export function SettingsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <RbacGuard perm="teams.edit">
-        <Card>
-          <CardHeader>
-            <CardTitle>Hesapsız ekip çalışanları</CardTitle>
+      {activeTab === 'teams' && (
+        <RbacGuard perm="teams.edit">
+          <Card>
+            <CardHeader>
+              <CardTitle>Hesapsız ekip çalışanları</CardTitle>
             <CardDescription>
               Sistem hesabı olmayan fakat ekiplerde çalışan kişileri kaydedin. Çalışan Takibi sayfasında &quot;Saha&quot;
               listesinde görünür; görev ataması için önce sistem kullanıcısı oluşturmanız gerekir.
@@ -1953,7 +2059,9 @@ export function SettingsPage() {
           </CardContent>
         </Card>
       </RbacGuard>
-      <div className="grid gap-4 md:grid-cols-2">
+      )}
+
+      {activeTab === 'system' && (
         <Card>
           <CardHeader>
             <CardTitle>Takvim senkron</CardTitle>
@@ -1976,6 +2084,8 @@ export function SettingsPage() {
             </Button>
           </CardContent>
         </Card>
+      )}
+        </div>
       </div>
     </div>
   )

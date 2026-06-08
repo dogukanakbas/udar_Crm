@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, Calendar, CheckCircle2, Copy, Cpu, Download, Edit3, FileImage, Layers, LogOut, Monitor, Pause, Play, Plus, RefreshCw, Route, Save, Send, TimerReset, Trash2, Upload, UserPlus, Volume2, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { Bell, Calendar, CheckCircle2, Copy, Cpu, Download, Edit3, FileImage, Layers, LogOut, Monitor, Pause, Play, Plus, RefreshCw, Route, Save, Send, TimerReset, Trash2, Upload, UserPlus, Volume2, X, Building2, Workflow, Clock, Tablet, AlertTriangle, ChefHat, Image, FileSpreadsheet, HardDrive, LayoutTemplate } from 'lucide-react'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip as ReTooltip, XAxis, YAxis, PieChart, Pie } from 'recharts'
 
 import { PageHeader } from '@/components/app-shell'
@@ -12,6 +12,8 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { PageSubSidebar, type SubSidebarTab, type SubSidebarGroup } from '@/components/page-sub-sidebar'
+import { useRouterState, useNavigate } from '@tanstack/react-router'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
 import api, { apiOrigin } from '@/lib/api'
@@ -448,6 +450,33 @@ function StationCard({ station, assignments = [], onEdit, onDelete }: { station:
 
 export function ProductionManagementPage() {
   const { toast } = useToast()
+  const routerState = useRouterState()
+  const navigate = useNavigate()
+  const activeTab = (routerState.location.search as { tab?: string }).tab || 'departments'
+  const setActiveTab = useCallback((tab: string) => {
+    navigate({ search: (prev: any) => ({ ...prev, tab }) } as any)
+  }, [navigate])
+
+  const prodGroups: SubSidebarGroup[] = [
+    { id: 'factory', label: 'Fabrika Yapısı' },
+    { id: 'operational', label: 'Operasyonel' },
+    { id: 'product', label: 'Ürün & Malzeme' },
+    { id: 'system', label: 'Sistem & Entegrasyon' },
+  ]
+  const prodTabs: SubSidebarTab[] = [
+    { id: 'departments', label: 'Bölümler', icon: Building2, group: 'factory' },
+    { id: 'stations', label: 'İstasyonlar', icon: Monitor, group: 'factory' },
+    { id: 'flow', label: 'Akış Tasarımcısı', icon: Workflow, group: 'factory' },
+    { id: 'shifts', label: 'Vardiyalar', icon: Clock, group: 'operational' },
+    { id: 'tablets', label: 'Tablet & PIN', icon: Tablet, group: 'operational' },
+    { id: 'alerts', label: 'Bildirimler', icon: AlertTriangle, group: 'operational' },
+    { id: 'recipes', label: 'Ürün Reçeteleri', icon: ChefHat, group: 'product' },
+    { id: 'drawings', label: 'Teknik Resimler', icon: Image, group: 'product' },
+    { id: 'report-templates', label: 'Rapor Şablonları', icon: FileSpreadsheet, group: 'product' },
+    { id: 'devices', label: 'Cihaz & Veri', icon: HardDrive, group: 'system' },
+    { id: 'presets', label: 'Şablonlar', icon: LayoutTemplate, group: 'system' },
+  ]
+
   const configImportRef = useRef<HTMLInputElement | null>(null)
   const drawingFileRef = useRef<HTMLInputElement | null>(null)
   const reportTemplateFileRef = useRef<HTMLInputElement | null>(null)
@@ -1345,22 +1374,14 @@ export function ProductionManagementPage() {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="departments" className="space-y-3">
-        <TabsList className="flex flex-wrap justify-start">
-          <TabsTrigger value="departments">Bölümler</TabsTrigger>
-          <TabsTrigger value="stations">İstasyonlar</TabsTrigger>
-          <TabsTrigger value="tablets">Tablet & PIN</TabsTrigger>
-          <TabsTrigger value="shifts">Vardiyalar</TabsTrigger>
-          <TabsTrigger value="alerts">Bildirimler</TabsTrigger>
-          <TabsTrigger value="recipes">Ürün Reçeteleri</TabsTrigger>
-          <TabsTrigger value="drawings">Teknik Resimler</TabsTrigger>
-          <TabsTrigger value="report-templates">Rapor Şablonları</TabsTrigger>
-          <TabsTrigger value="devices">Cihaz & Veri</TabsTrigger>
-          <TabsTrigger value="flow">Akış Tasarımcısı</TabsTrigger>
-          <TabsTrigger value="presets">Şablonlar</TabsTrigger>
-        </TabsList>
+      <PageSubSidebar
+        tabs={prodTabs}
+        groups={prodGroups}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+      >
 
-        <TabsContent value="departments">
+        {activeTab === 'departments' && (
           <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
             <Card>
               <CardHeader><CardTitle>{editingDepartmentId ? 'Bölümü düzenle' : 'Bölüm oluştur'}</CardTitle></CardHeader>
@@ -1437,9 +1458,9 @@ export function ProductionManagementPage() {
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
+        )}
 
-        <TabsContent value="stations">
+        {activeTab === 'stations' && (
           <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
             <div className="space-y-4">
               <Card>
@@ -1508,9 +1529,9 @@ export function ProductionManagementPage() {
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
+        )}
 
-        <TabsContent value="tablets">
+        {activeTab === 'tablets' && (
           <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
             <div className="space-y-4">
               <Card>
@@ -1596,9 +1617,9 @@ export function ProductionManagementPage() {
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
+        )}
 
-        <TabsContent value="shifts">
+        {activeTab === 'shifts' && (
           <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
             <div className="space-y-4">
               <Card>
@@ -1749,9 +1770,9 @@ export function ProductionManagementPage() {
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
+        )}
 
-        <TabsContent value="alerts">
+        {activeTab === 'alerts' && (
           <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
             <Card>
               <CardHeader><CardTitle>Yönetici bildirimi gönder</CardTitle></CardHeader>
@@ -1832,9 +1853,9 @@ export function ProductionManagementPage() {
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
+        )}
 
-        <TabsContent value="recipes">
+        {activeTab === 'recipes' && (
           <div className="grid gap-4 xl:grid-cols-[430px_1fr]">
             <div className="space-y-4">
               <Card>
@@ -2058,9 +2079,9 @@ export function ProductionManagementPage() {
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
+        )}
 
-        <TabsContent value="drawings">
+        {activeTab === 'drawings' && (
           <div className="grid gap-4 xl:grid-cols-[430px_1fr]">
             <div className="space-y-4">
               <Card>
@@ -2156,9 +2177,9 @@ export function ProductionManagementPage() {
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
+        )}
 
-        <TabsContent value="report-templates">
+        {activeTab === 'report-templates' && (
           <div className="grid gap-4 xl:grid-cols-[430px_1fr]">
             <Card>
               <CardHeader><CardTitle>{editingReportTemplateId ? 'Rapor şablonunu düzenle' : 'Rapor şablonu yükle'}</CardTitle></CardHeader>
@@ -2220,9 +2241,10 @@ export function ProductionManagementPage() {
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
+        )}
 
-        <TabsContent value="devices">
+        {activeTab === 'devices' && (
+          <>
           <div className="grid gap-4 xl:grid-cols-3">
             <Card>
               <CardHeader><CardTitle>{editingDeviceId ? 'Cihazı düzenle' : 'Cihaz oluştur'}</CardTitle></CardHeader>
@@ -2329,9 +2351,10 @@ export function ProductionManagementPage() {
               </Card>
             ))}
           </div>
-        </TabsContent>
+          </>
+        )}
 
-        <TabsContent value="flow">
+        {activeTab === 'flow' && (
           <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
             <Card>
               <CardHeader><CardTitle>{editingRouteId ? 'Rotayı düzenle' : 'Rota oluştur'}</CardTitle></CardHeader>
@@ -2443,9 +2466,9 @@ export function ProductionManagementPage() {
               </div>
             </div>
           </div>
-        </TabsContent>
+        )}
 
-        <TabsContent value="presets">
+        {activeTab === 'presets' && (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {presets.map((preset) => (
               <Card key={preset.id}>
@@ -2457,8 +2480,8 @@ export function ProductionManagementPage() {
               </Card>
             ))}
           </div>
-        </TabsContent>
-      </Tabs>
+        )}
+      </PageSubSidebar>
 
       <Dialog open={stockInOpen} onOpenChange={setStockInOpen}>
         <DialogContent className="max-w-md">

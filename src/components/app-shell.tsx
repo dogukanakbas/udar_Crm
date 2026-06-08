@@ -23,6 +23,8 @@ import {
   LogOut,
   Volume2,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -148,7 +150,23 @@ const fallbackNav: NavItem[] = [
   { key: 'worker_tracking', label: 'Çalışan Takibi', to: '/worker-tracking', icon: Activity, perm: 'worker_tracking.view' },
   { key: 'calendar', label: 'Takvim', to: '/calendar', icon: CalendarIconMini, perm: 'tasks.calendar.view' },
   { key: 'reports', label: 'Raporlar', to: '/reports', icon: BarChart3, perm: 'reports.view' },
-  { key: 'settings', label: 'Ayarlar', to: '/settings', icon: Settings, perm: 'settings.view' },
+  {
+    key: 'settings',
+    label: 'Ayarlar',
+    icon: Settings,
+    perm: 'settings.view',
+    children: [
+      { key: 'settings_profile', label: 'Genel Profil', to: '/settings?tab=profile' },
+      { key: 'settings_working_hours', label: 'Mesai & Çalışma Planı', to: '/settings?tab=working-hours' },
+      { key: 'settings_users', label: 'Kullanıcı Yönetimi', to: '/settings?tab=users' },
+      { key: 'settings_teams', label: 'Ekipler & Saha', to: '/settings?tab=teams' },
+      { key: 'settings_models', label: 'Görev Modelleri', to: '/settings?tab=models' },
+      { key: 'settings_notifications', label: 'Bildirim Ayarları', to: '/settings?tab=notifications' },
+      { key: 'settings_automation', label: 'Otomasyon Kuralları', to: '/settings?tab=automation' },
+      { key: 'settings_system', label: 'Sistem Sağlığı & ICS', to: '/settings?tab=system' },
+      { key: 'settings_addons', label: 'Add-on & Tasarım', to: '/settings?tab=addons', perm: 'addons.manage' },
+    ],
+  },
 ]
 
 type AddonNavRow = {
@@ -213,6 +231,14 @@ const mergeAddonNavigation = (rows: AddonNavRow[], useFallback = true) => {
   return merged.sort((a, b) => Number(a.displayOrder || 0) - Number(b.displayOrder || 0))
 }
 
+const isLinkActive = (to: string, pathname: string) => {
+  if (to.includes('?')) {
+    const currentUrl = pathname + (typeof window !== 'undefined' ? window.location.search : '')
+    return currentUrl === to
+  }
+  return pathname === to
+}
+
 const isNavItemVisible = (item: NavItem, role: string, permissions: string[]) => {
   if (item.roles && !item.roles.includes(role)) return false
   if (item.children) {
@@ -272,6 +298,22 @@ function playManagerAlarm() {
 export function AppShell() {
   const { data, resetDemo, setRole } = useAppStore()
   const { theme, setTheme } = useTheme()
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('sidebar-collapsed-groups')
+      return saved ? JSON.parse(saved) : {}
+    } catch {
+      return {}
+    }
+  })
+
+  const toggleGroup = (groupKey: string) => {
+    setCollapsedGroups((prev) => {
+      const next = { ...prev, [groupKey]: !prev[groupKey] }
+      localStorage.setItem('sidebar-collapsed-groups', JSON.stringify(next))
+      return next
+    })
+  }
   const [searchOpen, setSearchOpen] = useState(false)
   const [addonNavigation, setAddonNavigation] = useState<AddonNavRow[]>([])
   const [navigationDesigned, setNavigationDesigned] = useState(false)
@@ -398,53 +440,71 @@ export function AppShell() {
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,hsl(var(--accent)/0.12),transparent_30rem),linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.38))]">
       <div className="flex min-h-screen w-full">
         {loggedIn && (
-          <aside className="sticky top-0 hidden h-screen w-[276px] shrink-0 flex-col border-r border-white/10 bg-[#102d29] p-4 text-white lg:flex">
-          <div className="mb-4 flex shrink-0 items-center gap-3 rounded-lg border border-white/10 bg-white/[0.06] p-3">
-            <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-md bg-white/95 p-2 font-semibold shadow-[0_16px_38px_-22px_rgba(0,0,0,0.8)]">
+          <aside className="sticky top-0 hidden h-screen w-[276px] shrink-0 flex-col border-r border-white/[0.04] bg-gradient-to-b from-[#071614] via-[#05100e] to-[#030908] p-4 text-white lg:flex shadow-[4px_0_24px_rgba(0,0,0,0.3)]">
+          <div className="mb-6 flex shrink-0 items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 shadow-inner">
+            <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/95 p-2 font-semibold shadow-md">
               {data.organization?.logo_url ? (
                 <img src={resolveBrandingUrl(data.organization.logo_url, 'logo')} alt="Logo" className="h-full w-full object-contain" />
               ) : (
-                <div className="flex h-10 w-10 items-center justify-center rounded-md bg-white text-[#173f38] font-bold shadow-[0_16px_38px_-22px_rgba(0,0,0,0.8)]">
+                <div className="flex h-10 w-10 items-center justify-center rounded-md bg-white text-[#173f38] font-bold">
                   {(data.organization?.brand_name || data.organization?.name || 'U')[0].toUpperCase()}
                 </div>
               )}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-xs uppercase tracking-[0.2em] text-white/45 truncate">
+              <p className="text-xs uppercase tracking-[0.2em] text-white/40 truncate font-semibold">
                 {data.organization?.brand_name || data.organization?.name || 'Udar'}
               </p>
-              <p className="text-base font-semibold">CRM + ERP</p>
+              <p className="text-sm font-bold tracking-tight text-white/80">CRM + ERP</p>
             </div>
           </div>
           <ScrollArea className="min-h-0 flex-1 pr-2">
-            <nav className="space-y-6 text-sm">
+            <nav className="space-y-4 text-sm">
               {nav
                 .filter((group) => isNavItemVisible(group, data.settings.role, data.rolePermissions || []))
                 .map((item) => {
                   const Icon = item.icon ?? FolderKanban
                   if (item.children) {
+                    const groupKey = item.key || item.label
+                    const isCollapsed = collapsedGroups[groupKey] ?? false
                     const visibleChildren = item.children.filter((child) => isNavChildVisible(child, data.settings.role, data.rolePermissions || []))
+                    if (visibleChildren.length === 0) return null
+
                     return (
-                      <div key={item.label} className="space-y-2">
-                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-white/45">
-                          <Icon className="h-4 w-4" />
-                          {item.label}
-                        </div>
-                        <div className="space-y-1">
-                          {visibleChildren.map((child) => (
-                            <Link
-                              key={child.to}
-                              to={child.to}
-                              className={cn(
-                                'flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-white/10',
-                                activePath === child.to ? 'bg-white text-[#173f38] shadow-sm' : 'text-white/68'
-                              )}
-                            >
-                              <span>{child.label}</span>
-                              <ChevronRightMini className="h-4 w-4 opacity-60" />
-                            </Link>
-                          ))}
-                        </div>
+                      <div key={item.label} className="space-y-1">
+                        <button
+                          onClick={() => toggleGroup(groupKey)}
+                          className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-xs font-bold uppercase tracking-[0.08em] text-white/50 hover:bg-white/[0.04] hover:text-white transition-all duration-200"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <Icon className="h-4 w-4 text-white/30" />
+                            <span>{item.label}</span>
+                          </div>
+                          {isCollapsed ? (
+                            <ChevronRight className="h-3.5 w-3.5 opacity-55" />
+                          ) : (
+                            <ChevronDown className="h-3.5 w-3.5 opacity-55" />
+                          )}
+                        </button>
+
+                        {!isCollapsed && (
+                          <div className="border-l border-white/[0.04] pl-3 ml-4 mt-1 space-y-0.5">
+                            {visibleChildren.map((child) => (
+                              <Link
+                                key={child.to}
+                                to={child.to}
+                                className={cn(
+                                  'flex items-center justify-between rounded-md px-3 py-1.5 text-sm font-medium transition-all duration-150 border border-transparent',
+                                  isLinkActive(child.to, activePath)
+                                    ? 'bg-emerald-950/40 text-emerald-300 border-emerald-500/10 shadow-md font-bold'
+                                    : 'text-white/60 hover:text-white hover:bg-white/[0.03]'
+                                )}
+                              >
+                                <span>{child.label}</span>
+                              </Link>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )
                   }
@@ -453,11 +513,13 @@ export function AppShell() {
                       key={item.to}
                       to={item.to!}
                       className={cn(
-                        'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-semibold transition-colors hover:bg-white/10',
-                        activePath === item.to ? 'bg-white text-[#173f38] shadow-sm' : 'text-white/82'
+                        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-bold transition-all duration-150 border border-transparent',
+                        item.to && isLinkActive(item.to, activePath)
+                          ? 'bg-emerald-950/40 text-emerald-300 border-emerald-500/10 shadow-md font-bold'
+                          : 'text-white/70 hover:text-white hover:bg-white/[0.03]'
                       )}
                     >
-                      <Icon className="h-4 w-4" />
+                      <Icon className="h-4 w-4 text-white/30" />
                       {item.label}
                     </Link>
                   )
@@ -573,10 +635,6 @@ export function AppShell() {
   )
 }
 
-function ChevronRightMini(props: React.ComponentProps<'svg'>) {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={props.className}><path d="M10 6l6 6-6 6" /></svg>
-}
-
 function MobileMenu({ nav }: { nav: NavItem[] }) {
   const [open, setOpen] = useState(false)
   const { data } = useAppStore()
@@ -602,7 +660,7 @@ function MobileMenu({ nav }: { nav: NavItem[] }) {
                     to={child.to}
                     className={cn(
                       'flex w-full items-center justify-between rounded-md px-2 py-1 text-sm',
-                      activePath === child.to ? 'bg-muted' : ''
+                      isLinkActive(child.to, activePath) ? 'bg-muted' : ''
                     )}
                   >
                     <span>{child.label}</span>
