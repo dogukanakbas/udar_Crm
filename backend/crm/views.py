@@ -620,6 +620,8 @@ class SellerCompanyViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOrgMember, HasAPIPermission]
     required_perm = 'templates.view'
     permission_map = {
+        'list': None,
+        'retrieve': None,
         'create': 'templates.seller_companies.edit',
         'partial_update': 'templates.seller_companies.edit',
         'destroy': 'templates.seller_companies.edit',
@@ -667,18 +669,16 @@ class SellerCompanyViewSet(viewsets.ViewSet):
             return Response({'detail': 'Organizasyon bulunamadı'}, status=status.HTTP_400_BAD_REQUEST)
 
         key = normalize_seller_company_key(pk)
-        profiles = get_seller_profiles(org)
-        for index, profile in enumerate(profiles):
-            if profile['key'] != key:
-                continue
-            payload = dict(request.data or {})
-            payload['key'] = key
-            normalized = _normalize_seller_profile(payload, fallback=profile, sort_order=index)
-            profiles[index] = normalized
-            save_seller_profiles(org, profiles)
-            return Response(normalized)
+        profiles, index, profile = self._find_profile(org, key)
+        if profile is None or index is None:
+            return Response({'detail': 'Satıcı firma bulunamadı'}, status=status.HTTP_404_NOT_FOUND)
 
-        return Response({'detail': 'Satıcı firma bulunamadı'}, status=status.HTTP_404_NOT_FOUND)
+        payload = dict(request.data or {})
+        payload['key'] = key
+        normalized = _normalize_seller_profile(payload, fallback=profile, sort_order=index)
+        profiles[index] = normalized
+        save_seller_profiles(org, profiles)
+        return Response(normalized)
 
     def destroy(self, request, pk=None):
         org = self._organization(request)
@@ -693,39 +693,6 @@ class SellerCompanyViewSet(viewsets.ViewSet):
         remaining = [profile for profile in profiles if profile['key'] != key]
         if len(remaining) == len(profiles):
             return Response({'detail': 'Satıcı firma bulunamadı'}, status=status.HTTP_404_NOT_FOUND)
-        save_seller_profiles(org, remaining)
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-    def partial_update(self, request, pk=None):
-        org = self._organization(request)
-        if not org:
-            return Response({'detail': 'Organizasyon bulunamadÄ±'}, status=status.HTTP_400_BAD_REQUEST)
-
-        key = normalize_seller_company_key(pk)
-        profiles, index, profile = self._find_profile(org, key)
-        if profile is None or index is None:
-            return Response({'detail': 'SatÄ±cÄ± firma bulunamadÄ±'}, status=status.HTTP_404_NOT_FOUND)
-
-        payload = dict(request.data or {})
-        payload['key'] = key
-        normalized = _normalize_seller_profile(payload, fallback=profile, sort_order=index)
-        profiles[index] = normalized
-        save_seller_profiles(org, profiles)
-        return Response(normalized)
-
-    def destroy(self, request, pk=None):
-        org = self._organization(request)
-        if not org:
-            return Response({'detail': 'Organizasyon bulunamadÄ±'}, status=status.HTTP_400_BAD_REQUEST)
-
-        key = normalize_seller_company_key(pk)
-        if Quote.objects.filter(organization=org, seller_company_key__iexact=key).exists():
-            return Response({'detail': 'Bu firma mevcut belgelerde kullanÄ±ldÄ±ÄŸÄ± iÃ§in silinemez'}, status=status.HTTP_400_BAD_REQUEST)
-
-        profiles = get_seller_profiles(org)
-        remaining = [profile for profile in profiles if profile['key'] != key]
-        if len(remaining) == len(profiles):
-            return Response({'detail': 'SatÄ±cÄ± firma bulunamadÄ±'}, status=status.HTTP_404_NOT_FOUND)
 
         deleted = next((profile for profile in profiles if profile['key'] == key), None)
         if deleted and deleted.get('logo_url'):

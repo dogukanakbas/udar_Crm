@@ -343,7 +343,7 @@ export const useAppStore = create<AppState>()(
         fetchIf('products.view', '/products/'),
         fetchIf('products.view', '/categories/'),
         fetchIf('quotes.view.own', '/quotes/', { params: { summary: 1 } }),
-        fetchIf('templates.view', '/seller-companies/'),
+        api.get('/seller-companies/', quiet),
         fetchIf('partners.view', '/partners/'),
         fetchIf('contacts.view', '/contacts/'),
         fetchIf('opportunities.view', '/opportunities/'),
