@@ -1663,7 +1663,7 @@ def _set_header_detail_box(ws, row, label, value):
 
 
 def _apply_seller_master_header_branding(ws, quote):
-    fixed_left = _fixed_ayka_seller_profile(quote.organization)
+    seller = _selected_seller_profile(quote)
     _strip_header_logos(ws)
     _prepare_seller_master_header_layout(ws)
 
@@ -1672,7 +1672,7 @@ def _apply_seller_master_header_branding(ws, quote):
 
     _clear_logo_frame(ws, ws['B2'])
     _clear_logo_frame(ws, ws['F2'])
-    _add_header_logo(ws, fixed_left, 'B2', 330, 112)
+    _add_header_logo(ws, seller, 'B2', 330, 112)
 
     styles = _tail_styles()
     document_title = 'SÖZLEŞME' if quote.document_type == 'Contract' else 'TEKLİF'
