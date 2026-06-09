@@ -12,7 +12,7 @@ import { useToast } from '@/components/ui/use-toast'
 import { useAppStore } from '@/state/use-app-store'
 import { getCompanyCurrencyOptions, resolveCompanyCurrency, type SupportedCurrencyCode } from '@/lib/location-data'
 import { formatCurrency, formatExchangeRate, getCurrencySymbol, normalizeCurrency, cn } from '@/lib/utils'
-import type { Company, Quote } from '@/types'
+import type { Company, Quote, SellerCompanyProfile } from '@/types'
 import {
   type QuoteTemplateId,
   type MobilyaSubListId,
@@ -34,15 +34,98 @@ import {
   formatTermsBlock,
 } from '@/lib/quote-template-legal'
 import { Checkbox } from '@/components/ui/checkbox'
-import {
-  IBAN_BLOCK_AYKA,
-  IBAN_BLOCK_ORTKA,
-  INTERNAL_SELLERS,
-  QUOTE_PREPARER_OPTIONS,
-  type InternalSellerKey,
-  formatSellerBlock,
-} from '@/lib/quote-template-parties'
+import { QUOTE_PREPARER_OPTIONS } from '@/lib/quote-template-parties'
 import { FileSpreadsheet, Plus } from 'lucide-react'
+
+const DEFAULT_WIZARD_SELLER_PROFILES: SellerCompanyProfile[] = [
+  {
+    key: 'ORTKA',
+    shortName: 'ORTKA',
+    displayName: 'ORTKA YAPI ELEMANLARI ÜRETİM SAN. LTD. ŞTİ.',
+    legalName: 'ORTKA YAPI ELEMANLARI ÜRETİM SAN. LTD. ŞTİ.',
+    taxOffice: 'BEYDAĞI',
+    taxNumber: '6480365207',
+    address: '2. OSB 6. CADDE NO:6 YEŞİLYURT / MALATYA',
+    city: 'Malatya',
+    country: 'Türkiye',
+    phone: '444 0 932',
+    email: 'muhasebe@aykakapi.com.tr',
+    website: '',
+    kepAddress: '',
+    logoUrl: '/media/seller-logos/default/ortka-logo.png',
+    signatureName: '',
+    signatureTitle: '',
+    signatureLabel: '',
+    notes: '',
+    bankIbanLabel: 'Türk Lirası Hesapları',
+    bankIban2Label: 'Dolar Hesapları',
+    isActive: true,
+    sortOrder: 0,
+    bankAccounts: [
+      { bank: 'Türkiye İş Bankası', iban: 'TR24 0006 4000 0018 6003 9367 45', currency: 'TRY', iban2: '', currency2: 'USD', branch: '', accountHolder: '' },
+      { bank: 'Ziraat Bankası', iban: 'TR07 0001 0021 6935 0399 4450 09', currency: 'TRY', iban2: '', currency2: 'USD', branch: '', accountHolder: '' },
+      { bank: 'Albaraka Türk K.Bank.', iban: 'TR66 0020 3000 0056 3735 0000 02', currency: 'TRY', iban2: '', currency2: 'USD', branch: '', accountHolder: '' },
+      { bank: 'Vakıflar Bankası', iban: 'TR57 0001 5001 5800 7284 2692 06', currency: 'TRY', iban2: '', currency2: 'USD', branch: '', accountHolder: '' },
+    ],
+  },
+  {
+    key: 'AYKA',
+    shortName: 'AYKA',
+    displayName: 'AYKA KAPI SANAYİ TİCARET ANONİM ŞİRKETİ',
+    legalName: 'AYKA KAPI SANAYİ TİCARET ANONİM ŞİRKETİ',
+    taxOffice: 'BEYDAĞI',
+    taxNumber: '1210461108',
+    address: '2. OSB 6. CADDE NO:6 YEŞİLYURT / MALATYA',
+    city: 'Malatya',
+    country: 'Türkiye',
+    phone: '444 0 932',
+    email: 'muhasebe@aykakapi.com.tr',
+    website: '',
+    kepAddress: '',
+    logoUrl: '/media/seller-logos/default/ayka-logo.png',
+    signatureName: '',
+    signatureTitle: '',
+    signatureLabel: '',
+    notes: '',
+    bankIbanLabel: 'Türk Lirası Hesapları',
+    bankIban2Label: 'Dolar Hesapları',
+    isActive: true,
+    sortOrder: 1,
+    bankAccounts: [
+      { bank: 'Garanti BBVA Bankası', iban: 'TR14 0006 2000 1120 0006 2913 29', currency: 'TRY', iban2: '', currency2: 'USD', branch: '', accountHolder: '' },
+      { bank: 'Ziraat Bankası', iban: 'TR72 0001 0021 6994 2088 8850 01', currency: 'TRY', iban2: '', currency2: 'USD', branch: '', accountHolder: '' },
+      { bank: 'Albaraka Türk K.Bank.', iban: 'TR25 0020 3000 0770 5276 0000 01', currency: 'TRY', iban2: '', currency2: 'USD', branch: '', accountHolder: '' },
+    ],
+  },
+]
+
+function formatDynamicSellerBlock(s: SellerCompanyProfile | undefined): string {
+  if (!s) return '—'
+  const title = s.legalName || s.displayName || s.shortName || s.key
+  const taxOfficeLine = `VERGİ DAİRESİ : ${s.taxOffice || '—'}`
+  const taxNoLine = `VERGİ NO: ${s.taxNumber || '—'}`
+  const mailTelLine = `MAİL/TEL: ${s.email || '—'} / ${s.phone || '—'}`
+  return [title, taxOfficeLine, taxNoLine, mailTelLine].join('\n')
+}
+
+function formatDynamicIbanBlock(s: SellerCompanyProfile | undefined): string {
+  if (!s) return ''
+  const title = s.legalName || s.displayName || s.shortName || s.key
+  const lines = [`${title} TL`]
+  if (s.bankAccounts && s.bankAccounts.length > 0) {
+    s.bankAccounts.forEach((acc) => {
+      if (acc.bank) {
+        if (acc.iban) {
+          lines.push(`${acc.bank} ${acc.iban}`)
+        }
+        if (acc.iban2) {
+          lines.push(`${acc.bank} ${acc.iban2}`)
+        }
+      }
+    })
+  }
+  return lines.join('\n')
+}
 
 function emptyLine(over?: Partial<TemplateLineInput>): TemplateLineInput {
   return {
@@ -94,8 +177,22 @@ export function TemplateQuoteWizardTrigger({
   const [nakliye, setNakliye] = useState('')
   const [gecerlilikAciklama, setGecerlilikAciklama] = useState('')
 
-  const [sellingEntity, setSellingEntity] = useState<InternalSellerKey>('ortka')
-  const [signingEntity, setSigningEntity] = useState<InternalSellerKey>('ayka')
+  const sellerCompanies = useAppStore((s) => s.data.sellerCompanies) || []
+  const activeSellers = useMemo(() => {
+    const list = sellerCompanies.filter((s) => s.isActive !== false)
+    return list.length ? list : DEFAULT_WIZARD_SELLER_PROFILES
+  }, [sellerCompanies])
+
+  const getSellerProfile = (key: string) => {
+    const found = activeSellers.find((s) => s.key === key)
+    if (found) return found
+    const foundUpper = activeSellers.find((s) => s.key.toUpperCase() === key.toUpperCase())
+    if (foundUpper) return foundUpper
+    return activeSellers[0]
+  }
+
+  const [sellingEntity, setSellingEntity] = useState<string>('ORTKA')
+  const [signingEntity, setSigningEntity] = useState<string>('AYKA')
   const [selectedPreparers, setSelectedPreparers] = useState<Record<string, boolean>>({})
   const [salesRepArea, setSalesRepArea] = useState('')
   const [buyerUnvan, setBuyerUnvan] = useState('')
@@ -104,7 +201,7 @@ export function TemplateQuoteWizardTrigger({
   const [buyerYetkili, setBuyerYetkili] = useState('')
   const [buyerIletisim, setBuyerIletisim] = useState('')
   const [technicalSpecsText, setTechnicalSpecsText] = useState('')
-  const [ibanInNotes, setIbanInNotes] = useState<'ortka' | 'ayka' | 'both'>('both')
+  const [ibanInNotes, setIbanInNotes] = useState<string>('both')
   const [includeErpBoilerplate, setIncludeErpBoilerplate] = useState(true)
   const [includeStandardTerms, setIncludeStandardTerms] = useState(true)
   const [includeNotesColumn, setIncludeNotesColumn] = useState(false)
@@ -196,12 +293,17 @@ export function TemplateQuoteWizardTrigger({
       .map((p) => p.label)
       .join(' | ')
 
-    const ibanSection =
-      ibanInNotes === 'both'
-        ? `--- ORTKA IBAN özeti ---\n${IBAN_BLOCK_ORTKA}\n--- AYKA IBAN özeti ---\n${IBAN_BLOCK_AYKA}`
-        : ibanInNotes === 'ortka'
-          ? IBAN_BLOCK_ORTKA
-          : IBAN_BLOCK_AYKA
+    let ibanSection = ''
+    if (ibanInNotes === 'both') {
+      const sellingProfile = getSellerProfile(sellingEntity)
+      const signingProfile = getSellerProfile(signingEntity)
+      const sellShort = sellingProfile?.shortName || sellingProfile?.key || 'SATIŞ'
+      const signShort = signingProfile?.shortName || signingProfile?.key || 'İMZA'
+      ibanSection = `--- ${sellShort} IBAN özeti ---\n${formatDynamicIbanBlock(sellingProfile)}\n--- ${signShort} IBAN özeti ---\n${formatDynamicIbanBlock(signingProfile)}`
+    } else {
+      const selectedProfile = getSellerProfile(ibanInNotes)
+      ibanSection = formatDynamicIbanBlock(selectedProfile)
+    }
 
     const standardTermsLines = template.id === 'mobilya' ? STANDARD_QUOTE_TERMS_KDV10_TR : STANDARD_QUOTE_TERMS_KDV20_TR
 
@@ -227,11 +329,16 @@ export function TemplateQuoteWizardTrigger({
       )
     }
 
+    const sellingProfile = getSellerProfile(sellingEntity)
+    const signingProfile = getSellerProfile(signingEntity)
+    const sellingTitle = sellingProfile?.legalName || sellingProfile?.displayName || sellingProfile?.shortName || sellingEntity
+    const signingTitle = signingProfile?.legalName || signingProfile?.displayName || signingProfile?.shortName || signingEntity
+
     notesParts.push(
       `=== TARAFLAR (Excel) ===`,
-      `Satışı yapan şirket (seçim): ${INTERNAL_SELLERS[sellingEntity].title}`,
-      `Satış şirketi detay:\n${formatSellerBlock(sellingEntity)}`,
-      `Kaşe / imza tarafı (Excel): ${INTERNAL_SELLERS[signingEntity].title} adına`,
+      `Satışı yapan şirket (seçim): ${sellingTitle}`,
+      `Satış şirketi detay:\n${formatDynamicSellerBlock(sellingProfile)}`,
+      `Kaşe / imza tarafı (Excel): ${signingTitle} adına`,
       `Hazırlayan (işaretlenenler, satır 31): ${preparersLine || '—'}`,
       `Satış temsilcisi bilgi alanı (satır 29): ${salesRepArea || '—'}`,
       `--- ALICI BİLGİLERİ (satır 23–27) ---`,
@@ -283,6 +390,7 @@ export function TemplateQuoteWizardTrigger({
         exchangeRate: effectiveCurrency === 'TRY' ? 1 : exchangeRate,
       },
       vatRate: template.vatPercent,
+      sellerCompanyKey: sellingEntity,
       lines: activeLines.map((l) => ({
         name: lineLabel(l),
         qty: l.qty,
@@ -453,33 +561,33 @@ export function TemplateQuoteWizardTrigger({
             <div className="rounded-md border bg-muted/20 p-3 space-y-3">
               <p className="text-sm font-medium">Satıcı (Excel «SATIŞ ŞİRKETİ» — iki kolondan biri)</p>
               <div className="flex flex-wrap gap-2">
-                {(['ortka', 'ayka'] as const).map((key) => (
+                {activeSellers.map((seller) => (
                   <Button
-                    key={key}
+                    key={seller.key}
                     type="button"
                     size="sm"
-                    variant={sellingEntity === key ? 'default' : 'outline'}
-                    onClick={() => setSellingEntity(key)}
+                    variant={sellingEntity === seller.key ? 'default' : 'outline'}
+                    onClick={() => setSellingEntity(seller.key)}
                   >
-                    {INTERNAL_SELLERS[key].title}
+                    {seller.shortName || seller.displayName || seller.key}
                   </Button>
                 ))}
               </div>
-              <p className="text-xs text-muted-foreground whitespace-pre-wrap">{formatSellerBlock(sellingEntity)}</p>
+              <p className="text-xs text-muted-foreground whitespace-pre-wrap">{formatDynamicSellerBlock(getSellerProfile(sellingEntity))}</p>
             </div>
 
             <div className="rounded-md border p-3 space-y-2">
               <Label>Kaşe / imza hangi firma adına (Excel imza bloğu)</Label>
               <div className="flex flex-wrap gap-2">
-                {(['ortka', 'ayka'] as const).map((key) => (
+                {activeSellers.map((seller) => (
                   <Button
-                    key={`sig-${key}`}
+                    key={`sig-${seller.key}`}
                     type="button"
                     size="sm"
-                    variant={signingEntity === key ? 'secondary' : 'outline'}
-                    onClick={() => setSigningEntity(key)}
+                    variant={signingEntity === seller.key ? 'secondary' : 'outline'}
+                    onClick={() => setSigningEntity(seller.key)}
                   >
-                    {key === 'ortka' ? 'ORTKA adına' : 'AYKA adına'}
+                    {(seller.shortName || seller.key) + ' adına'}
                   </Button>
                 ))}
               </div>
@@ -570,13 +678,16 @@ export function TemplateQuoteWizardTrigger({
 
             <div>
               <Label>İBAN bilgisi notlarda</Label>
-              <Select value={ibanInNotes} onValueChange={(v) => setIbanInNotes(v as 'ortka' | 'ayka' | 'both')}>
+              <Select value={ibanInNotes} onValueChange={(v) => setIbanInNotes(v)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="ortka">Yalnızca ORTKA hesapları</SelectItem>
-                  <SelectItem value="ayka">Yalnızca AYKA hesapları</SelectItem>
+                  {activeSellers.map((seller) => (
+                    <SelectItem key={`iban-opt-${seller.key}`} value={seller.key}>
+                      Yalnızca {seller.shortName || seller.key} hesapları
+                    </SelectItem>
+                  ))}
                   <SelectItem value="both">Her iki kolon (Excel’deki gibi)</SelectItem>
                 </SelectContent>
               </Select>
@@ -851,10 +962,10 @@ export function TemplateQuoteWizardTrigger({
             <div className="rounded-md border p-3 space-y-2 text-xs">
               <p className="font-medium text-sm text-foreground">Taraflar özeti</p>
               <p>
-                <span className="text-muted-foreground">Satışı yapan:</span> {INTERNAL_SELLERS[sellingEntity].title}
+                <span className="text-muted-foreground">Satışı yapan:</span> {getSellerProfile(sellingEntity)?.legalName || getSellerProfile(sellingEntity)?.displayName || sellingEntity}
               </p>
               <p>
-                <span className="text-muted-foreground">İmza tarafı:</span> {INTERNAL_SELLERS[signingEntity].title}
+                <span className="text-muted-foreground">İmza tarafı:</span> {getSellerProfile(signingEntity)?.legalName || getSellerProfile(signingEntity)?.displayName || signingEntity}
               </p>
               <p>
                 <span className="text-muted-foreground">Hazırlayan:</span>{' '}
