@@ -170,7 +170,7 @@ AUTH_USER_MODEL = 'accounts.User'
 SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'true').lower() == 'true'
 CSRF_COOKIE_SECURE = os.getenv('CSRF_COOKIE_SECURE', 'true').lower() == 'true'
 
-FRONTEND_URL = os.getenv('FRONTEND_URL', 'https://crm.udarsoft.com')
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'https://crm.aykadoor.com')
 
 CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://redis:6379/0')
 CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://redis:6379/1')
